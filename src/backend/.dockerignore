@@ -1,0 +1,80 @@
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+env
+pip-log.txt
+pip-delete-this-directory.txt
+.tox
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.log
+.git
+.mypy_cache
+.pytest_cache
+.hypothesis
+
+.DS_Store
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# Django
+*.log
+local_settings.py
+db.sqlite3
+db.sqlite3-journal
+
+# Media files (if using local storage during development)
+media/*
+!media/.gitkeep
+
+# Static files (will be collected during build)
+staticfiles/
+static/
+
+# Environment files
+.env
+.env.local
+.env.production
+.env.development
+
+# Node modules (if any)
+node_modules/
+
+# Documentation
+*.md
+docs/
+README.rst
+
+# Testing
+htmlcov/
+.coverage
+.pytest_cache/
+.tox/
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST

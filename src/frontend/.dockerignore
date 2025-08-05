@@ -1,0 +1,55 @@
+Dockerfile*
+.dockerignore
+node_modules
+npm-debug.log
+README.md
+.env
+.env.local
+.env.production
+.env.development
+.git
+.gitignore
+.next
+out
+.vercel
+
+# Testing
+coverage
+__tests__
+**/*.test.js
+**/*.test.jsx
+**/*.test.ts
+**/*.test.tsx
+
+# Documentation
+*.md
+docs/
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*

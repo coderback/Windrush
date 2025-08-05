@@ -1,0 +1,49 @@
+# Development Dockerfile for Django with hot reload
+FROM python:3.12-slim
+
+# Set environment variables
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Set work directory
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        postgresql-client \
+        build-essential \
+        libpq-dev \
+        gettext \
+        git \
+        curl \
+        vim \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Python dependencies
+COPY requirements.txt /app/
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Install development dependencies
+RUN pip install --no-cache-dir \
+    django-debug-toolbar \
+    django-extensions \
+    ipdb \
+    pytest-django \
+    factory-boy \
+    black \
+    isort \
+    flake8
+
+# Copy project
+COPY . /app/
+
+# Create directories for media and static files
+RUN mkdir -p /app/media /app/staticfiles
+
+# Expose port
+EXPOSE 8000
+
+# Run development server
+CMD ["python", "manage.py", "runserver", "0.0.0.0:8000"]
