@@ -1,0 +1,45 @@
+Non-Functional Requirements
+Beyond core features, Windrush must satisfy various non-functional requirements to be successful:
+Scalability: The system should gracefully handle at least 50,000 users, including spikes of concurrent usage. The architecture will be scalable horizontally – for example, we may deploy multiple application server instances behind a load balancer so that increasing traffic can be accommodated by adding more servers
+
+
+. The design will avoid bottlenecks by using stateless app servers and scalable data stores. We anticipate having to support thousands of daily active users performing searches and submissions, so both the web servers and the database must scale (via replication, sharding, or clustering as needed). Planning for growth from day one (“scale-out” design) is critical to avoid a complete refactor later
+
+.
+Performance: The application should be responsive and fast. Page loads and search queries should ideally complete within 2-3 seconds under normal load. Search and filter operations will be optimized via indexing or specialized search engines so users can quickly find jobs. The AI recommendation generation should feel instantaneous (possibly pre-computed in the background or cached per user). Uploading CVs or submitting applications should also be efficient (with background processing for things like virus scans to not block the user). We will use caching for frequently accessed data (e.g. cached lists of recent jobs or sponsor companies) to reduce database load and improve response times. Performance testing will be done to ensure the system meets these targets under peak load (e.g. simulate hundreds of concurrent searches).
+Security: Security is paramount since sensitive personal data (profiles, CVs, possibly passport/visa info in CVs) will be stored. We will implement secure authentication (password hashing, optional 2FA for accounts) and protect against common web threats (OWASP top 10). All communications will be over HTTPS (TLS encryption in transit), and sensitive data at rest (like user passwords, personal details, and documents) will be encrypted or stored securely
+
+. We’ll enforce strong password policies and possibly allow social logins (which offload some security to providers). Role-based access control will ensure, for example, that employers can only view data for applicants to their jobs, and no one can access data they shouldn’t. Regular security audits and penetration testing will be conducted
+
+. File uploads (CVs) will be scanned for malware. Additionally, user-uploaded content (like profile text or messages) will be sanitized to prevent XSS attacks.
+Privacy & Compliance: Windrush will adhere to GDPR and UK data protection laws from day one. This includes obtaining clear user consent for data collection and usage
+
+, providing transparent privacy policies, and allowing users to exercise their rights (data access, correction, deletion, etc.)
+
+
+. The platform will only collect data that is necessary (“data minimization”)
+
+ – for example, we don’t need a full date of birth unless for age verification, so we might only ask for year of birth or age range
+
+. We will implement data retention policies: personal data won’t be kept longer than needed
+
+. For instance, we might auto-delete or anonymize accounts that have been inactive for a long period, or remove applications data after a certain number of years unless the user opts to retain it. Privacy by design principles will be followed (e.g. using pseudonymized identifiers internally, segregating personal data). All third-party integrations (like cloud hosting or analytics) will be vetted for GDPR compliance, and if any data leaves the UK/EU, proper safeguards (standard contractual clauses, etc.) will be in place
+
+. Building user trust through robust privacy protection is crucial
+
+.
+Reliability & Availability: The service should be highly available, targeting >99.5% uptime. This will be achieved via redundant infrastructure – multiple server instances (no single point of failure), regular backups of the database, and possibly a fallback read-only mode if certain components fail. We will use health checks and monitoring to detect outages quickly. Data durability is important for user-uploaded CVs and applications; we will store data in reliable storage (cloud storage with replication) and run routine backups. In case of any incident (server crash, etc.), auto-recovery or failover mechanisms should kick in. Users should be able to trust that the platform is up when they need it, especially during critical job application periods.
+Maintainability & Extensibility: The codebase and system design should be modular and well-documented to allow easy maintenance and future feature extensions. We plan to use a microservice or modular architecture (see System Design below) so that different components (jobs service, user service, recommender, etc.) can be developed and updated independently without breaking the whole system. Clear APIs between services and an organized code structure (using MVC or similar separation of concerns) will make it easier for developers to add features like new recommendation algorithms or new types of user accounts (e.g. university career centers in future) with minimal impact on existing functionality. We will adhere to best practices in software development (version control, code reviews, CI/CD pipeline for deployments, automated tests) to ensure quality and maintainability.
+Usability & Accessibility: Given our target users (many of whom may not be native English speakers or may be new to UK job hunting), the UI/UX must be intuitive and user-friendly
+
+. We’ll use clear navigation and logical organization (separate dashboards for job search vs. application tracking, etc.). The language will be simple and we might offer resources or tooltips to explain UK-specific terms (e.g. “What is a graduate scheme?”). The platform will follow accessibility guidelines (WCAG) so that it’s usable by people with disabilities – e.g. proper labels for screen readers, high-contrast modes, and keyboard-navigable components. Mobile-responsive design is also critical, as many users may access via smartphones. A consistent and clean design will improve adoption.
+Accuracy and Relevance: The job matching algorithm’s accuracy is an important quality attribute. We will continuously refine the AI suggestions using data analytics and user feedback
+
+. The system should avoid recommending completely irrelevant jobs; as it learns, it should improve the relevance of matches (e.g. understanding that a user with a background in finance shouldn’t see engineering jobs). We will evaluate the recommendation success by measuring click-through or application rates on suggested jobs and adjust the model accordingly.
+Monetization & UX Balance: While we plan to monetize via premium features, we must ensure the platform remains functional and valuable even for free users (to build traction). The non-functional aspect here is user satisfaction – premium features should enhance the experience without alienating free users
+
+. We will ensure that ads (if any) or premium prompts are not overly intrusive. The system must handle payment securely (PCI compliance if handling payments directly, though we likely use an external payment gateway). Premium content (like premium-only job posts or features) should be delivered reliably to those who pay, and the system should differentiate access levels correctly.
+Regulatory Compliance: (Expanding on compliance for visas) The platform must remain compliant with UK employment and immigration regulations. For example, job postings should not violate labor laws or advertising standards. If there are rules like the now-defunct Resident Labour Market Test or current sponsor advertising requirements, the platform should facilitate compliance – e.g. by ensuring all relevant jobs are visible to domestic workers as well (though focusing on sponsored jobs is our niche, we must avoid any impression of excluding candidates unlawfully). We will also keep up to date with changes in visa rules (for instance, if the government updates sponsorship criteria, salary thresholds, or creates new visa types, our platform’s logic and information should be updated promptly). All terms and conditions will be reviewed by legal counsel regularly
+
+ to ensure we meet any Tier 2/Skilled Worker visa guidelines, GDPR, anti-discrimination laws, etc.
+In summary, Windrush will be secure, scalable, and compliant by design. We are building not just a feature-rich application, but one that is robust, trustworthy, and ready to grow. Non-functional requirements like security, privacy, and scalability are first-class citizens in this project plan – they will guide architecture decisions from the start rather than being afterthoughts

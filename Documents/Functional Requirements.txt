@@ -1,0 +1,70 @@
+Functional Requirements
+Core functionality is split across job seekers, employers, and admin roles:
+Job Seeker Functions:
+Account & Profile: Users (job seekers) can register and authenticate (with email/password or SSO)
+
+. Upon signup they create a profile detailing their education, skills, work experience, and job preferences (e.g. desired industry, location, visa status, etc.)
+
+. They can indicate if they are seeking internships, placements, graduate schemes or full-time roles.
+Job Search & Filtering: Users can search for available opportunities with robust filters by keyword, location, job type (internship, graduate scheme, etc.), industry, salary range, sponsor availability, etc.
+
+. Since Windrush targets visa-sponsored roles, a filter or default setting will show only jobs from licensed sponsors.
+Job Listings & Details: For each job, the app displays a detailed posting including role description, requirements, company info, location, salary, and an indicator that the employer is a licensed sponsor (and possibly the visa category)
+
+. Jobs are categorized (e.g. “Placement Year”, “Graduate Scheme”, “Skilled Worker – Tier 2”) for easy browsing.
+AI-Powered Recommendations: The system provides personalized job suggestions on the user’s dashboard, using an AI matching algorithm that considers the user’s profile (skills, education, browsing/applications) to surface relevant jobs
+
+. For example, if a user is a computer science graduate, the AI might recommend software developer roles or tech graduate schemes, including roles they might not have found via search. This recommendation engine will improve over time via machine learning, using feedback like which suggestions are viewed or applied to
+
+.
+Application to Jobs: Users can apply directly to posted jobs through the platform
+
+. The application workflow allows the user to upload a CV and cover letter (or select from previously saved documents) tailored to that specific job or company, addressing requirement #2. For each application, the user can either use their default profile CV or upload a custom CV/cover letter unique to that job – enabling them to target their application to the employer. The system should support storing multiple resumes/cover letters per user (or per application) so that each application can carry a customized document set.
+Speculative Applications: In addition to applying for listed jobs, the platform allows users to send speculative applications to companies that are known visa sponsors (even if those companies have no active job posting on Windrush). The system provides a directory or search of sponsor-licensed companies (using the official UK register of licensed sponsors
+
+). A user can select a company and submit an unsolicited application (CV/cover letter) expressing interest in future opportunities. These speculative applications will be stored and (if possible) forwarded to the company’s contact or saved for when the company creates an employer account. This encourages proactive outreach and differentiates Windrush.
+Application Tracking: Users have a personal dashboard to track all their job applications
+
+. For each application (including speculative ones), they can see its status – e.g. Submitted, Viewed by Employer, Interview Invite, Rejected, etc. – as updated by the employer or admin. They receive notifications when an application status changes (more on notifications below). This provides transparency in the hiring process
+
+.
+Notifications & Alerts: The app will send real-time or email notifications to job seekers for relevant events: e.g. when new matching jobs are posted, when an employer views or replies to their application, upcoming interview schedules, or general announcements
+
+
+. Users can opt into job alerts for certain keywords or companies, and configure preferences for email/SMS notifications (e.g. turn on/off certain alerts).
+Saved Jobs and Job Alerts: Users can bookmark jobs to review or apply later. They can also set up alerts (e.g. “notify me of new Data Science graduate schemes in London”) and receive periodic updates.
+In-App Messaging (Optional): To facilitate communication, an in-app messaging feature may allow job seekers and employers to communicate within the platform
+
+. For example, an employer could message a candidate to ask for more information or schedule an interview, and candidates could ask questions about a role. (This may be implemented in later phases, as initially communication could also happen via email outside the platform.)
+Profile Privacy & Preferences: Job seekers can control the visibility of their profile. For instance, they might allow their profile/CV to be discoverable by vetted employers (for recruiting purposes) or keep it private except for jobs they applied to. They should be able to deactivate or delete their profile if they choose.
+Employer (Company) Functions:
+(Initially, Windrush will be curated by the internal team adding job listings. As the user base grows, a self-service employer portal will be introduced.)
+Curated Listings by Admin: In early stages, the Windrush team (admins) will manually source and post job listings. Employers may not interact directly with the system initially – the team will gather job openings from known sponsor companies and input them. Each listing will include the company name (which must match an entry in the sponsor company database), job details, etc. Admins ensure the jobs meet criteria (e.g. genuine vacancies, visa sponsorship available).
+Employer Portal (Phase 2+): When opened to employers, companies can register for an Employer Account (with verification, especially confirming they are a licensed sponsor). Multiple recruiters/HR users from the same company can be associated with one company profile
+
+. Verified employers can then perform the following:
+Job Posting: Post new job vacancies on the platform, providing all relevant info (title, description, requirements, location, category, whether visa sponsorship is offered, etc.)
+
+. The system will tie each job post to the employer’s company profile. Employers can edit or close their listings as needed. (The UI will enforce including necessary data like salary if required for visa compliance.)
+Application Management: View a dashboard of applicants for each job they posted
+
+. For each application, they can see the candidate’s profile and the CV/cover letter submitted. They can update the application status (shortlist, reject, interview, offer, etc.), which triggers notifications to the candidate. They can also filter/sort applicants (e.g. by skills match). An employer user can download CVs and contact candidates via the provided contact or messaging system.
+Speculative Applications Inbox: Companies will have access to a list of unsolicited applications sent to them via the system. This acts as a talent pool – even if they haven’t posted a job, they might review these profiles. They can respond to these candidates or convert a speculative application into a formal application if a suitable role opens.
+Company Profile Management: Employers can update their company’s profile page (logo, description, industries, office locations, etc.) which candidates can view to learn about the company. Crucially, the system will indicate that the company is a licensed sponsor (and possibly display their sponsor license number or tier category).
+Search Candidate Database (Future feature): Down the line, employers with proper subscriptions might search the database of job seeker profiles (who marked themselves as open to visibility) to proactively reach out to talent. They could filter candidates by skills, degree, etc., similar to LinkedIn Recruiter. (This is an advanced feature and would require privacy controls and user consent.)
+Recruiter Notifications: Employers get notified when new applications come in, or when a candidate accepts/declines an offer, etc. Also, they might get alerts if a speculative candidate matches a job they just posted.
+Note: Initially, only the Windrush team will post jobs on behalf of companies (to ensure quality control and that listings are from legit sponsors). As we expand, adding a dedicated portal for companies to self-post and manage jobs is planned (requirement #3). This transition will be handled carefully to maintain a high quality of listings.
+Admin Functions:
+Windrush administrators will have a backend interface for site management:
+Job Curation: Create, edit, and remove job listings. Admins essentially act as super-recruiters who can input jobs gathered from sponsor companies or public postings. They ensure each job is correctly labeled (visa sponsorship available, etc.). They can also feature or prioritize certain listings (especially for premium employer clients).
+User Management: View/manage user accounts (both job seekers and employer accounts). Admins can verify employer accounts and mark them as trusted sponsors. They can handle user support issues (password resets, profile takedown requests, etc.).
+Content Management: Manage site content such as blog posts, FAQs (e.g. guidance on Tier 2 visa process), and possibly moderate any user-generated content (if forums or reviews are present in future).
+Monitoring & Analytics: Access dashboards showing key metrics (user signups, active users, number of applications, conversion rates, etc.)
+
+. They will also be able to see trends in job search to inform improving the AI recommendations.
+Compliance Oversight: Admins ensure that data handling is compliant (respond to data deletion requests, etc.) and that job postings comply with labor regulations (no discriminatory language, roles meet visa salary thresholds if applicable, etc.).
+Premium Feature Management: Set up premium plans, manage subscriptions, and possibly moderate job postings to ensure premium employers get appropriate visibility.
+All these functional requirements ensure Windrush offers end-to-end recruitment functionality tailored to visa sponsorship scenarios. In summary, job seekers can create profiles, get matched to suitable sponsored jobs, and apply with tailored documents; employers can find and manage sponsored candidates; and admins oversee the ecosystem. This aligns with the standard expectations of modern job portals
+
+
+ while adding unique features like speculative applications and AI matching for our niche.

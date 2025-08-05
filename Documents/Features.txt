@@ -1,0 +1,76 @@
+Key Features and Unique Selling Points
+Windrush combines standard job-portal features with unique capabilities tailored to our target audience. Below are the key features of the platform and how they fulfill the project goals:
+Comprehensive Profile & Resume Tools: Users create detailed profiles including academic history, work experience, skills, and visa status/preferences
+
+. They can upload a profile picture and indicate their job interests. A built-in resume/CV builder (or template library) may be provided to help users create a professional CV if they don’t have one
+
+. Users can store multiple CV versions and cover letters on their account, making it easy to pick a customized pair for each application (addressing the need for custom documents per company). We might also integrate resume parsing – i.e. when a user uploads a CV, the system auto-extracts key information to fill their profile
+
+, speeding up profile creation.
+Advanced Job Search & Filtering: Windrush offers powerful search capabilities so users can pinpoint opportunities that suit them
+
+. Filters include location (with emphasis on UK regions/cities), industry/field, job type (internship, placement, graduate scheme, full-time), company, salary range, and keyword. Critically, there will be a filter for “Visa Sponsorship: Yes” which is essentially defaulted on for our platform (since our niche is sponsored jobs). The search results can be sorted by date or relevance. We will also have quick categories (shortcuts) such as “Jobs with Visa Sponsorship” (similar to some sites’ feature) and “Placement Year Opportunities” for easy browsing. These advanced filters ensure a user can narrow down from thousands of listings to the few that fit their needs, providing a better experience than generic job boards
+
+
+.
+AI-Powered Job Recommendations: A standout feature is the AI recommendation engine. Using machine learning algorithms, Windrush will proactively suggest jobs, internships, or graduate schemes that the user is likely to be interested in
+
+. The recommendation considers the user’s profile (skills, education), their past behavior (e.g. jobs viewed or applied to), and possibly similar users’ patterns (collaborative filtering). For example, if many users with a certain skill set applied to a particular job, that job might be recommended to another user with a similar profile. Initially, a simple rule-based matching (matching profile skills to job requirements) will be implemented
+
+, but over time this will evolve into a smarter AI model (incorporating NLP to match CV content with job descriptions, etc.). The AI suggestions bring personalized value – users don’t have to search exhaustively; relevant opportunities “find them.” This is especially useful for highlighting options like lesser-known sponsoring companies or related fields the user might not have considered. We will continuously refine the algorithm using analytics and user feedback to improve its accuracy
+
+
+.
+Visa Sponsorship Focus & Company Sponsor Database: Unlike general job platforms, Windrush is built around visa sponsorship jobs in the UK. We will maintain a database of UK companies that hold work visa sponsor licenses (based on the official government list of approved sponsors
+davidsonmorris.com
+). Each job listing is cross-checked against this database – if a company isn’t on the sponsor list, it won’t be posted (or at least it won’t be tagged as offering sponsorship). Users can also browse or search the Company Directory of sponsor-approved employers, with filters by industry or location. Each company profile will indicate what kinds of visas they sponsor (Skilled Worker, Graduate route, etc. if known) and perhaps how many international hires they have made (if data available). This focus addresses a pain point for international candidates – it saves them time by ensuring all opportunities they find on Windrush are viable for visa sponsorship
+
+. It essentially pre-filters the job market for them. Additionally, by having this structured data, features like speculative applications (below) become possible. (This is a key selling point compared to generic boards that do not allow filtering for visa jobs easily
+
+.)
+Speculative Application Portal: Windrush facilitates unsolicited applications to sponsor companies. From the company directory, a user can select a company and click “Send a Speculative Application.” They can then write a cover message and attach a CV (again, potentially a tailored version). The system will deliver this to the company (either to a designated HR email if the company hasn’t signed up yet, or into their Windrush employer account if they have one). This feature acknowledges that many jobs (especially in smaller firms) are not publicly advertised – a proactive approach can open doors. The platform essentially acts as a conduit, maintaining a record of these speculative applications for both user and (eventually) the employer to track. It’s a unique feature that adds value for users by broadening their reach beyond posted vacancies. It also benefits companies by providing a pool of interested candidates on demand. We will provide guidance and templates to users on how to craft effective speculative cover letters
+prospects.ac.uk
+. This speculative application feature is somewhat analogous to LinkedIn’s “connect with recruiters” but more structured specifically around visa-sponsoring employers.
+Application Management & Status Tracking: Both job seekers and employers have dedicated dashboards for managing applications. For candidates: a dashboard shows all jobs they applied to (or speculative applications sent), with each application’s status (e.g. “Application Submitted – Awaiting Review”, “Interview Scheduled: 2025-09-10”, “Offer Received”, “Closed – Position Filled”, etc.). If the employer provides feedback or updates (like rejecting or inviting for interview through the system), the status is updated in real time
+
+. This eliminates the black-box feeling after applying – users get more clarity and timely updates. For employers: they can easily track incoming applications per job, mark statuses (shortlist, reject, etc.), and even bulk-message candidates. The system can also show analytics like how many views a job post got or how many applications per job, helping employers gauge interest. An interactive dashboard for each side streamlines the hiring process and saves time
+
+.
+Communication & Notifications: Windrush integrates communication tools to keep the hiring process moving swiftly. We have real-time notifications to users about important events (new recommended jobs, application status changes, messages from employers)
+
+. Notifications can be in-app (a notification bell icon) and via email (with user consent settings). We may later integrate SMS or WhatsApp alerts for urgent updates if users prefer. Additionally, the in-app messaging system (or a relay of emails) lets employers and candidates discuss next steps without leaving the platform
+
+. For example, an employer can request additional information or schedule an interview, and the candidate can reply or confirm availability. Having this communication logged on the platform ensures everything is in one place. It’s important to note, however, that early on we might rely on email integration for simplicity (e.g. an employer clicks “Contact Candidate” and it sends an email through our system to the candidate, rather than a full chat interface). Over time, we can evolve this into a more robust messaging module. These communication features improve engagement and keep users coming back, as they are continually informed and can act quickly when opportunities arise
+
+.
+Premium Membership Features: To monetize, Windrush will offer a Premium tier for job seekers (requirement #4) with enhanced features. While the core job search and application features remain free, premium users might get benefits such as:
+Early access or exclusive listings: Premium members could see certain job postings (especially from partner employers) 24 hours before others, or access a curated list of hard-to-find sponsorship jobs.
+Enhanced AI coaching: Premium users might get an AI-driven resume review or interview preparation tips. For instance, the app could analyze a job description and the user’s CV and suggest improvements or talking points.
+Unlimited speculative applications or applications: The free tier might set a limit (e.g. a free user can send 5 speculative applications per month to prevent spam, whereas premium has a higher or no limit).
+Profile boosting: Premium candidates could appear higher in employer searches or get a “featured” tag that makes their applications stand out.
+Insights and Analytics: Premium users might see extra data like how many people applied for a job, or their application’s status relative to others (if available), or get notified when an employer reads their CV.
+We will fine-tune these premium offerings to ensure they are compelling but also fair (we don’t want to disadvantage free users too harshly, especially since our user base might be students with limited funds). Premium subscriptions could be monthly or yearly, and there may be a free trial. This freemium model is a common monetization strategy for job portals
+
+
+ – offering basic services free and advanced features for a fee
+
+.
+Employer Monetization Features: As a secondary revenue stream (especially once we have a sizable user base), Windrush will charge employers for certain services. This could include:
+Paid job postings or featured listings: Perhaps posting a basic job is free initially to attract companies, but a featured job (highlighted in search results or emailed to candidates) costs a fee
+
+. We could also limit how many active postings a free employer account can have.
+Access to candidate database: If an employer wants to proactively search resumes, that might be a premium employer feature (subscription or pay-per-use).
+Employer Branding: Companies could pay to have a detailed profile page with videos, etc., or to be listed in a “Top Visa Sponsors” carousel on the home page.
+Applicant management tools: Advanced analytics on their postings, or integration with their ATS (Applicant Tracking System), might be premium services for which we charge.
+Our initial focus is on building the user base, so monetization from employers will be phased in carefully (possibly with freemium approach for them too: basic usage free, advanced features paid)
+
+
+.
+Placement & Internship Listings: The platform will explicitly support placement year internships (for university students needing a 1-year placement) and shorter internships. These will be tagged accordingly so students can filter for “Placement Year 2025” or similar. Often, these are a pathway to visa sponsorship if the company likes the intern. We’ll curate such opportunities and possibly partner with universities or the UK government’s sandwich placement programs to list them. Similarly, graduate schemes (rotational programs for new grads) often accept international students if the company sponsors visas – Windrush will highlight these as well. By tailoring categories to these specific needs of international students, we make the search experience much more targeted for our users.
+Resource Center & Guidance: As an added value feature, Windrush can include a section with guides/blogs on navigating UK jobs and visas. For example, articles about “How to secure a Tier 2 sponsorship job” or “Tips for writing a great speculative application”
+prospects.ac.uk
+, or explanations of visa rules (in plain language). This content not only helps users but also improves our site engagement and SEO (attracting users searching these questions). We might also integrate tools like visa eligibility checkers or links to official guidance. While not a core functional requirement, providing these resources enhances the platform’s appeal as a one-stop-shop for international job seekers.
+Analytics and Admin Tools: Internally, the platform will have features to track usage and performance. This includes Google Analytics or similar for user behavior on the site, as well as custom admin dashboards showing metrics (number of applications per week, growth of user signups, etc.)
+
+. These insights will guide improvements and allow us to demonstrate traction to potential investors or partners. They also help in scaling decisions (e.g. if we see search queries growing exponentially, we know to invest in scaling our search infrastructure).
+In essence, Windrush’s feature set is holistic: it covers the basic expectations of any job board (accounts, profiles, job search, applications, notifications) and layers on specialized features (visa sponsor filtering, AI matching, speculative outreach, and targeted content) to truly serve the needs of international candidates. This combination of functionality and focus will make Windrush stand out in the UK recruitment market.

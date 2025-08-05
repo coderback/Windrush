@@ -1,0 +1,103 @@
+Database Design
+A relational database will underlie the Windrush platform, storing all persistent data. Below we outline the main database schema and how it supports the application’s requirements. (We’ll use a SQL schema for illustration, though actual implementation might vary.) Main Entities and Tables:
+User – Stores basic account information for all users (both job seekers and employer representatives). Key fields:
+user_id (PK): unique identifier for each user.
+email (indexed, unique) and password_hash.
+role: e.g. “job_seeker”, “employer”, or “admin”. Alternatively, a separate user_type table could map to types
+vertabelo.com
+, but a simple enum field works.
+name (for job seeker: full name; for employer user: maybe their name or just use company profile for display).
+is_verified: for employers, whether their company email is verified, etc.
+premium_status: could be a boolean or a reference to a subscription table if we manage subscriptions (with fields for plan, start_date, end_date).
+Timestamps: created_at, last_login (or a separate user_log table for last login and activity
+vertabelo.com
+).
+JobSeekerProfile – Details specific to job seeker users. (We separate this from User to keep things organized, but it could also be in the same table if using single-table inheritance pattern.) Fields might include:
+user_id (PK, FK to User).
+education (e.g. highest degree or a text field summary). We might instead have a related table for multiple education entries.
+experience (years of experience or summary; again could be normalized to a separate Experience table for multiple entries per user).
+skills – could be a free-text or a set of FK references to a Skills table if we maintain a taxonomy of skills. For AI matching, structured skills are useful (e.g. separate table linking user to skill with proficiency level
+vertabelo.com
+), but initially a comma-separated list might do, then parse it.
+visa_status – e.g. “Tier 4 student visa expiring 2024” or “Post-Study Work visa”, etc. This is not sensitive exactly, but relevant for employers to know availability.
+job_preferences – could include desired industries or job types (perhaps in a normalized way via related tables).
+Possibly resume_headline or a short bio.
+If no separate Resume table, we might store a link to the user’s default resume file here (though users can upload multiple, one primary can be flagged).
+Profile visibility flag (whether employers can find them).
+Company – Represents companies (especially those licensed sponsors). This is central for linking jobs and for speculative applications. Fields:
+company_id (PK).
+name – company name.
+sponsor_license – a boolean or enum indicating if they are a known licensed sponsor (and possibly the sponsor license number or rating). We could have sponsor_license = NULL for not in list, or store details if available (the gov list provides categories of visa they can sponsor, etc.).
+industry – category of company (tech, finance, healthcare, etc.), could be a FK to Industry table.
+size and location – e.g. number of employees, HQ location (for info).
+profile_details – text field for description (if company has signed up and filled it).
+website, logo_url, etc.
+created_by – if an employer user from that company created the profile (else it might be created by admin from sponsor list import).
+We will pre-populate this table with entries from the UK sponsor list
+davidsonmorris.com
+ (which could be thousands of companies). Additional companies can be added later. A key concept: not all Company entries will have an associated User initially. For example, IBM might be in Company (as a sponsor), even if no IBM recruiter has signed up on Windrush. If a recruiter from IBM later registers, we link their user account to the existing IBM company entry (via perhaps an employer_profile table or a field in Company like admin_user_id or a join table for multiple). This prevents duplicates and allows speculative applications to IBM to already be stored even if IBM isn’t actively posting jobs on the platform yet.
+EmployerProfile/CompanyUser – A join table linking Users (with employer role) to the Company they represent. Fields: user_id, company_id, role_title (like their title at company), and possibly permissions (like some employer users could be main admins who approve other users from same company). This allows multiple recruiters per company
+vertabelo.com
+. When an employer user registers with a company email, we might auto-link if the domain matches a company’s website domain (with verification), or create a new Company if not existing (though ideally we focus on known sponsors).
+Job – Represents a job posting. Fields:
+job_id (PK).
+company_id (FK to Company) – the company offering the job.
+posted_by (FK to User) – which user (employer or admin) created the listing
+vertabelo.com
+. For admin-curated jobs, this might be an admin user; for employer-posted jobs, the employer’s user ID.
+title – job title, e.g. “Software Engineer (Graduate Scheme)”.
+description – full job description (could be long text).
+location – could be a text city/region or a FK to a Location table if we normalize. Possibly a separate table job_location with fields (city, country, etc.) if needed for structured search
+vertabelo.com
+.
+job_type – e.g. “Full-Time”, “Internship”, “Placement”, “Graduate Scheme” – a categorical field or FK to a JobType table
+vertabelo.com
+.
+category – e.g. “IT/Software”, “Finance”, etc., possibly multi-valued if a job spans categories. Perhaps a join table job_category.
+salary – numeric or range, and maybe currency (though all UK, so GBP). Could be min_salary, max_salary fields. (Often visa roles must meet a minimum, so if known we include it).
+visa_sponsorship – a boolean or small text indicating if sponsorship is available (most likely true for our jobs, but possibly a job might say “only for those with right to work” in rare case, which we might exclude anyway). We might include what visa types – e.g. “Skilled Worker visa sponsorship offered”.
+created_at and expires_at – when posted and when the application closes (if known).
+is_active – flag if the job is open or taken down
+vertabelo.com
+.
+Additional fields: perhaps experience_level (“Entry, Mid, Senior”) for filtering, and any specific requirements like required_skills (which could link to a Skill table similarly to user skills). We might have a join table Job_Skills listing required skills or keywords
+vertabelo.com
+, to facilitate matching with user skills.
+Application – Represents an application by a user to a job. This is a critical table tying users and jobs together. Fields:
+application_id (PK).
+job_id (FK to Job) – nullable in case of speculative application (if no specific job). For speculative applications, we might set job_id = NULL and use company_id instead. Alternatively, we keep one Application table for both, and if speculative, job_id is null and we rely on company_id. Or we could separate speculative ones into a different table, but that complicates user view. It might be cleaner to unify them: just treat a speculative application as an application record not linked to a job posting.
+company_id – if job_id is null (speculative), this tells which company it was sent to. For normal job apps, this duplicates info (since Job has company), but it can be handy for queries (and ensure referential integrity – we might enforce either job_id or company_id must be set).
+user_id (FK to User) – the candidate who applied
+vertabelo.com
+.
+applied_at – timestamp.
+status – current status of application. This could be an enum: “Submitted”, “Viewed”, “Interviewing”, “Offered”, “Rejected”, etc., or a simpler scheme (like a status code and maybe a separate table to track history of status changes).
+cv_file and cover_letter_file – file path or URL to the documents used for this application. We store them per application to preserve the exact version sent. (We’ll ensure these are not accessible publicly without auth.)
+notes – maybe a text field for either the applicant (like “note to self about this application”) or internal notes by employer (if we allow that in UI later).
+This table will be one of the largest (number of rows grows as applications are made). We’ll index it on user_id (for user dashboards) and on job_id (for employer view of applicants) for fast retrieval. The status field might be indexed if we often query e.g. count of “open” applications.
+
+Subscription/Premium – If we handle subscriptions in DB, a subscription table (user_id, plan, start_date, end_date, etc.) will exist. Or we might rely on an external payment provider that can webhook us to mark a user as premium.
+Notification – A table to store notifications for in-app display: (notif_id, user_id, type, message, created_at, read_flag). This can queue up messages like “Your application to X was viewed” or “New job matching your profile: ...”. The user’s notification bell fetches from here. Not strictly required to detail, but part of design.
+Other Supporting Tables: We might have tables like Skill, JobCategory, Location, etc., to normalize common data. For example, a Skill table might list skill names, and then UserSkill(user_id, skill_id, level) and JobSkill(job_id, skill_id, required_level) to precisely match candidates with jobs (this is how a detailed matching could work long-term). Initially, we might not go that granular; we could use text search on descriptions and profiles. But the schema is extensible to that. Similarly, a Country or City table could list locations (though since we’re UK-only for now, maybe a list of UK cities or regions is useful for filtering by region).
+
+Relational Integrity & Indices: We will enforce foreign key constraints, e.g. an Application must refer to a valid User and Job (or Company). If a Job is deleted, we might cascade delete or better, mark it inactive but keep it for historical record (so as not to orphan applications). We’ll add indexes on fields used in lookups: email in User, company_id in Job, user_id in Application, etc. This ensures queries like “find all applications for job X” or “all jobs at company Y” are fast.
+
+Example Use Cases Walk-through (DB perspective):
+User applies to a job: The system creates an Application row linking that user and job, with their uploaded files. The job’s company can then query Application by job_id to get all applicants. If the user is premium, nothing special in DB except perhaps the user’s premium flag might allow more applications (enforced in logic rather than schema).
+User sends speculative app: System finds Company by name (say user selected “Google UK” which has company_id 42). It creates Application with company_id=42, job_id=NULL, user_id = that user. Status maybe “Sent”. If later Google posts a job or signs up, they could see those waiting spec apps by querying Application WHERE company_id=42 AND job_id IS NULL.
+Employer posts a job: A new Job row is inserted with their company_id and posted_by their user_id. Job searches query the Job table joined with Company (to filter sponsor companies). We might only show jobs where Company.sponsor_license = true, but since our companies are seeded as sponsors, that’s inherent. If an admin posts on behalf of a company, posted_by is admin but company_id is set appropriately.
+AI recommendation: If we were to store some ML results, we could have a table like JobMatchScore(user_id, job_id, score) updated periodically. Or we compute on the fly using data from above (like matching user’s skills to job’s required skills via join tables). This is more of a process than storage question; storing precomputed might be fine if updated regularly.
+ER Diagram: To visualize, an ER diagram would show:
+User (1) --- (0..*) Application (since a user can have many applications).
+Job (1) --- (0..*) Application (a job can have many applicants).
+Company (1) --- (0..*) Job (a company can have many jobs).
+Company (1) --- (0..*) Application (for speculative apps, linking by company).
+User (1) --- (0..) CompanyUser (if multiple employer accounts per company), and Company (1) -- (0..) CompanyUser.
+Potentially User (1) -- (1) JobSeekerProfile (one-to-one).
+This aligns with typical job portal data models, supporting users, jobs, companies, and applications as central entities.
+We will also consider data volume and retention: Application table can grow very large; we might partition it by year or have archiving for old data beyond a certain time (for GDPR or performance). But initially volumes are manageable. Compliance aspects in DB:
+We should store consent timestamps (e.g. user agreed to privacy policy at signup, store that date).
+Possibly store that a company is verified as a licensed sponsor (which might involve storing the date we verified, etc., for audit).
+If users request deletion, we might soft-delete (mark inactive) or actually remove personal data. In a soft-delete case, we might nullify personal fields and keep a shell record for referential integrity. For now, likely we’ll do hard delete of user and cascade to their profiles and possibly anonymize their applications (e.g. keep the application count but remove name on it).
+Any special categories of data (like ethnicity if we ever collected for diversity stats) would require extra protection – but we likely won’t collect those to avoid complexity (unless needed by law for reporting, which usually isn’t mandatory for private job boards).
+Overall, this database design ensures we can implement all required features: linking users to applications, tracking which companies can sponsor, and storing multiple documents per application. It’s a normalized schema that avoids duplication (e.g. company info stored once, user info in one place). We will use transactions where needed (like when an application is created, we might update a counter somewhere, but that can be recalculated if needed rather than stored to avoid anomalies). The data model is extensible – we can add tables for things like reviews/ratings, or additional profile info without major refactoring, as evidenced by similar job portal data models
