@@ -17,16 +17,52 @@ Including another URLconf
 from django.contrib import admin
 from django.urls import path, include
 from django.http import JsonResponse
+from django.conf import settings
+from django.conf.urls.static import static
 
 def api_health(request):
     return JsonResponse({
         'status': 'healthy',
         'message': 'Windrush API is running',
-        'version': '0.1.0'
+        'version': '0.1.0',
+        'environment': 'development' if settings.DEBUG else 'production'
+    })
+
+def api_root(request):
+    return JsonResponse({
+        'message': 'Welcome to Windrush API',
+        'version': '0.1.0',
+        'endpoints': {
+            'auth': '/api/auth/',
+            'accounts': '/api/accounts/',
+            'companies': '/api/companies/',
+            'jobs': '/api/jobs/',
+            'applications': '/api/applications/',
+            'health': '/api/health/',
+            'docs': '/api/docs/',
+        }
     })
 
 urlpatterns = [
     path('admin/', admin.site.urls),
+    
+    # API endpoints
+    path('api/', api_root, name='api_root'),
     path('api/health/', api_health, name='api_health'),
-    path('api/', include('rest_framework.urls')),
+    
+    # Authentication and accounts
+    path('api/auth/', include('accounts.urls')),
+    
+    # Main app endpoints
+    path('api/companies/', include('companies.urls')),
+    path('api/jobs/', include('jobs.urls')),
+    # path('api/applications/', include('applications.urls')),
+    
+    # Django REST framework browsable API
+    path('api-auth/', include('rest_framework.urls')),
 ]
+
+# Serve media files in development
+if settings.DEBUG:
+    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+    urlpatterns += static(settings.STATIC_URL, document_root=settings.STATIC_ROOT)
