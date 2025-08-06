@@ -53,11 +53,11 @@ class CompanyListCreateView(generics.ListCreateAPIView):
         if sponsor_status:
             queryset = queryset.filter(sponsor_status=sponsor_status)
         
-        # Note: visa_types filtering temporarily disabled for SQLite compatibility
-        # visa_types = self.request.query_params.getlist('visa_types')
-        # if visa_types:
-        #     for visa_type in visa_types:
-        #         queryset = queryset.filter(sponsor_types__contains=[visa_type])
+        # PostgreSQL JSON field filtering for visa types
+        visa_types = self.request.query_params.getlist('visa_types')
+        if visa_types:
+            for visa_type in visa_types:
+                queryset = queryset.filter(sponsor_types__contains=[visa_type])
         
         has_active_jobs = self.request.query_params.get('has_active_jobs')
         if has_active_jobs == 'true':
@@ -216,11 +216,11 @@ def company_search(request):
     if sponsor_status:
         queryset = queryset.filter(sponsor_status=sponsor_status)
     
-    # Note: visa_types filtering temporarily disabled for SQLite compatibility  
-    # visa_types = data.get('visa_types')
-    # if visa_types:
-    #     for visa_type in visa_types:
-    #         queryset = queryset.filter(sponsor_types__contains=[visa_type])
+    # PostgreSQL JSON field filtering for visa types
+    visa_types = data.get('visa_types')
+    if visa_types:
+        for visa_type in visa_types:
+            queryset = queryset.filter(sponsor_types__contains=[visa_type])
     
     has_active_jobs = data.get('has_active_jobs')
     if has_active_jobs is not None:

@@ -12,6 +12,7 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 
 from pathlib import Path
 import os
+from decouple import config
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -20,10 +21,10 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-9ae$vtblz)$!fsfcz#u(hnz6$%at&8-rrmf=ekk7y-v$l@@m=o'
+SECRET_KEY = config('SECRET_KEY', default='django-insecure-9ae$vtblz)$!fsfcz#u(hnz6$%at&8-rrmf=ekk7y-v$l@@m=o')
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = config('DEBUG', default=True, cast=bool)
 
 ALLOWED_HOSTS = ['localhost', '127.0.0.1']
 
@@ -80,11 +81,15 @@ TEMPLATES = [
 WSGI_APPLICATION = 'windrush_api.wsgi.application'
 
 # Database
-# Start with SQLite for development, will switch to PostgreSQL later
+# PostgreSQL for both development and production
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+        'ENGINE': 'django.db.backends.postgresql',
+        'NAME': config('DB_NAME', default='windrush_db'),
+        'USER': config('DB_USER', default='windrush_user'),
+        'PASSWORD': config('DB_PASSWORD', default='windrush_password'),
+        'HOST': config('DB_HOST', default='localhost'),
+        'PORT': config('DB_PORT', default='5432'),
     }
 }
 
