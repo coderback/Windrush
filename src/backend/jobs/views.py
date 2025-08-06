@@ -23,7 +23,7 @@ class JobListCreateView(generics.ListCreateAPIView):
     """
     permission_classes = [IsAuthenticatedOrReadOnly]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
-    search_fields = ['title', 'description', 'required_skills', 'company__name']
+    search_fields = ['title', 'description', 'company__name']  # required_skills removed for SQLite compatibility
     filterset_fields = [
         'job_type', 'experience_level', 'industry', 'remote_policy',
         'visa_sponsorship', 'is_featured', 'is_urgent', 'company'
@@ -37,7 +37,6 @@ class JobListCreateView(generics.ListCreateAPIView):
     def get_queryset(self):
         """Get jobs with optimized queries and custom filtering"""
         queryset = Job.objects.filter(
-            is_active=True,
             status='active'
         ).select_related('company').annotate(
             offers_visa_sponsorship=Case(
@@ -45,6 +44,7 @@ class JobListCreateView(generics.ListCreateAPIView):
                 default=0,
                 output_field=IntegerField()
             ),
+            # Note: days_since_posted simplified for SQLite compatibility
             days_since_posted=Case(
                 When(
                     created_at__gte=timezone.now() - timedelta(days=1),
@@ -52,9 +52,13 @@ class JobListCreateView(generics.ListCreateAPIView):
                 ),
                 When(
                     created_at__gte=timezone.now() - timedelta(days=7),
-                    then=F('created_at__date') - timezone.now().date()
+                    then=1
                 ),
-                default=(F('created_at__date') - timezone.now().date()).days,
+                When(
+                    created_at__gte=timezone.now() - timedelta(days=30),
+                    then=2
+                ),
+                default=3,
                 output_field=IntegerField()
             )
         )
@@ -97,10 +101,11 @@ class JobListCreateView(generics.ListCreateAPIView):
         if visa_sponsorship_options:
             queryset = queryset.filter(visa_sponsorship__in=visa_sponsorship_options)
         
-        required_skills = self.request.query_params.getlist('required_skills')
-        if required_skills:
-            for skill in required_skills:
-                queryset = queryset.filter(required_skills__icontains=skill)
+        # Note: required_skills filtering temporarily disabled for SQLite compatibility
+        # required_skills = self.request.query_params.getlist('required_skills')
+        # if required_skills:
+        #     for skill in required_skills:
+        #         queryset = queryset.filter(required_skills__icontains=skill)
         
         company_name = self.request.query_params.get('company')
         if company_name:
@@ -192,7 +197,6 @@ def job_search(request):
     
     # Start with base queryset
     queryset = Job.objects.filter(
-        is_active=True,
         status='active'
     ).select_related('company').annotate(
         offers_visa_sponsorship=Case(
@@ -208,8 +212,8 @@ def job_search(request):
         queryset = queryset.filter(
             Q(title__icontains=search) |
             Q(description__icontains=search) |
-            Q(required_skills__icontains=search) |
             Q(company__name__icontains=search)
+            # required_skills__icontains removed for SQLite compatibility
         )
     
     # Apply filters
@@ -248,10 +252,11 @@ def job_search(request):
     if visa_sponsorship:
         queryset = queryset.filter(visa_sponsorship__in=visa_sponsorship)
     
-    required_skills = data.get('required_skills')
-    if required_skills:
-        for skill in required_skills:
-            queryset = queryset.filter(required_skills__icontains=skill)
+    # Note: required_skills filtering temporarily disabled for SQLite compatibility
+    # required_skills = data.get('required_skills')
+    # if required_skills:
+    #     for skill in required_skills:
+    #         queryset = queryset.filter(required_skills__icontains=skill)
     
     company = data.get('company')
     if company:
@@ -293,47 +298,47 @@ def job_search(request):
 def job_stats(request):
     """Get overall job statistics"""
     stats = {
-        'total_jobs': Job.objects.filter(is_active=True).count(),
-        'active_jobs': Job.objects.filter(status='active', is_active=True).count(),
+        'total_jobs': Job.objects.filter(status='active').count(),
+        'active_jobs': Job.objects.filter(status='active').count(),
         'jobs_with_sponsorship': Job.objects.filter(
             visa_sponsorship__in=['available', 'considered'],
-            is_active=True
+            status='active'
         ).count(),
-        'featured_jobs': Job.objects.filter(is_featured=True, is_active=True).count(),
+        'featured_jobs': Job.objects.filter(is_featured=True, status='active').count(),
         'remote_jobs': Job.objects.filter(
-            remote_policy__in=['remote_only', 'hybrid'],
-            is_active=True
+            remote_policy__in=['remote', 'hybrid'],
+            status='active'
         ).count(),
         'top_job_types': list(
-            Job.objects.filter(is_active=True)
+            Job.objects.filter(status='active')
             .values('job_type')
             .annotate(count=Count('id'))
             .order_by('-count')[:10]
         ),
         'top_industries': list(
-            Job.objects.filter(is_active=True)
+            Job.objects.filter(status='active')
             .values('industry')
             .annotate(count=Count('id'))
             .order_by('-count')[:10]
         ),
         'top_locations': list(
-            Job.objects.filter(is_active=True)
+            Job.objects.filter(status='active')
             .values('location_city', 'location_region')
             .annotate(count=Count('id'))
             .order_by('-count')[:10]
         ),
         'salary_ranges': {
             'under_30k': Job.objects.filter(
-                salary_max__lt=30000, is_active=True
+                salary_max__lt=30000, status='active'
             ).count(),
             '30k_50k': Job.objects.filter(
-                salary_min__gte=30000, salary_max__lte=50000, is_active=True
+                salary_min__gte=30000, salary_max__lte=50000, status='active'
             ).count(),
             '50k_70k': Job.objects.filter(
-                salary_min__gte=50000, salary_max__lte=70000, is_active=True
+                salary_min__gte=50000, salary_max__lte=70000, status='active'
             ).count(),
             'over_70k': Job.objects.filter(
-                salary_min__gt=70000, is_active=True
+                salary_min__gt=70000, status='active'
             ).count(),
         }
     }
@@ -346,7 +351,6 @@ def featured_jobs(request):
     """Get featured jobs for homepage"""
     jobs = Job.objects.filter(
         is_featured=True,
-        is_active=True,
         status='active'
     ).select_related('company').annotate(
         offers_visa_sponsorship=Case(
@@ -376,7 +380,7 @@ class SavedJobsListView(generics.ListAPIView):
 @permission_classes([IsAuthenticated])
 def save_job(request, job_id):
     """Save a job for later viewing"""
-    job = get_object_or_404(Job, id=job_id, is_active=True)
+    job = get_object_or_404(Job, id=job_id, status='active')
     
     # Check if already saved
     saved_job, created = JobSavedByUser.objects.get_or_create(

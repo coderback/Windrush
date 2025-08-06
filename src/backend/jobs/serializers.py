@@ -214,7 +214,7 @@ class JobSaveSerializer(serializers.ModelSerializer):
     
     def validate_job(self, value):
         """Ensure job exists and is active"""
-        if not value.is_active:
+        if value.status != 'active':
             raise serializers.ValidationError("Cannot save inactive job")
         return value
     

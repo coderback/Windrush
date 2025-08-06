@@ -32,7 +32,7 @@ Authorization: Token <your_token_here>
 - Advanced job search and filtering
 - Saved jobs and job alerts
 
-### Applications (`/api/applications/`) - Coming Soon
+### Applications (`/api/applications/`)
 - Job applications and speculative applications
 - Application tracking and status updates
 - Application messaging

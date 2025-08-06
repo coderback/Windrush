@@ -6,6 +6,7 @@ from django.contrib.auth import login, logout
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
 from django.shortcuts import get_object_or_404
+from django.http import JsonResponse
 
 from .models import User, JobSeekerProfile
 from .serializers import (
@@ -14,6 +15,25 @@ from .serializers import (
     ChangePasswordSerializer, PasswordResetRequestSerializer,
     PasswordResetConfirmSerializer
 )
+
+
+def auth_root(request):
+    """Auth API root endpoint"""
+    return JsonResponse({
+        'message': 'Windrush Authentication API',
+        'endpoints': {
+            'register': '/api/auth/register/',
+            'login': '/api/auth/login/',
+            'logout': '/api/auth/logout/',
+            'profile': '/api/auth/profile/',
+            'job_seeker_profile': '/api/auth/job-seeker-profile/',
+            'change_password': '/api/auth/change-password/',
+            'password_reset': '/api/auth/password-reset/',
+            'stats': '/api/auth/stats/',
+            'verify_email': '/api/auth/verify-email/',
+            'delete_account': '/api/auth/delete-account/',
+        }
+    })
 
 
 class UserRegistrationView(generics.CreateAPIView):

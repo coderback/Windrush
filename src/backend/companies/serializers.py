@@ -5,7 +5,7 @@ from .models import Company, CompanyReview
 class CompanyListSerializer(serializers.ModelSerializer):
     """Serializer for company list view (limited fields)"""
     active_jobs_count = serializers.ReadOnlyField()
-    can_sponsor_skilled_worker = serializers.ReadOnlyField()
+    can_sponsor_skilled_worker = serializers.SerializerMethodField()
     
     class Meta:
         model = Company
@@ -15,12 +15,18 @@ class CompanyListSerializer(serializers.ModelSerializer):
             'sponsor_types', 'active_jobs_count', 'can_sponsor_skilled_worker',
             'is_featured', 'is_premium_partner'
         ]
+    
+    def get_can_sponsor_skilled_worker(self, obj):
+        """Check if company can sponsor skilled workers"""
+        return (obj.is_sponsor and 
+                obj.sponsor_types and 
+                'skilled_worker' in obj.sponsor_types)
 
 
 class CompanyDetailSerializer(serializers.ModelSerializer):
     """Serializer for company detail view"""
     active_jobs_count = serializers.ReadOnlyField()
-    can_sponsor_skilled_worker = serializers.ReadOnlyField()
+    can_sponsor_skilled_worker = serializers.SerializerMethodField()
     average_rating = serializers.SerializerMethodField()
     review_count = serializers.SerializerMethodField()
     
@@ -51,6 +57,12 @@ class CompanyDetailSerializer(serializers.ModelSerializer):
     def get_review_count(self, obj):
         """Get count of approved reviews"""
         return obj.reviews.filter(is_approved=True).count()
+    
+    def get_can_sponsor_skilled_worker(self, obj):
+        """Check if company can sponsor skilled workers"""
+        return (obj.is_sponsor and 
+                obj.sponsor_types and 
+                'skilled_worker' in obj.sponsor_types)
 
 
 class CompanyCreateUpdateSerializer(serializers.ModelSerializer):

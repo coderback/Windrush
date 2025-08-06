@@ -204,7 +204,7 @@ class Company(models.Model):
     @property
     def active_jobs_count(self):
         """Return count of active job postings"""
-        return self.jobs.filter(is_active=True).count()
+        return self.jobs.filter(status='active').count()
     
     @property
     def can_sponsor_skilled_worker(self):

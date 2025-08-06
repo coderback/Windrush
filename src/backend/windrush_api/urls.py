@@ -56,7 +56,7 @@ urlpatterns = [
     # Main app endpoints
     path('api/companies/', include('companies.urls')),
     path('api/jobs/', include('jobs.urls')),
-    # path('api/applications/', include('applications.urls')),
+    path('api/applications/', include('applications.urls')),
     
     # Django REST framework browsable API
     path('api-auth/', include('rest_framework.urls')),

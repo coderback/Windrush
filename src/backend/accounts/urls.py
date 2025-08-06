@@ -4,6 +4,9 @@ from . import views
 app_name = 'accounts'
 
 urlpatterns = [
+    # Auth root endpoint
+    path('', views.auth_root, name='auth_root'),
+    
     # Authentication
     path('register/', views.UserRegistrationView.as_view(), name='register'),
     path('login/', views.UserLoginView.as_view(), name='login'),

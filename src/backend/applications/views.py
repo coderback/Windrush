@@ -35,7 +35,23 @@ class ApplicationListCreateView(generics.ListCreateAPIView):
         return Application.objects.filter(
             applicant=self.request.user
         ).select_related('job', 'company').annotate(
-            days_since_applied=(timezone.now().date() - F('applied_at__date')),
+            # Note: days_since_applied simplified for SQLite compatibility
+            days_since_applied=Case(
+                When(
+                    applied_at__gte=timezone.now() - timedelta(days=1),
+                    then=0
+                ),
+                When(
+                    applied_at__gte=timezone.now() - timedelta(days=7),
+                    then=1
+                ),
+                When(
+                    applied_at__gte=timezone.now() - timedelta(days=30),
+                    then=2
+                ),
+                default=3,
+                output_field=IntegerField()
+            ),
             is_active=Case(
                 When(status__in=['applied', 'under_review', 'interviewing', 'offered'], then=1),
                 default=0,
@@ -108,7 +124,7 @@ class ApplicationDetailView(generics.RetrieveAPIView):
 @permission_classes([IsAuthenticated])
 def apply_to_job(request, job_id):
     """Apply to a specific job"""
-    job = get_object_or_404(Job, id=job_id, is_active=True, status='active')
+    job = get_object_or_404(Job, id=job_id, status='active')
     
     # Check if user has already applied
     if Application.objects.filter(applicant=request.user, job=job).exists():
@@ -370,7 +386,23 @@ def employer_applications(request):
     applications = Application.objects.filter(
         company__created_by=request.user
     ).select_related('job', 'company', 'applicant').annotate(
-        days_since_applied=(timezone.now().date() - F('applied_at__date'))
+        # Note: days_since_applied simplified for SQLite compatibility
+        days_since_applied=Case(
+            When(
+                applied_at__gte=timezone.now() - timedelta(days=1),
+                then=0
+            ),
+            When(
+                applied_at__gte=timezone.now() - timedelta(days=7),
+                then=1
+            ),
+            When(
+                applied_at__gte=timezone.now() - timedelta(days=30),
+                then=2
+            ),
+            default=3,
+            output_field=IntegerField()
+        )
     ).order_by('-applied_at')
     
     # Apply filters
