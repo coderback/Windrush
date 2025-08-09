@@ -4,6 +4,22 @@ from django.core.validators import RegexValidator
 from django.urls import reverse
 
 
+def get_company_logo_upload_path(instance, filename):
+    """Generate secure upload path for company logo files"""
+    from utils.file_handlers import SecureFileUploadHandler
+    handler = SecureFileUploadHandler()
+    secure_filename = handler.generate_secure_filename(filename)
+    return handler.get_upload_path(secure_filename, 'image')
+
+
+def get_company_banner_upload_path(instance, filename):
+    """Generate secure upload path for company banner files"""
+    from utils.file_handlers import SecureFileUploadHandler
+    handler = SecureFileUploadHandler()
+    secure_filename = handler.generate_secure_filename(filename)
+    return handler.get_upload_path(secure_filename, 'image')
+
+
 class Company(models.Model):
     """
     Company model representing UK visa sponsor companies
@@ -126,13 +142,13 @@ class Company(models.Model):
     
     # Company Profile & Branding
     logo = models.ImageField(
-        upload_to='company_logos/',
+        upload_to=get_company_logo_upload_path,
         null=True,
         blank=True,
         help_text="Company logo image"
     )
     banner_image = models.ImageField(
-        upload_to='company_banners/',
+        upload_to=get_company_banner_upload_path,
         null=True,
         blank=True,
         help_text="Company banner/cover image"
@@ -216,6 +232,18 @@ class Company(models.Model):
             from django.utils.text import slugify
             self.slug = slugify(self.name)
         super().save(*args, **kwargs)
+    
+    @property
+    def logo_url(self):
+        """Get secure URL for company logo"""
+        from utils.file_handlers import get_file_url
+        return get_file_url(self.logo.name) if self.logo else None
+    
+    @property
+    def banner_image_url(self):
+        """Get secure URL for company banner image"""
+        from utils.file_handlers import get_file_url
+        return get_file_url(self.banner_image.name) if self.banner_image else None
 
 
 class CompanyReview(models.Model):

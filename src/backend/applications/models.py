@@ -1,6 +1,31 @@
 from django.db import models
 from django.utils.translation import gettext_lazy as _
 from django.core.validators import FileExtensionValidator
+from utils.file_handlers import get_file_url
+
+
+def get_cv_upload_path(instance, filename):
+    """Generate secure upload path for CV files"""
+    from utils.file_handlers import SecureFileUploadHandler
+    handler = SecureFileUploadHandler()
+    secure_filename = handler.generate_secure_filename(filename, instance.applicant_id)
+    return handler.get_upload_path(secure_filename, 'cv')
+
+
+def get_cover_letter_upload_path(instance, filename):
+    """Generate secure upload path for cover letter files"""
+    from utils.file_handlers import SecureFileUploadHandler
+    handler = SecureFileUploadHandler()
+    secure_filename = handler.generate_secure_filename(filename, instance.applicant_id)
+    return handler.get_upload_path(secure_filename, 'cover_letter')
+
+
+def get_portfolio_upload_path(instance, filename):
+    """Generate secure upload path for portfolio files"""
+    from utils.file_handlers import SecureFileUploadHandler
+    handler = SecureFileUploadHandler()
+    secure_filename = handler.generate_secure_filename(filename, instance.applicant_id)
+    return handler.get_upload_path(secure_filename, 'portfolio')
 
 
 class Application(models.Model):
@@ -81,19 +106,19 @@ class Application(models.Model):
     
     # Documents
     cv_file = models.FileField(
-        upload_to='applications/cvs/%Y/%m/',
+        upload_to=get_cv_upload_path,
         validators=[FileExtensionValidator(allowed_extensions=['pdf', 'doc', 'docx'])],
         help_text="CV/Resume file"
     )
     cover_letter_file = models.FileField(
-        upload_to='applications/cover_letters/%Y/%m/',
+        upload_to=get_cover_letter_upload_path,
         validators=[FileExtensionValidator(allowed_extensions=['pdf', 'doc', 'docx'])],
         null=True,
         blank=True,
         help_text="Optional separate cover letter file"
     )
     portfolio_file = models.FileField(
-        upload_to='applications/portfolios/%Y/%m/',
+        upload_to=get_portfolio_upload_path,
         validators=[FileExtensionValidator(allowed_extensions=['pdf', 'zip', 'rar'])],
         null=True,
         blank=True,
@@ -284,6 +309,21 @@ class Application(models.Model):
         """Calculate days since application was submitted"""
         from django.utils import timezone
         return (timezone.now() - self.applied_at).days
+    
+    @property
+    def cv_file_url(self):
+        """Get secure URL for CV file"""
+        return get_file_url(self.cv_file.name) if self.cv_file else None
+    
+    @property
+    def cover_letter_file_url(self):
+        """Get secure URL for cover letter file"""
+        return get_file_url(self.cover_letter_file.name) if self.cover_letter_file else None
+    
+    @property
+    def portfolio_file_url(self):
+        """Get secure URL for portfolio file"""
+        return get_file_url(self.portfolio_file.name) if self.portfolio_file else None
 
 
 class ApplicationStatusHistory(models.Model):

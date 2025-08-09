@@ -1,9 +1,11 @@
 from rest_framework import serializers
 from django.core.files.uploadedfile import UploadedFile
+from django.core.exceptions import ValidationError as DjangoValidationError
 from .models import Application, ApplicationStatusHistory, ApplicationMessage
 from jobs.serializers import JobListSerializer
 from companies.serializers import CompanyListSerializer
 from accounts.serializers import UserProfileSerializer
+from utils.file_handlers import SecureFileUploadHandler
 
 
 class ApplicationListSerializer(serializers.ModelSerializer):
@@ -61,21 +63,15 @@ class ApplicationCreateSerializer(serializers.ModelSerializer):
         ]
     
     def validate_cv_file(self, value):
-        """Validate CV file"""
+        """Validate CV file using secure file handler"""
         if not value:
             raise serializers.ValidationError("CV file is required")
         
-        # Check file size (10MB limit)
-        if value.size > 10 * 1024 * 1024:
-            raise serializers.ValidationError("CV file size cannot exceed 10MB")
-        
-        # Check file type
-        allowed_types = ['pdf', 'doc', 'docx']
-        file_extension = value.name.split('.')[-1].lower()
-        if file_extension not in allowed_types:
-            raise serializers.ValidationError(
-                f"Invalid file type. Allowed types: {', '.join(allowed_types)}"
-            )
+        try:
+            handler = SecureFileUploadHandler()
+            handler.validate_file(value, 'cv')
+        except DjangoValidationError as e:
+            raise serializers.ValidationError(str(e))
         
         return value
     
@@ -132,13 +128,15 @@ class SpeculativeApplicationCreateSerializer(serializers.ModelSerializer):
         ]
     
     def validate_cv_file(self, value):
-        """Validate CV file"""
+        """Validate CV file using secure file handler"""
         if not value:
             raise serializers.ValidationError("CV file is required")
         
-        # Check file size (10MB limit)
-        if value.size > 10 * 1024 * 1024:
-            raise serializers.ValidationError("CV file size cannot exceed 10MB")
+        try:
+            handler = SecureFileUploadHandler()
+            handler.validate_file(value, 'cv')
+        except DjangoValidationError as e:
+            raise serializers.ValidationError(str(e))
         
         return value
     

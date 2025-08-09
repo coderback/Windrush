@@ -3,6 +3,14 @@ from django.db import models
 from django.utils.translation import gettext_lazy as _
 
 
+def get_cv_upload_path(instance, filename):
+    """Generate secure upload path for user CV files"""
+    from utils.file_handlers import SecureFileUploadHandler
+    handler = SecureFileUploadHandler()
+    secure_filename = handler.generate_secure_filename(filename, instance.user_id)
+    return handler.get_upload_path(secure_filename, 'cv')
+
+
 class User(AbstractUser):
     """
     Custom User model for Windrush platform
@@ -126,7 +134,7 @@ class JobSeekerProfile(models.Model):
     
     # CV/Resume files
     primary_cv = models.FileField(
-        upload_to='cvs/',
+        upload_to=get_cv_upload_path,
         null=True,
         blank=True,
         help_text='Primary CV file'
@@ -141,3 +149,9 @@ class JobSeekerProfile(models.Model):
         
     def __str__(self):
         return f"{self.user.full_name} - Job Seeker Profile"
+    
+    @property
+    def primary_cv_url(self):
+        """Get secure URL for primary CV file"""
+        from utils.file_handlers import get_file_url
+        return get_file_url(self.primary_cv.name) if self.primary_cv else None

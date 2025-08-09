@@ -122,6 +122,28 @@ STATIC_ROOT = BASE_DIR / 'staticfiles'
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
 
+# File Upload Configuration
+FILE_UPLOAD_MAX_MEMORY_SIZE = 5242880  # 5MB
+DATA_UPLOAD_MAX_MEMORY_SIZE = 5242880  # 5MB
+FILE_UPLOAD_PERMISSIONS = 0o644
+
+# Security settings for file uploads
+SECURE_FILE_UPLOAD_PATH = MEDIA_ROOT / 'secure'
+ALLOWED_FILE_EXTENSIONS = {
+    'cv': ['pdf', 'doc', 'docx'],
+    'cover_letter': ['pdf', 'doc', 'docx'],
+    'portfolio': ['pdf', 'zip', 'rar'],
+    'image': ['jpg', 'jpeg', 'png', 'gif']
+}
+
+# Maximum file sizes (in bytes)
+MAX_FILE_SIZES = {
+    'cv': 10 * 1024 * 1024,  # 10MB
+    'cover_letter': 10 * 1024 * 1024,  # 10MB
+    'portfolio': 50 * 1024 * 1024,  # 50MB
+    'image': 5 * 1024 * 1024,  # 5MB
+}
+
 # Default primary key field type
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
