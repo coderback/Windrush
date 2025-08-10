@@ -5,10 +5,18 @@ from django.utils.translation import gettext_lazy as _
 
 def get_cv_upload_path(instance, filename):
     """Generate secure upload path for user CV files"""
-    from utils.file_handlers import SecureFileUploadHandler
-    handler = SecureFileUploadHandler()
-    secure_filename = handler.generate_secure_filename(filename, instance.user_id)
-    return handler.get_upload_path(secure_filename, 'cv')
+    try:
+        from utils.file_handlers import SecureFileUploadHandler
+        handler = SecureFileUploadHandler()
+        secure_filename = handler.generate_secure_filename(filename, instance.user_id)
+        return handler.get_upload_path(secure_filename, 'cv')
+    except ImportError:
+        # Fallback to simple path generation
+        import uuid
+        from datetime import datetime
+        date_path = datetime.now().strftime('%Y/%m')
+        secure_name = str(uuid.uuid4())
+        return f"uploads/cv/{date_path}/user_{instance.user_id}_{secure_name}_{filename}"
 
 
 class User(AbstractUser):
@@ -153,5 +161,12 @@ class JobSeekerProfile(models.Model):
     @property
     def primary_cv_url(self):
         """Get secure URL for primary CV file"""
-        from utils.file_handlers import get_file_url
-        return get_file_url(self.primary_cv.name) if self.primary_cv else None
+        if not self.primary_cv:
+            return None
+        try:
+            from utils.file_handlers import get_file_url
+            return get_file_url(self.primary_cv.name)
+        except ImportError:
+            # Fallback to default storage URL
+            from django.core.files.storage import default_storage
+            return default_storage.url(self.primary_cv.name)

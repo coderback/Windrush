@@ -16,6 +16,9 @@ RUN apt-get update \
         libpq-dev \
         gettext \
         git \
+        libmagic1 \
+        libmagic-dev \
+        file \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python dependencies

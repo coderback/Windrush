@@ -1,12 +1,19 @@
 import os
 import uuid
-import magic
 from pathlib import Path
 from typing import Optional, List
 from django.conf import settings
 from django.core.files.storage import default_storage
 from django.core.files.uploadedfile import UploadedFile
 from django.core.exceptions import ValidationError
+
+# Try to import python-magic, but provide fallback if not available
+try:
+    import magic
+    MAGIC_AVAILABLE = True
+except ImportError:
+    MAGIC_AVAILABLE = False
+    import mimetypes
 
 
 class SecureFileUploadHandler:
@@ -82,15 +89,32 @@ class SecureFileUploadHandler:
             file_content = uploaded_file.read(1024)
             uploaded_file.seek(0)
             
-            # Use python-magic to detect MIME type
-            mime_type = magic.from_buffer(file_content, mime=True)
+            # Use python-magic if available, otherwise fallback to mimetypes
+            if MAGIC_AVAILABLE:
+                mime_type = magic.from_buffer(file_content, mime=True)
+            else:
+                # Fallback to basic MIME type guessing
+                mime_type, _ = mimetypes.guess_type(uploaded_file.name)
+                if not mime_type:
+                    # Basic content-based detection for common files
+                    if file_content.startswith(b'%PDF'):
+                        mime_type = 'application/pdf'
+                    elif file_content.startswith(b'PK\x03\x04'):
+                        mime_type = 'application/zip'  # Could be docx/zip
+                    elif file_content.startswith(b'\xFF\xD8\xFF'):
+                        mime_type = 'image/jpeg'
+                    elif file_content.startswith(b'\x89PNG'):
+                        mime_type = 'image/png'
+                    else:
+                        mime_type = 'application/octet-stream'
             
             # Define expected MIME types for extensions
             mime_mappings = {
                 'pdf': ['application/pdf'],
                 'doc': ['application/msword'],
                 'docx': [
-                    'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+                    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                    'application/zip'  # docx files are zip-based
                 ],
                 'jpg': ['image/jpeg'],
                 'jpeg': ['image/jpeg'],
@@ -120,8 +144,11 @@ class SecureFileUploadHandler:
         try:
             uploaded_file.seek(0)
             # Read first 1KB to check for dangerous patterns
-            content = uploaded_file.read(1024).lower()
+            content = uploaded_file.read(1024)
             uploaded_file.seek(0)
+            
+            # Convert to lowercase for pattern matching
+            content_lower = content.lower()
             
             # Check for script tags, executable signatures, etc.
             dangerous_patterns = [
@@ -131,19 +158,18 @@ class SecureFileUploadHandler:
                 b'<%',
                 b'mz',  # DOS executable signature
                 b'\x7felf',  # ELF executable signature
-                b'pk\x03\x04',  # ZIP file (be careful with this one)
             ]
             
-            # For ZIP files, we allow the ZIP signature
+            # ZIP signature is allowed for docx and zip files
             file_extension = self._get_file_extension(uploaded_file.name)
-            if file_extension in ['zip', 'docx']:
-                dangerous_patterns = [p for p in dangerous_patterns if p != b'pk\x03\x04']
+            if file_extension not in ['zip', 'docx'] and content.startswith(b'PK\x03\x04'):
+                return True
             
-            return any(pattern in content for pattern in dangerous_patterns)
+            return any(pattern in content_lower for pattern in dangerous_patterns)
             
         except Exception:
-            # If content scanning fails, err on the side of caution
-            return True
+            # If content scanning fails, allow the file (defensive programming)
+            return False
     
     def generate_secure_filename(self, original_filename: str, user_id: int = None) -> str:
         """

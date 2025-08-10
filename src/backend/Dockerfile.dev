@@ -19,6 +19,9 @@ RUN apt-get update \
         git \
         curl \
         vim \
+        libmagic1 \
+        libmagic-dev \
+        file \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python dependencies

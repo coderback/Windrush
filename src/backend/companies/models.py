@@ -6,18 +6,34 @@ from django.urls import reverse
 
 def get_company_logo_upload_path(instance, filename):
     """Generate secure upload path for company logo files"""
-    from utils.file_handlers import SecureFileUploadHandler
-    handler = SecureFileUploadHandler()
-    secure_filename = handler.generate_secure_filename(filename)
-    return handler.get_upload_path(secure_filename, 'image')
+    try:
+        from utils.file_handlers import SecureFileUploadHandler
+        handler = SecureFileUploadHandler()
+        secure_filename = handler.generate_secure_filename(filename)
+        return handler.get_upload_path(secure_filename, 'image')
+    except ImportError:
+        # Fallback to simple path generation
+        import uuid
+        from datetime import datetime
+        date_path = datetime.now().strftime('%Y/%m')
+        secure_name = str(uuid.uuid4())
+        return f"uploads/image/{date_path}/{secure_name}_{filename}"
 
 
 def get_company_banner_upload_path(instance, filename):
     """Generate secure upload path for company banner files"""
-    from utils.file_handlers import SecureFileUploadHandler
-    handler = SecureFileUploadHandler()
-    secure_filename = handler.generate_secure_filename(filename)
-    return handler.get_upload_path(secure_filename, 'image')
+    try:
+        from utils.file_handlers import SecureFileUploadHandler
+        handler = SecureFileUploadHandler()
+        secure_filename = handler.generate_secure_filename(filename)
+        return handler.get_upload_path(secure_filename, 'image')
+    except ImportError:
+        # Fallback to simple path generation
+        import uuid
+        from datetime import datetime
+        date_path = datetime.now().strftime('%Y/%m')
+        secure_name = str(uuid.uuid4())
+        return f"uploads/image/{date_path}/{secure_name}_{filename}"
 
 
 class Company(models.Model):
@@ -236,14 +252,26 @@ class Company(models.Model):
     @property
     def logo_url(self):
         """Get secure URL for company logo"""
-        from utils.file_handlers import get_file_url
-        return get_file_url(self.logo.name) if self.logo else None
+        if not self.logo:
+            return None
+        try:
+            from utils.file_handlers import get_file_url
+            return get_file_url(self.logo.name)
+        except ImportError:
+            from django.core.files.storage import default_storage
+            return default_storage.url(self.logo.name)
     
     @property
     def banner_image_url(self):
         """Get secure URL for company banner image"""
-        from utils.file_handlers import get_file_url
-        return get_file_url(self.banner_image.name) if self.banner_image else None
+        if not self.banner_image:
+            return None
+        try:
+            from utils.file_handlers import get_file_url
+            return get_file_url(self.banner_image.name)
+        except ImportError:
+            from django.core.files.storage import default_storage
+            return default_storage.url(self.banner_image.name)
 
 
 class CompanyReview(models.Model):

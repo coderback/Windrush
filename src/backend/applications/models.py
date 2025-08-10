@@ -1,31 +1,65 @@
 from django.db import models
 from django.utils.translation import gettext_lazy as _
 from django.core.validators import FileExtensionValidator
-from utils.file_handlers import get_file_url
+
+# Import file handler functions with fallback
+try:
+    from utils.file_handlers import get_file_url
+except ImportError:
+    def get_file_url(file_path):
+        """Fallback function for getting file URL"""
+        from django.core.files.storage import default_storage
+        if file_path and default_storage.exists(file_path):
+            return default_storage.url(file_path)
+        return None
 
 
 def get_cv_upload_path(instance, filename):
     """Generate secure upload path for CV files"""
-    from utils.file_handlers import SecureFileUploadHandler
-    handler = SecureFileUploadHandler()
-    secure_filename = handler.generate_secure_filename(filename, instance.applicant_id)
-    return handler.get_upload_path(secure_filename, 'cv')
+    try:
+        from utils.file_handlers import SecureFileUploadHandler
+        handler = SecureFileUploadHandler()
+        secure_filename = handler.generate_secure_filename(filename, instance.applicant_id)
+        return handler.get_upload_path(secure_filename, 'cv')
+    except ImportError:
+        # Fallback to simple path generation
+        import uuid
+        from datetime import datetime
+        date_path = datetime.now().strftime('%Y/%m')
+        secure_name = str(uuid.uuid4())
+        return f"uploads/cv/{date_path}/{secure_name}_{filename}"
 
 
 def get_cover_letter_upload_path(instance, filename):
     """Generate secure upload path for cover letter files"""
-    from utils.file_handlers import SecureFileUploadHandler
-    handler = SecureFileUploadHandler()
-    secure_filename = handler.generate_secure_filename(filename, instance.applicant_id)
-    return handler.get_upload_path(secure_filename, 'cover_letter')
+    try:
+        from utils.file_handlers import SecureFileUploadHandler
+        handler = SecureFileUploadHandler()
+        secure_filename = handler.generate_secure_filename(filename, instance.applicant_id)
+        return handler.get_upload_path(secure_filename, 'cover_letter')
+    except ImportError:
+        # Fallback to simple path generation
+        import uuid
+        from datetime import datetime
+        date_path = datetime.now().strftime('%Y/%m')
+        secure_name = str(uuid.uuid4())
+        return f"uploads/cover_letter/{date_path}/{secure_name}_{filename}"
 
 
 def get_portfolio_upload_path(instance, filename):
     """Generate secure upload path for portfolio files"""
-    from utils.file_handlers import SecureFileUploadHandler
-    handler = SecureFileUploadHandler()
-    secure_filename = handler.generate_secure_filename(filename, instance.applicant_id)
-    return handler.get_upload_path(secure_filename, 'portfolio')
+    try:
+        from utils.file_handlers import SecureFileUploadHandler
+        handler = SecureFileUploadHandler()
+        secure_filename = handler.generate_secure_filename(filename, instance.applicant_id)
+        return handler.get_upload_path(secure_filename, 'portfolio')
+    except ImportError:
+        # Fallback to simple path generation
+        import uuid
+        from datetime import datetime
+        date_path = datetime.now().strftime('%Y/%m')
+        secure_name = str(uuid.uuid4())
+        return f"uploads/portfolio/{date_path}/{secure_name}_{filename}"
 
 
 class Application(models.Model):
