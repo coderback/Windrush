@@ -83,8 +83,15 @@ export default function RegisterForm() {
     setErrors({});
 
     try {
-      const { confirmPassword, ...registerData } = formData;
-      const response = await register(registerData);
+      const { confirmPassword, phone, ...registerData } = formData;
+      // Transform data to match backend API expectations
+      const apiData = {
+        ...registerData,
+        password_confirm: confirmPassword,
+        username: formData.email, // Use email as username
+        user_type: 'job_seeker'
+      };
+      const response = await register(apiData);
       
       // Check if email verification is required
       if (response.verification_required) {

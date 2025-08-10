@@ -94,16 +94,19 @@ export interface LoginCredentials {
 
 export interface RegisterData {
   email: string;
+  username: string;
   password: string;
+  password_confirm: string;
   first_name: string;
   last_name: string;
-  phone?: string;
+  user_type: string;
 }
 
 export interface AuthResponse {
   user: User;
-  token: string;
+  token?: string;
   message: string;
+  verification_required?: boolean;
 }
 
 // API Search Parameters

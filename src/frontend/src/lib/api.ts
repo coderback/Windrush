@@ -124,11 +124,11 @@ class ApiClient {
   }
 
   async getCurrentUser(): Promise<User> {
-    return this.request<User>('/auth/user/');
+    return this.request<User>('/auth/profile/');
   }
 
   async updateProfile(data: Partial<User>): Promise<User> {
-    return this.request<User>('/auth/user/', {
+    return this.request<User>('/auth/profile/', {
       method: 'PATCH',
       body: JSON.stringify(data),
     });
