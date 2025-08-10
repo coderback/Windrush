@@ -9,7 +9,7 @@ interface AuthContextType {
   isLoading: boolean;
   isAuthenticated: boolean;
   login: (credentials: LoginCredentials) => Promise<void>;
-  register: (data: RegisterData) => Promise<void>;
+  register: (data: RegisterData) => Promise<any>;
   logout: () => Promise<void>;
   updateUser: (data: Partial<User>) => Promise<void>;
 }
@@ -60,7 +60,12 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const register = async (data: RegisterData) => {
     try {
       const response = await apiClient.register(data);
-      setUser(response.user);
+      // Only set user if they have a token (email verification not required)
+      // If verification is required, user will be set after email verification
+      if (response.token) {
+        setUser(response.user);
+      }
+      return response; // Return response to handle verification_required flag
     } catch (error) {
       throw error;
     }

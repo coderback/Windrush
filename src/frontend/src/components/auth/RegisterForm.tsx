@@ -84,8 +84,16 @@ export default function RegisterForm() {
 
     try {
       const { confirmPassword, ...registerData } = formData;
-      await register(registerData);
-      router.push('/dashboard');
+      const response = await register(registerData);
+      
+      // Check if email verification is required
+      if (response.verification_required) {
+        // Show success message and redirect to verification info page
+        router.push(`/auth/verify-email?email=${encodeURIComponent(formData.email)}`);
+      } else {
+        // Direct login, go to dashboard
+        router.push('/dashboard');
+      }
     } catch (error) {
       const apiError = error as ApiError & { status?: number };
       

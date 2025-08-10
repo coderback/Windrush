@@ -41,10 +41,17 @@ export default function LoginForm() {
     try {
       await login(formData);
       router.push('/dashboard');
-    } catch (error) {
+    } catch (error: any) {
       const apiError = error as ApiError & { status?: number };
       
-      if (apiError.status === 400 || apiError.status === 401) {
+      // Handle email verification required (403)
+      if (apiError.status === 403 && error.response?.data?.email_verification_required) {
+        const email = error.response.data.email || formData.email;
+        setErrors({ 
+          general: error.response.data.message || 'Please verify your email address.',
+          email_verification: `verification_required:${email}`
+        });
+      } else if (apiError.status === 400 || apiError.status === 401) {
         if (typeof apiError.detail === 'string') {
           setErrors({ general: apiError.detail });
         } else {
@@ -89,6 +96,16 @@ export default function LoginForm() {
           {errors.general && (
             <div className="bg-red-50 border border-red-200 rounded-md p-4">
               <p className="text-sm text-red-600">{errors.general}</p>
+              {errors.email_verification && errors.email_verification.startsWith('verification_required:') && (
+                <div className="mt-3 space-y-2">
+                  <Link
+                    href={`/auth/resend-verification?email=${encodeURIComponent(errors.email_verification.split(':')[1])}`}
+                    className="inline-flex items-center text-sm font-medium text-blue-600 hover:text-blue-500"
+                  >
+                    Resend verification email
+                  </Link>
+                </div>
+              )}
             </div>
           )}
           

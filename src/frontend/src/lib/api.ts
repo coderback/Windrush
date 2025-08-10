@@ -106,7 +106,10 @@ class ApiClient {
       body: JSON.stringify(data),
     });
     
-    this.setToken(response.token);
+    // Only set token if provided (email verification may be required)
+    if (response.token) {
+      this.setToken(response.token);
+    }
     return response;
   }
 
@@ -250,6 +253,43 @@ class ApiClient {
   async withdrawApplication(id: number): Promise<void> {
     await this.request(`/applications/${id}/withdraw/`, {
       method: 'POST',
+    });
+  }
+
+  // Email verification and password reset methods
+  async verifyEmail(token: string): Promise<{ message: string; user: User; token: string }> {
+    const response = await this.request<{ message: string; user: User; token: string }>('/auth/verify-email/', {
+      method: 'POST',
+      body: JSON.stringify({ token }),
+    });
+    
+    // Set the auth token from response
+    this.setToken(response.token);
+    return response;
+  }
+
+  async resendVerification(email: string): Promise<{ message: string }> {
+    return this.request<{ message: string }>('/auth/resend-verification/', {
+      method: 'POST',
+      body: JSON.stringify({ email }),
+    });
+  }
+
+  async requestPasswordReset(email: string): Promise<{ message: string }> {
+    return this.request<{ message: string }>('/auth/password-reset/', {
+      method: 'POST',
+      body: JSON.stringify({ email }),
+    });
+  }
+
+  async confirmPasswordReset(data: {
+    token: string;
+    new_password: string;
+    new_password_confirm: string;
+  }): Promise<{ message: string }> {
+    return this.request<{ message: string }>('/auth/password-reset-confirm/', {
+      method: 'POST',
+      body: JSON.stringify(data),
     });
   }
 
