@@ -38,6 +38,7 @@ def api_root(request):
             'companies': '/api/companies/',
             'jobs': '/api/jobs/',
             'applications': '/api/applications/',
+            'recommendations': '/api/recommendations/',
             'health': '/api/health/',
             'docs': '/api/docs/',
         }
@@ -57,6 +58,7 @@ urlpatterns = [
     path('api/companies/', include('companies.urls')),
     path('api/jobs/', include('jobs.urls')),
     path('api/applications/', include('applications.urls')),
+    path('api/recommendations/', include('recommendations.urls')),
     
     # Django REST framework browsable API
     path('api-auth/', include('rest_framework.urls')),

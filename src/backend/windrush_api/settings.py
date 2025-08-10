@@ -49,6 +49,7 @@ INSTALLED_APPS = [
     'jobs',
     'applications',
     'notifications',
+    'recommendations',
     'utils',
 ]
 

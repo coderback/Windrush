@@ -18,6 +18,18 @@ export default function Home() {
             <div className="flex items-center space-x-4">
               {isAuthenticated ? (
                 <>
+                  <Link
+                    href="/jobs"
+                    className="text-gray-700 hover:text-gray-900 font-medium"
+                  >
+                    Jobs
+                  </Link>
+                  <Link
+                    href="/recommendations"
+                    className="text-gray-700 hover:text-gray-900 font-medium"
+                  >
+                    Recommendations
+                  </Link>
                   <span className="text-gray-700">Welcome, {user?.first_name}!</span>
                   <Link
                     href="/dashboard"

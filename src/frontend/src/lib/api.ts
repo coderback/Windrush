@@ -9,7 +9,12 @@ import {
   JobSearchParams,
   CompanySearchParams,
   PaginatedResponse,
-  ApiError
+  ApiError,
+  UserJobPreference,
+  JobRecommendation,
+  RecommendationStats,
+  GenerateRecommendationsRequest,
+  GenerateRecommendationsResponse
 } from '@/types/api';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
@@ -290,6 +295,59 @@ class ApiClient {
     return this.request<{ message: string }>('/auth/password-reset-confirm/', {
       method: 'POST',
       body: JSON.stringify(data),
+    });
+  }
+
+  // Recommendation Methods
+  async getUserPreferences(): Promise<UserJobPreference> {
+    return this.request<UserJobPreference>('/recommendations/api/preferences/current/');
+  }
+
+  async updateUserPreferences(preferences: Partial<UserJobPreference>): Promise<UserJobPreference> {
+    return this.request<UserJobPreference>('/recommendations/api/preferences/update_preferences/', {
+      method: 'POST',
+      body: JSON.stringify(preferences),
+    });
+  }
+
+  async getRecommendations(): Promise<PaginatedResponse<JobRecommendation>> {
+    return this.request<PaginatedResponse<JobRecommendation>>('/recommendations/api/recommendations/');
+  }
+
+  async getRecommendation(id: number): Promise<JobRecommendation> {
+    return this.request<JobRecommendation>(`/recommendations/api/recommendations/${id}/`);
+  }
+
+  async generateRecommendations(params: GenerateRecommendationsRequest = {}): Promise<GenerateRecommendationsResponse> {
+    return this.request<GenerateRecommendationsResponse>('/recommendations/api/recommendations/generate/', {
+      method: 'POST',
+      body: JSON.stringify(params),
+    });
+  }
+
+  async clickRecommendation(id: number): Promise<{ status: string }> {
+    return this.request<{ status: string }>(`/recommendations/api/recommendations/${id}/click/`, {
+      method: 'POST',
+    });
+  }
+
+  async submitRecommendationFeedback(id: number, feedback: {
+    feedback: 'helpful' | 'not_helpful' | 'not_interested' | 'already_applied';
+    feedback_notes?: string;
+  }): Promise<{ status: string }> {
+    return this.request<{ status: string }>(`/recommendations/api/recommendations/${id}/feedback/`, {
+      method: 'POST',
+      body: JSON.stringify(feedback),
+    });
+  }
+
+  async getRecommendationStats(): Promise<RecommendationStats> {
+    return this.request<RecommendationStats>('/recommendations/api/recommendations/stats/');
+  }
+
+  async clearOldRecommendations(): Promise<{ message: string }> {
+    return this.request<{ message: string }>('/recommendations/api/recommendations/clear/', {
+      method: 'DELETE',
     });
   }
 

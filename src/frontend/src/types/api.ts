@@ -148,6 +148,74 @@ export interface PaginatedResponse<T> {
   results: T[];
 }
 
+// Recommendation Types
+export interface UserJobPreference {
+  id: number;
+  preferred_locations: string[];
+  max_commute_distance?: number;
+  open_to_remote: boolean;
+  open_to_hybrid: boolean;
+  preferred_job_types: string[];
+  preferred_industries: string[];
+  experience_level: 'entry' | 'mid' | 'senior' | 'lead' | 'executive';
+  min_salary?: number;
+  max_salary?: number;
+  salary_currency: string;
+  key_skills: string[];
+  avoid_keywords: string[];
+  preferred_company_sizes: string[];
+  avoid_companies: number[];
+  requires_sponsorship: boolean;
+  visa_types_needed: string[];
+  notification_frequency: 'daily' | 'weekly' | 'monthly' | 'disabled';
+  max_recommendations: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface JobRecommendation {
+  id: number;
+  job: Job;
+  match_score: number;
+  match_score_percentage: number;
+  score_breakdown?: {
+    skills: number;
+    location: number;
+    salary: number;
+    company: number;
+    experience: number;
+  };
+  match_reasons: string[];
+  viewed: boolean;
+  clicked: boolean;
+  applied: boolean;
+  feedback?: 'helpful' | 'not_helpful' | 'not_interested' | 'already_applied';
+  feedback_notes?: string;
+  created_at: string;
+}
+
+export interface RecommendationStats {
+  total_recommendations: number;
+  viewed_count: number;
+  clicked_count: number;
+  applied_count: number;
+  feedback_count: number;
+  average_score: number;
+  last_generated?: string;
+  generation_time_ms: number;
+}
+
+export interface GenerateRecommendationsRequest {
+  limit?: number;
+  refresh?: boolean;
+}
+
+export interface GenerateRecommendationsResponse {
+  message: string;
+  count: number;
+  recommendations: JobRecommendation[];
+}
+
 // API Error Response
 export interface ApiError {
   detail?: string;
