@@ -1,7 +1,7 @@
 from rest_framework import serializers
 from django.contrib.auth.password_validation import validate_password
 from django.contrib.auth import authenticate
-from .models import User, JobSeekerProfile
+from .models import User, JobSeekerProfile, EmailVerificationToken, PasswordResetToken
 
 
 class UserRegistrationSerializer(serializers.ModelSerializer):
@@ -167,13 +167,39 @@ class PasswordResetRequestSerializer(serializers.Serializer):
 
 class PasswordResetConfirmSerializer(serializers.Serializer):
     """Serializer for password reset confirmation"""
+    token = serializers.UUIDField()
     new_password = serializers.CharField(
         write_only=True,
         validators=[validate_password]
     )
     new_password_confirm = serializers.CharField(write_only=True)
     
+    def validate_token(self, value):
+        """Validate the reset token"""
+        try:
+            token = PasswordResetToken.objects.get(token=value, is_used=False)
+            if token.is_expired():
+                raise serializers.ValidationError("Reset token has expired")
+            return value
+        except PasswordResetToken.DoesNotExist:
+            raise serializers.ValidationError("Invalid or expired reset token")
+    
     def validate(self, attrs):
         if attrs['new_password'] != attrs['new_password_confirm']:
             raise serializers.ValidationError("Passwords don't match")
         return attrs
+
+
+class EmailVerificationSerializer(serializers.Serializer):
+    """Serializer for email verification"""
+    token = serializers.UUIDField()
+    
+    def validate_token(self, value):
+        """Validate the verification token"""
+        try:
+            token = EmailVerificationToken.objects.get(token=value, is_used=False)
+            if token.is_expired():
+                raise serializers.ValidationError("Verification token has expired")
+            return value
+        except EmailVerificationToken.DoesNotExist:
+            raise serializers.ValidationError("Invalid or expired verification token")

@@ -8,13 +8,14 @@ from django.views.decorators.csrf import csrf_exempt
 from django.shortcuts import get_object_or_404
 from django.http import JsonResponse
 
-from .models import User, JobSeekerProfile
+from .models import User, JobSeekerProfile, EmailVerificationToken, PasswordResetToken
 from .serializers import (
     UserRegistrationSerializer, UserLoginSerializer, UserProfileSerializer,
     JobSeekerProfileSerializer, JobSeekerProfileCreateUpdateSerializer,
     ChangePasswordSerializer, PasswordResetRequestSerializer,
-    PasswordResetConfirmSerializer
+    PasswordResetConfirmSerializer, EmailVerificationSerializer
 )
+from .email_service import EmailService
 
 
 def auth_root(request):
@@ -47,17 +48,24 @@ class UserRegistrationView(generics.CreateAPIView):
         serializer.is_valid(raise_exception=True)
         user = serializer.save()
         
-        # Create auth token
-        token, created = Token.objects.get_or_create(user=user)
+        # User starts unverified
+        user.is_verified = False
+        user.save()
+        
+        # Create verification token
+        verification_token = EmailVerificationToken.objects.create(user=user)
+        
+        # Send verification email
+        EmailService.send_verification_email(user, verification_token)
         
         # Create job seeker profile if user type is job_seeker
         if user.user_type == 'job_seeker':
             JobSeekerProfile.objects.create(user=user)
         
         return Response({
-            'message': 'Registration successful',
+            'message': 'Registration successful. Please check your email to verify your account.',
             'user': UserProfileSerializer(user).data,
-            'token': token.key
+            'verification_required': True
         }, status=status.HTTP_201_CREATED)
 
 
@@ -71,6 +79,15 @@ class UserLoginView(generics.GenericAPIView):
         serializer.is_valid(raise_exception=True)
         
         user = serializer.validated_data['user']
+        
+        # Check if email is verified
+        if not user.is_verified:
+            return Response({
+                'message': 'Please verify your email address before logging in.',
+                'email_verification_required': True,
+                'email': user.email
+            }, status=status.HTTP_403_FORBIDDEN)
+        
         login(request, user)
         
         # Get or create token
@@ -158,13 +175,17 @@ class PasswordResetRequestView(generics.GenericAPIView):
         serializer.is_valid(raise_exception=True)
         
         email = serializer.validated_data['email']
+        user = User.objects.get(email=email)
         
-        # In a real implementation, you would:
-        # 1. Generate a reset token
-        # 2. Send email with reset link
-        # 3. Store token with expiry
+        # Invalidate any existing reset tokens
+        PasswordResetToken.objects.filter(user=user, is_used=False).update(is_used=True)
         
-        # For now, we'll just return success
+        # Create new reset token
+        reset_token = PasswordResetToken.objects.create(user=user)
+        
+        # Send reset email
+        EmailService.send_password_reset_email(user, reset_token)
+        
         return Response({
             'message': f'Password reset instructions sent to {email}'
         })
@@ -176,17 +197,32 @@ class PasswordResetConfirmView(generics.GenericAPIView):
     permission_classes = [permissions.AllowAny]
     
     def post(self, request, *args, **kwargs):
-        # In a real implementation, you would:
-        # 1. Validate the reset token from URL params
-        # 2. Check if token is not expired
-        # 3. Reset the password
-        
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         
-        # For now, just return success
+        token_value = serializer.validated_data['token']
+        new_password = serializer.validated_data['new_password']
+        
+        # Get the token
+        reset_token = PasswordResetToken.objects.get(token=token_value, is_used=False)
+        user = reset_token.user
+        
+        # Reset password
+        user.set_password(new_password)
+        user.save()
+        
+        # Mark token as used
+        reset_token.is_used = True
+        reset_token.save()
+        
+        # Delete all user tokens to force re-login
+        Token.objects.filter(user=user).delete()
+        
+        # Send confirmation email
+        EmailService.send_password_reset_confirmation_email(user)
+        
         return Response({
-            'message': 'Password reset successful'
+            'message': 'Password reset successful. Please login with your new password.'
         })
 
 
@@ -280,38 +316,70 @@ def delete_account_view(request):
 
 
 @api_view(['POST'])
-@permission_classes([permissions.IsAuthenticated])
+@permission_classes([permissions.AllowAny])
 def verify_email_view(request):
-    """Verify user email"""
-    user = request.user
+    """Verify user email with token"""
+    serializer = EmailVerificationSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
     
-    # In a real implementation, you would:
-    # 1. Check verification token from request
-    # 2. Validate token
-    # 3. Mark email as verified
+    token_value = serializer.validated_data['token']
     
+    # Get the token
+    verification_token = EmailVerificationToken.objects.get(token=token_value, is_used=False)
+    user = verification_token.user
+    
+    # Mark email as verified
     user.is_verified = True
     user.save()
     
+    # Mark token as used
+    verification_token.is_used = True
+    verification_token.save()
+    
+    # Create auth token for immediate login
+    auth_token, created = Token.objects.get_or_create(user=user)
+    
+    # Send welcome email
+    EmailService.send_welcome_email(user)
+    
     return Response({
-        'message': 'Email verified successfully'
+        'message': 'Email verified successfully! You are now logged in.',
+        'user': UserProfileSerializer(user).data,
+        'token': auth_token.key
     })
 
 
 @api_view(['POST'])
-@permission_classes([permissions.IsAuthenticated])
+@permission_classes([permissions.AllowAny])
 def resend_verification_email_view(request):
     """Resend email verification"""
-    user = request.user
+    email = request.data.get('email')
+    
+    if not email:
+        return Response({
+            'message': 'Email address is required'
+        }, status=status.HTTP_400_BAD_REQUEST)
+    
+    try:
+        user = User.objects.get(email=email)
+    except User.DoesNotExist:
+        return Response({
+            'message': 'No user found with this email address'
+        }, status=status.HTTP_400_BAD_REQUEST)
     
     if user.is_verified:
         return Response({
             'message': 'Email is already verified'
         }, status=status.HTTP_400_BAD_REQUEST)
     
-    # In a real implementation, you would:
-    # 1. Generate new verification token
-    # 2. Send verification email
+    # Invalidate existing tokens
+    EmailVerificationToken.objects.filter(user=user, is_used=False).update(is_used=True)
+    
+    # Create new verification token
+    verification_token = EmailVerificationToken.objects.create(user=user)
+    
+    # Send verification email
+    EmailService.send_verification_email(user, verification_token)
     
     return Response({
         'message': 'Verification email sent'

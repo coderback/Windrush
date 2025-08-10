@@ -174,3 +174,44 @@ REST_FRAMEWORK['DEFAULT_AUTHENTICATION_CLASSES'] = [
     'rest_framework.authentication.TokenAuthentication',
     'rest_framework.authentication.SessionAuthentication',
 ]
+
+# Email Configuration
+EMAIL_BACKEND = config(
+    'EMAIL_BACKEND', 
+    default='django.core.mail.backends.console.EmailBackend'
+)
+
+# Email settings for production (using environment variables)
+EMAIL_HOST = config('EMAIL_HOST', default='smtp.gmail.com')
+EMAIL_PORT = config('EMAIL_PORT', default=587, cast=int)
+EMAIL_USE_TLS = config('EMAIL_USE_TLS', default=True, cast=bool)
+EMAIL_HOST_USER = config('EMAIL_HOST_USER', default='')
+EMAIL_HOST_PASSWORD = config('EMAIL_HOST_PASSWORD', default='')
+DEFAULT_FROM_EMAIL = config('DEFAULT_FROM_EMAIL', default='noreply@windrush.co.uk')
+
+# Frontend URL for email links
+FRONTEND_URL = config('FRONTEND_URL', default='http://localhost:3000')
+
+# Logging configuration
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'handlers': {
+        'file': {
+            'level': 'INFO',
+            'class': 'logging.FileHandler',
+            'filename': 'windrush.log',
+        },
+        'console': {
+            'level': 'INFO',
+            'class': 'logging.StreamHandler',
+        },
+    },
+    'loggers': {
+        'accounts.email_service': {
+            'handlers': ['file', 'console'],
+            'level': 'INFO',
+            'propagate': True,
+        },
+    },
+}

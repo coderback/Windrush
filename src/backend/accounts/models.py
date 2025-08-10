@@ -1,6 +1,9 @@
 from django.contrib.auth.models import AbstractUser
 from django.db import models
 from django.utils.translation import gettext_lazy as _
+import uuid
+from datetime import timedelta
+from django.utils import timezone
 
 
 def get_cv_upload_path(instance, filename):
@@ -170,3 +173,61 @@ class JobSeekerProfile(models.Model):
             # Fallback to default storage URL
             from django.core.files.storage import default_storage
             return default_storage.url(self.primary_cv.name)
+
+
+class EmailVerificationToken(models.Model):
+    """Email verification tokens for user registration"""
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='email_verification_tokens'
+    )
+    token = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+    is_used = models.BooleanField(default=False)
+    
+    class Meta:
+        verbose_name = _('Email Verification Token')
+        verbose_name_plural = _('Email Verification Tokens')
+        ordering = ['-created_at']
+    
+    def save(self, *args, **kwargs):
+        if not self.expires_at:
+            self.expires_at = timezone.now() + timedelta(hours=24)
+        super().save(*args, **kwargs)
+    
+    def is_expired(self):
+        return timezone.now() > self.expires_at
+    
+    def __str__(self):
+        return f"Email verification token for {self.user.email}"
+
+
+class PasswordResetToken(models.Model):
+    """Password reset tokens"""
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='password_reset_tokens'
+    )
+    token = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+    is_used = models.BooleanField(default=False)
+    
+    class Meta:
+        verbose_name = _('Password Reset Token')
+        verbose_name_plural = _('Password Reset Tokens')
+        ordering = ['-created_at']
+    
+    def save(self, *args, **kwargs):
+        if not self.expires_at:
+            self.expires_at = timezone.now() + timedelta(hours=1)
+        super().save(*args, **kwargs)
+    
+    def is_expired(self):
+        return timezone.now() > self.expires_at
+    
+    def __str__(self):
+        return f"Password reset token for {self.user.email}"
