@@ -20,7 +20,7 @@ SKILL_EXPOSURE: dict[str, float] = {
     # Programming languages
     "python": 0.65, "javascript": 0.62, "typescript": 0.60, "java": 0.58,
     "c++": 0.50, "c#": 0.55, "go": 0.52, "rust": 0.45, "ruby": 0.60,
-    "php": 0.62, "swift": 0.52, "kotlin": 0.52, "scala": 0.55, "r": 0.65,
+    "php": 0.62, "swift": 0.52, "kotlin": 0.52, "scala": 0.55, "r language": 0.65,
     # Web frameworks & libraries
     "react": 0.58, "next.js": 0.57, "vue": 0.57, "angular": 0.57,
     "svelte": 0.55, "node.js": 0.60, "express": 0.60, "django": 0.60,
@@ -37,6 +37,13 @@ SKILL_EXPOSURE: dict[str, float] = {
     "deep learning": 0.55, "cnns": 0.55, "transfer learning": 0.55,
     "nlp": 0.55, "computer vision": 0.52, "scikit-learn": 0.62,
     "mlops": 0.52, "llms": 0.50,
+    # Generative / frontier AI — high exposure (these tools ARE the automation)
+    "rag systems": 0.62, "rag": 0.60, "llm workflows": 0.62,
+    "generative models": 0.60, "generative ai": 0.62,
+    "diffusion models": 0.58, "normalizing flows": 0.52,
+    "graph neural networks": 0.55, "gnns": 0.55,
+    "signal processing": 0.48, "explainability in ai": 0.38, "xai": 0.38,
+    "pyspark": 0.62, "spark": 0.60, "agile": 0.45, "scrum": 0.48,
     # Infrastructure & DevOps
     "docker": 0.55, "kubernetes": 0.50, "aws": 0.52, "azure": 0.52,
     "gcp": 0.52, "git": 0.55, "ci/cd": 0.50, "azure devops": 0.52,
@@ -81,9 +88,15 @@ def lookup_by_title(title: str) -> dict:
     if key in SKILL_EXPOSURE:
         return {"occupation_name": title, "overall_exposure": SKILL_EXPOSURE[key]}
 
-    # Partial skill name match (e.g. "Tailwind CSS" matches "tailwind")
+    # Partial skill name match — require the matching key to be a whole word
+    # (avoids "r" matching "rag systems", "workflows", etc.)
+    import re
+    key_words = set(re.split(r'\W+', key))
     for skill_key, exposure in SKILL_EXPOSURE.items():
-        if skill_key in key or key in skill_key:
+        skill_words = set(re.split(r'\W+', skill_key))
+        # Match only if there's a meaningful word overlap (not single-char tokens)
+        overlap = {w for w in key_words & skill_words if len(w) > 1}
+        if overlap:
             return {"occupation_name": title, "overall_exposure": exposure}
 
     # ONET occupation fuzzy match
