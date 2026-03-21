@@ -294,10 +294,17 @@ async def run_apply(job_id: str, cover_letter: str, cv_profile: dict, skill_risk
 
     yield _sse("start", {"message": "Applying..."})
 
+    # Inject skill_risks into the tool executor via closure so generate_skill_roadmap
+    # always gets real data even if Claude fires it in parallel with empty input
+    async def execute_tool_with_context(name: str, tool_input: dict) -> dict:
+        if name == "generate_skill_roadmap" and not tool_input.get("skill_risks"):
+            tool_input = {**tool_input, "skill_risks": skill_risks}
+        return await execute_tool(name, tool_input)
+
     while True:
         response = await client.messages.create(
             model="claude-sonnet-4-6",
-            max_tokens=2048,
+            max_tokens=4096,
             system=SYSTEM_PROMPT,
             tools=TOOLS,
             messages=messages,
@@ -308,7 +315,7 @@ async def run_apply(job_id: str, cover_letter: str, cv_profile: dict, skill_risk
         for block in response.content:
             if block.type == "tool_use":
                 yield _sse("tool_call", {"tool_name": block.name, "tool_input": block.input})
-                result = await execute_tool(block.name, block.input)
+                result = await execute_tool_with_context(block.name, block.input)
                 yield _sse("tool_result", {"tool_name": block.name, "result": result})
                 tool_results.append(
                     {
