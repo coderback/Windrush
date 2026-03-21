@@ -43,11 +43,13 @@ async def apply(
     job_id: str = Form(...),
     cover_letter: str = Form(...),
     cv_profile: str = Form(default="{}"),
+    skill_risks: str = Form(default="[]"),
 ):
     import json
     profile = json.loads(cv_profile)
+    risks = json.loads(skill_risks)
     return StreamingResponse(
-        run_apply(job_id, cover_letter, profile),
+        run_apply(job_id, cover_letter, profile, risks),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

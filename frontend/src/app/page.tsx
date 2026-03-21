@@ -44,6 +44,18 @@ export default function Home() {
     (ev: AgentEvent) => {
       pushEvent(ev);
 
+      // Capture cv_profile from tool *call* inputs (score_job_fit / generate_cover_letter)
+      if (ev.type === "tool_call" && ev.tool_input) {
+        const input = ev.tool_input as Record<string, unknown>;
+        if (
+          (ev.tool_name === "score_job_fit" || ev.tool_name === "generate_cover_letter") &&
+          input.cv_profile &&
+          typeof input.cv_profile === "object"
+        ) {
+          setCvProfile(input.cv_profile as CVProfile);
+        }
+      }
+
       if (ev.type === "tool_result" && ev.tool_name && ev.result) {
         const result = ev.result as Record<string, unknown>;
 
@@ -155,6 +167,7 @@ export default function Home() {
     form.append("job_id", selectedJob.job_id);
     form.append("cover_letter", cl);
     form.append("cv_profile", JSON.stringify(cvProfile ?? {}));
+    form.append("skill_risks", JSON.stringify(skillRisks));
 
     const response = await fetch("/api/apply", { method: "POST", body: form });
     const reader = response.body!.getReader();

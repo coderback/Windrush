@@ -275,17 +275,19 @@ async def run_pipeline(cv_text: str, location: str = "London") -> AsyncGenerator
         messages.append({"role": "user", "content": tool_results})
 
 
-async def run_apply(job_id: str, cover_letter: str, cv_profile: dict) -> AsyncGenerator[str, None]:
+async def run_apply(job_id: str, cover_letter: str, cv_profile: dict, skill_risks: list | None = None) -> AsyncGenerator[str, None]:
     """Short continuation for the apply + roadmap phase after user approval."""
+    skill_risks = skill_risks or []
     messages = [
         {
             "role": "user",
             "content": (
                 f"The user has approved the cover letter. Please:\n"
                 f"1. Call apply_to_job with job_id='{job_id}'\n"
-                f"2. Then call generate_skill_roadmap\n\n"
+                f"2. Then call generate_skill_roadmap using the skill_risks below\n\n"
                 f"Cover letter:\n{cover_letter}\n\n"
-                f"CV Profile:\n{json.dumps(cv_profile)}"
+                f"CV Profile:\n{json.dumps(cv_profile)}\n\n"
+                f"Skill risks (from earlier scoring):\n{json.dumps(skill_risks)}"
             ),
         }
     ]
