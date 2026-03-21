@@ -4,9 +4,12 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="657acfba-7aae-4604-a67f-31eee75bbb05" name="Changes" comment="add skill risk handling to job application process and update API routes">
+    <list default="true" id="657acfba-7aae-4604-a67f-31eee75bbb05" name="Changes" comment="inject skill risks into tool executor for generate_skill_roadmap and increase max_tokens">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/api/app/agent.py" beforeDir="false" afterPath="$PROJECT_DIR$/api/app/agent.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/api/app/job_proxy.py" beforeDir="false" afterPath="$PROJECT_DIR$/api/app/job_proxy.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/api/app/risk_scorer.py" beforeDir="false" afterPath="$PROJECT_DIR$/api/app/risk_scorer.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/data/economic_index.json" beforeDir="false" afterPath="$PROJECT_DIR$/data/economic_index.json" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/scripts/download_economic_index.py" beforeDir="false" afterPath="$PROJECT_DIR$/scripts/download_economic_index.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -105,7 +108,15 @@
       <option name="project" value="LOCAL" />
       <updated>1774093096906</updated>
     </task>
-    <option name="localTasksCounter" value="6" />
+    <task id="LOCAL-00006" summary="inject skill risks into tool executor for generate_skill_roadmap and increase max_tokens">
+      <option name="closed" value="true" />
+      <created>1774097640548</created>
+      <option name="number" value="00006" />
+      <option name="presentableId" value="LOCAL-00006" />
+      <option name="project" value="LOCAL" />
+      <updated>1774097640548</updated>
+    </task>
+    <option name="localTasksCounter" value="7" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -137,7 +148,8 @@
     <MESSAGE value="add initial configuration and components for Windrush career transition advisor" />
     <MESSAGE value="add Docker configuration, environment setup, and economic index data generation" />
     <MESSAGE value="add skill risk handling to job application process and update API routes" />
-    <option name="LAST_COMMIT_MESSAGE" value="add skill risk handling to job application process and update API routes" />
+    <MESSAGE value="inject skill risks into tool executor for generate_skill_roadmap and increase max_tokens" />
+    <option name="LAST_COMMIT_MESSAGE" value="inject skill risks into tool executor for generate_skill_roadmap and increase max_tokens" />
   </component>
   <component name="github-copilot-workspace">
     <instructionFileLocations>

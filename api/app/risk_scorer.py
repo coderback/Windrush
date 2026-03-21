@@ -51,11 +51,26 @@ SKILL_EXPOSURE: dict[str, float] = {
     "project management": 0.38, "stakeholder management": 0.30,
     "communication": 0.25, "leadership": 0.22, "negotiation": 0.28,
     "teaching": 0.22, "coaching": 0.20, "community engagement": 0.18,
-    # Occupation-level titles
-    "full-stack engineer": 0.62, "software engineer": 0.62,
-    "machine learning engineer": 0.60, "data engineer": 0.62,
-    "product manager": 0.42, "ux researcher": 0.28,
+    # Note: occupation-level job titles are intentionally NOT listed here.
+    # They fall through to the ECONOMIC_INDEX ONET lookup below so that
+    # real Anthropic Economic Index data is used for occupation scoring.
 }
+
+
+def occupation_exposure(title: str) -> float:
+    """Return observed_exposure for a job title using the Economic Index.
+    Falls back to 0.5 if no match found."""
+    key = title.lower().strip()
+    best_score: float | None = None
+    best_len = 0
+    for code, data in ECONOMIC_INDEX.items():
+        occ = data.get("occupation_name", "").lower()
+        if key in occ or occ in key:
+            # Prefer the longest (most specific) match
+            if len(occ) > best_len:
+                best_len = len(occ)
+                best_score = float(data.get("overall_exposure", 0.5))
+    return best_score if best_score is not None else 0.5
 
 
 def lookup_by_title(title: str) -> dict:

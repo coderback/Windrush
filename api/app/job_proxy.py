@@ -1,6 +1,9 @@
 import httpx
+from .risk_scorer import occupation_exposure
 
-FIXTURE = [
+# Exposure scores are looked up from the Anthropic Economic Index at import time.
+# The closest ONET occupation match is used for each job title.
+_RAW_JOBS = [
     {
         "job_id": "j1",
         "title": "Climate Project Manager",
@@ -8,7 +11,8 @@ FIXTURE = [
         "location": "London",
         "description": "Lead climate resilience projects across urban infrastructure. Strong project management, stakeholder engagement, and sustainability expertise required.",
         "url": "https://www.arup.com/careers",
-        "exposure_score": 0.25,
+        # ONET: Construction Managers (11-9021) or General and Operations Managers (11-1021)
+        "_onet_hint": "construction managers",
     },
     {
         "job_id": "j2",
@@ -17,7 +21,8 @@ FIXTURE = [
         "location": "London",
         "description": "Help clients navigate AI transformation. Blend of data strategy, change management, and technical communication.",
         "url": "https://www.deloitte.com/uk/careers",
-        "exposure_score": 0.40,
+        # ONET: Management Analysts (13-1111)
+        "_onet_hint": "management analysts",
     },
     {
         "job_id": "j3",
@@ -26,7 +31,8 @@ FIXTURE = [
         "location": "London",
         "description": "Design and deliver community engagement programmes for city-wide initiatives. Strong communication and facilitation skills essential.",
         "url": "https://www.london.gov.uk/about-us/jobs",
-        "exposure_score": 0.20,
+        # ONET: Social and Community Service Managers (11-9151)
+        "_onet_hint": "social and community service managers",
     },
     {
         "job_id": "j4",
@@ -35,7 +41,8 @@ FIXTURE = [
         "location": "London",
         "description": "Research and policy analysis on automation, labour markets, and equitable transition. Economics or social science background preferred.",
         "url": "https://www.ippr.org/join-us",
-        "exposure_score": 0.30,
+        # ONET: Political Scientists (19-3094) or Economists (19-3011)
+        "_onet_hint": "economists",
     },
     {
         "job_id": "j5",
@@ -44,8 +51,16 @@ FIXTURE = [
         "location": "London",
         "description": "Build ML systems for financial products. Python, PyTorch, and cloud deployment experience required.",
         "url": "https://monzo.com/careers",
-        "exposure_score": 0.60,
+        # ONET: Software Developers (15-1252) — closest available
+        "_onet_hint": "software developers",
     },
+]
+
+FIXTURE = [
+    {k: v for k, v in job.items() if k != "_onet_hint"} | {
+        "exposure_score": round(occupation_exposure(job["_onet_hint"]), 3)
+    }
+    for job in _RAW_JOBS
 ]
 
 
