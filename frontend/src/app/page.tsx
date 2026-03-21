@@ -6,6 +6,7 @@ import RiskRadar, { SkillRisk } from "@/components/RiskRadar";
 import JobList, { Job } from "@/components/JobList";
 import CoverLetter from "@/components/CoverLetter";
 import SkillRoadmap, { RoadmapItem } from "@/components/SkillRoadmap";
+import BrowserView from "@/components/BrowserView";
 
 interface CVProfile {
   name?: string;
@@ -23,6 +24,7 @@ type Phase =
   | "streaming"
   | "awaiting_approval"
   | "applying"
+  | "browser"
   | "done";
 
 export default function Home() {
@@ -37,6 +39,13 @@ export default function Home() {
   const [appliedConfirmation, setAppliedConfirmation] = useState("");
   const [dragOver, setDragOver] = useState(false);
   const [pendingCoverLetter, setPendingCoverLetter] = useState("");
+  const [sessionId, setSessionId] = useState("");
+  const [browserScreenshot, setBrowserScreenshot] = useState<string | null>(null);
+  const [browserAction, setBrowserAction] = useState("");
+  const [browserBlocked, setBrowserBlocked] = useState(false);
+  const [browserReason, setBrowserReason] = useState<string | null>(null);
+  const [browserInteractive, setBrowserInteractive] = useState(false);
+  const [showBrowser, setShowBrowser] = useState(false);
 
   const pushEvent = (ev: AgentEvent) => setEvents((prev) => [...prev, ev]);
 
@@ -56,6 +65,34 @@ export default function Home() {
         }
       }
 
+      if (ev.type === "start" && (ev as AgentEvent & { session_id?: string }).session_id) {
+        setSessionId((ev as AgentEvent & { session_id?: string }).session_id!);
+      }
+
+      if (ev.type === "browser_action") {
+        setBrowserAction(ev.action ?? "");
+        if (ev.screenshot) setBrowserScreenshot(ev.screenshot);
+        setBrowserBlocked(false);
+        setBrowserReason(null);
+        setBrowserInteractive(false);
+        setShowBrowser(true);
+        setPhase("browser");
+      }
+
+      if (ev.type === "browser_blocked") {
+        setBrowserAction(ev.action ?? "");
+        if (ev.screenshot) setBrowserScreenshot(ev.screenshot);
+        setBrowserBlocked(true);
+        setBrowserReason(ev.reason ?? null);
+        setBrowserInteractive(!!(ev as AgentEvent & { interactive?: boolean }).interactive);
+        setShowBrowser(true);
+        setPhase("browser");
+      }
+
+      if (ev.type === "tool_call") {
+        setShowBrowser(false);
+      }
+
       if (ev.type === "tool_result" && ev.tool_name && ev.result) {
         const result = ev.result as Record<string, unknown>;
 
@@ -69,22 +106,17 @@ export default function Home() {
           if (ranked.length > 0) setSelectedJob(ranked[0]);
         }
 
+        if (ev.tool_name === "generate_cover_letter" && result.cover_letter) {
+          setPendingCoverLetter(result.cover_letter as string);
+        }
+
+        if (ev.tool_name === "generate_skill_roadmap" && result.items) {
+          setRoadmap(result.items as RoadmapItem[]);
+        }
+
         if (ev.tool_name === "apply_to_job") {
           const r = result as { message?: string };
           setAppliedConfirmation(r.message ?? "Application submitted!");
-        }
-      }
-
-      // Extract cover letter from text events
-      if (ev.type === "text" && ev.text) {
-        const text = ev.text;
-        if (
-          text.includes("Dear") ||
-          text.includes("I am writing") ||
-          text.includes("I am excited") ||
-          text.length > 300
-        ) {
-          setPendingCoverLetter(text);
         }
       }
 
@@ -150,11 +182,8 @@ export default function Home() {
       }
     }
 
-    // After stream ends, show approval if we have a cover letter
-    setPendingCoverLetter((cl) => {
-      if (cl) setCoverLetter(cl);
-      return cl;
-    });
+    setCoverLetter((cl) => cl || "");
+    setPendingCoverLetter((cl) => { if (cl) setCoverLetter(cl); return cl; });
   };
 
   const handleApprove = async () => {
@@ -165,6 +194,7 @@ export default function Home() {
 
     const form = new FormData();
     form.append("job_id", selectedJob.job_id);
+    form.append("job_url", selectedJob.url ?? "");
     form.append("cover_letter", cl);
     form.append("cv_profile", JSON.stringify(cvProfile ?? {}));
     form.append("skill_risks", JSON.stringify(skillRisks));
@@ -338,6 +368,18 @@ export default function Home() {
       </div>
 
       {/* Cover Letter Approval Modal */}
+      {showBrowser && (
+        <BrowserView
+          action={browserAction}
+          screenshot={browserScreenshot}
+          blocked={browserBlocked}
+          reason={browserReason}
+          sessionId={sessionId}
+          interactive={browserInteractive}
+          onInstructionSent={() => setBrowserBlocked(false)}
+        />
+      )}
+
       {showApproval && (
         <CoverLetter
           coverLetter={coverLetter || pendingCoverLetter}

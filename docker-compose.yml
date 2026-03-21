@@ -18,10 +18,23 @@ services:
     build: ./api
     expose: ["8000"]
     environment:
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - GITHUB_TOKEN=${GITHUB_TOKEN}
       - ECONOMIC_INDEX_PATH=/data/economic_index.json
+      - TASK_PENETRATION_PATH=/data/task_penetration.csv
+      - ADZUNA_APP_ID=${ADZUNA_APP_ID}
+      - ADZUNA_API_KEY=${ADZUNA_API_KEY}
     volumes:
       - economic_data:/data:ro
+    depends_on: [jobs-mcp]
+
+  jobs-mcp:
+    build: ./jobs-mcp
+    expose: ["8001"]
+    environment:
+      - ADZUNA_APP_ID=${ADZUNA_APP_ID}
+      - ADZUNA_API_KEY=${ADZUNA_API_KEY}
+      - FASTMCP_HOST=0.0.0.0
+      - FASTMCP_PORT=8001
 
 volumes:
   economic_data:

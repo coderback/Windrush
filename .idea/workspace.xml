@@ -4,9 +4,21 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="657acfba-7aae-4604-a67f-31eee75bbb05" name="Changes" comment="add occupation exposure scoring using the Anthropic Economic Index and update job proxy fixture">
+    <list default="true" id="657acfba-7aae-4604-a67f-31eee75bbb05" name="Changes" comment="update skill exposure scoring with new AI technologies and improve partial match logic">
+      <change beforePath="$PROJECT_DIR$/.env.example" beforeDir="false" afterPath="$PROJECT_DIR$/.env.example" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/api/Dockerfile" beforeDir="false" afterPath="$PROJECT_DIR$/api/Dockerfile" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/api/app/agent.py" beforeDir="false" afterPath="$PROJECT_DIR$/api/app/agent.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/api/app/job_proxy.py" beforeDir="false" afterPath="$PROJECT_DIR$/api/app/job_proxy.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/api/app/main.py" beforeDir="false" afterPath="$PROJECT_DIR$/api/app/main.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/api/app/risk_scorer.py" beforeDir="false" afterPath="$PROJECT_DIR$/api/app/risk_scorer.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/api/requirements.txt" beforeDir="false" afterPath="$PROJECT_DIR$/api/requirements.txt" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/docker-compose.yml" beforeDir="false" afterPath="$PROJECT_DIR$/docker-compose.yml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/frontend/src/app/page.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/frontend/src/app/page.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/frontend/src/components/AgentLog.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/frontend/src/components/AgentLog.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/frontend/src/components/RiskRadar.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/frontend/src/components/RiskRadar.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/nginx/nginx.conf" beforeDir="false" afterPath="$PROJECT_DIR$/nginx/nginx.conf" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/scripts/download_economic_index.py" beforeDir="false" afterPath="$PROJECT_DIR$/scripts/download_economic_index.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -121,7 +133,15 @@
       <option name="project" value="LOCAL" />
       <updated>1774099306815</updated>
     </task>
-    <option name="localTasksCounter" value="8" />
+    <task id="LOCAL-00008" summary="update skill exposure scoring with new AI technologies and improve partial match logic">
+      <option name="closed" value="true" />
+      <created>1774104975328</created>
+      <option name="number" value="00008" />
+      <option name="presentableId" value="LOCAL-00008" />
+      <option name="project" value="LOCAL" />
+      <updated>1774104975330</updated>
+    </task>
+    <option name="localTasksCounter" value="9" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -155,7 +175,8 @@
     <MESSAGE value="add skill risk handling to job application process and update API routes" />
     <MESSAGE value="inject skill risks into tool executor for generate_skill_roadmap and increase max_tokens" />
     <MESSAGE value="add occupation exposure scoring using the Anthropic Economic Index and update job proxy fixture" />
-    <option name="LAST_COMMIT_MESSAGE" value="add occupation exposure scoring using the Anthropic Economic Index and update job proxy fixture" />
+    <MESSAGE value="update skill exposure scoring with new AI technologies and improve partial match logic" />
+    <option name="LAST_COMMIT_MESSAGE" value="update skill exposure scoring with new AI technologies and improve partial match logic" />
   </component>
   <component name="github-copilot-workspace">
     <instructionFileLocations>

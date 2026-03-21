@@ -1,8 +1,12 @@
+import os
 import httpx
 from .risk_scorer import occupation_exposure
 
-# Exposure scores are looked up from the Anthropic Economic Index at import time.
-# The closest ONET occupation match is used for each job title.
+ADZUNA_APP_ID = os.environ.get("ADZUNA_APP_ID", "")
+ADZUNA_API_KEY = os.environ.get("ADZUNA_API_KEY", "")
+ADZUNA_BASE = "https://api.adzuna.com/v1/api/jobs/gb/search/1"
+
+# Fixture fallback — used when Adzuna credentials are absent or request fails
 _RAW_JOBS = [
     {
         "job_id": "j1",
@@ -11,7 +15,6 @@ _RAW_JOBS = [
         "location": "London",
         "description": "Lead climate resilience projects across urban infrastructure. Strong project management, stakeholder engagement, and sustainability expertise required.",
         "url": "https://www.arup.com/careers",
-        # ONET: Construction Managers (11-9021) or General and Operations Managers (11-1021)
         "_onet_hint": "construction managers",
     },
     {
@@ -21,7 +24,6 @@ _RAW_JOBS = [
         "location": "London",
         "description": "Help clients navigate AI transformation. Blend of data strategy, change management, and technical communication.",
         "url": "https://www.deloitte.com/uk/careers",
-        # ONET: Management Analysts (13-1111)
         "_onet_hint": "management analysts",
     },
     {
@@ -31,7 +33,6 @@ _RAW_JOBS = [
         "location": "London",
         "description": "Design and deliver community engagement programmes for city-wide initiatives. Strong communication and facilitation skills essential.",
         "url": "https://www.london.gov.uk/about-us/jobs",
-        # ONET: Social and Community Service Managers (11-9151)
         "_onet_hint": "social and community service managers",
     },
     {
@@ -41,7 +42,6 @@ _RAW_JOBS = [
         "location": "London",
         "description": "Research and policy analysis on automation, labour markets, and equitable transition. Economics or social science background preferred.",
         "url": "https://www.ippr.org/join-us",
-        # ONET: Political Scientists (19-3094) or Economists (19-3011)
         "_onet_hint": "economists",
     },
     {
@@ -51,7 +51,6 @@ _RAW_JOBS = [
         "location": "London",
         "description": "Build ML systems for financial products. Python, PyTorch, and cloud deployment experience required.",
         "url": "https://monzo.com/careers",
-        # ONET: Software Developers (15-1252) — closest available
         "_onet_hint": "software developers",
     },
 ]
@@ -64,19 +63,60 @@ FIXTURE = [
 ]
 
 
+_BROAD_LOCATIONS = {"united kingdom", "uk", "england", "britain", "great britain"}
+
+
+def _normalise_location(location: str) -> str:
+    """Map overly broad UK regions to London so Adzuna finds results."""
+    if location.lower().strip() in _BROAD_LOCATIONS:
+        return "London"
+    return location
+
+
 async def search_jobs(query: str, location: str) -> list[dict]:
-    try:
-        return await _fetch_indeed(query, location)
-    except Exception:
-        return FIXTURE
+    location = _normalise_location(location)
+    if ADZUNA_APP_ID and ADZUNA_API_KEY:
+        try:
+            jobs = await _fetch_adzuna(query, location)
+            if jobs:
+                return jobs
+        except Exception:
+            pass
+    return FIXTURE
 
 
-async def _fetch_indeed(query: str, location: str) -> list[dict]:
-    # Attempt host bridge on port 8099 (optional setup)
-    async with httpx.AsyncClient(timeout=5.0) as client:
-        resp = await client.get(
-            "http://host.docker.internal:8099/search",
-            params={"q": query, "l": location},
-        )
+async def _fetch_adzuna(query: str, location: str) -> list[dict]:
+    params = {
+        "app_id": ADZUNA_APP_ID,
+        "app_key": ADZUNA_API_KEY,
+        "what": query,
+        "where": location,
+        "results_per_page": 5,
+        "content-type": "application/json",
+    }
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        resp = await client.get(ADZUNA_BASE, params=params)
         resp.raise_for_status()
-        return resp.json()
+        data = resp.json()
+
+    seen = set()
+    jobs = []
+    for item in data.get("results", []):
+        title = item.get("title", "")
+        company = item.get("company", {}).get("display_name", "Unknown")
+        dedup_key = (title.lower(), company.lower())
+        if dedup_key in seen:
+            continue
+        seen.add(dedup_key)
+        jobs.append({
+            "job_id": item.get("id", ""),
+            "title": title,
+            "company": company,
+            "location": item.get("location", {}).get("display_name", location),
+            "description": item.get("description", "")[:500],
+            "url": item.get("redirect_url", ""),
+            "salary_min": item.get("salary_min"),
+            "salary_max": item.get("salary_max"),
+            "exposure_score": round(occupation_exposure(title), 3),
+        })
+    return jobs

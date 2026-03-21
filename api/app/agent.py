@@ -1,143 +1,174 @@
-import anthropic
+import asyncio
 import json
+import os
 import time
 from typing import AsyncGenerator
+
+from openai import AsyncOpenAI
 
 from .cv_parser import extract_text
 from .risk_scorer import lookup_onet, lookup_by_title, ECONOMIC_INDEX
 from .job_proxy import search_jobs
+from .browser_agent import apply_with_browser
 
-client = anthropic.AsyncAnthropic()
+client = AsyncOpenAI(
+    base_url="https://models.inference.ai.azure.com",
+    api_key=os.environ.get("GITHUB_TOKEN", ""),
+)
+
+MODEL = "gpt-4o-mini"
 
 SYSTEM_PROMPT = """You are Windrush, an AI career transition advisor helping workers navigate the impact of AI on their careers.
 
-You have access to tools to analyse a CV, score AI-related risk for their skills, find suitable jobs, and generate a cover letter.
+Work through this pipeline in order, passing data between tools explicitly:
 
-Work through this pipeline in order:
-1. extract_cv_profile — parse the CV text into structured data
-2. score_ai_risk — score each extracted skill/occupation for AI exposure
-3. search_jobs — find relevant jobs in the user's location
-4. score_job_fit — rank those jobs against the CV profile
-5. generate_cover_letter — write a personalised cover letter for the top job
+1. extract_cv_profile(cv_text) → returns a profile object with name, skills, job_titles, location
+2. score_ai_risk(skills=[...all skills and job_titles from step 1...])
+3. search_jobs(query=<primary job title from profile>, location=<location from profile>)
+4. score_job_fit(jobs=[...the jobs array from step 3's result...], cv_profile={...the full profile object from step 1...})
+5. generate_cover_letter(job={...the top ranked job from step 4...}, cv_profile={...the full profile object from step 1...})
 
-IMPORTANT: After generate_cover_letter completes, return end_turn. Do NOT call apply_to_job automatically.
-The user must explicitly approve before any application is submitted.
+CRITICAL: Always pass the actual data objects from previous tool results into subsequent tool calls. Never call a tool with empty arguments.
 
-Be thorough but efficient. Use real data from the CV — never generate generic responses."""
+After generate_cover_letter completes, stop. Do NOT call apply_to_job — the user must explicitly approve first."""
 
 TOOLS = [
     {
-        "name": "extract_cv_profile",
-        "description": "Parse CV text into structured profile: name, skills, job titles, experience years, location.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "cv_text": {"type": "string", "description": "Raw CV text to parse"},
-            },
-            "required": ["cv_text"],
-        },
-    },
-    {
-        "name": "score_ai_risk",
-        "description": "Look up AI exposure scores for a list of skills or job titles using the Economic Index.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "skills": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "List of skills or occupation titles to score",
+        "type": "function",
+        "function": {
+            "name": "extract_cv_profile",
+            "description": "Parse CV text into structured profile: name, skills, job titles, experience years, location.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "cv_text": {"type": "string", "description": "Raw CV text to parse"},
                 },
+                "required": ["cv_text"],
             },
-            "required": ["skills"],
         },
     },
     {
-        "name": "search_jobs",
-        "description": "Search for job listings matching a query in a given location.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "query": {"type": "string", "description": "Job search query"},
-                "location": {"type": "string", "description": "Location e.g. 'London'"},
-            },
-            "required": ["query", "location"],
-        },
-    },
-    {
-        "name": "score_job_fit",
-        "description": "Score and rank a list of jobs against a CV profile. Returns jobs sorted by composite score.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "jobs": {
-                    "type": "array",
-                    "items": {"type": "object"},
-                    "description": "List of job objects from search_jobs",
+        "type": "function",
+        "function": {
+            "name": "score_ai_risk",
+            "description": "Look up AI exposure scores for a list of skills or job titles using the Economic Index.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "skills": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "List of skills or occupation titles to score",
+                    },
                 },
-                "cv_profile": {
-                    "type": "object",
-                    "description": "Structured CV profile from extract_cv_profile",
+                "required": ["skills"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_jobs",
+            "description": "Search for job listings matching a query in a given location.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Job search query"},
+                    "location": {"type": "string", "description": "Location e.g. 'London'"},
                 },
+                "required": ["query", "location"],
             },
-            "required": ["jobs", "cv_profile"],
         },
     },
     {
-        "name": "generate_cover_letter",
-        "description": "Generate a personalised cover letter for a specific job, grounded in the CV profile.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "job": {"type": "object", "description": "Target job object"},
-                "cv_profile": {"type": "object", "description": "Structured CV profile"},
-                "tone": {
-                    "type": "string",
-                    "enum": ["professional", "enthusiastic", "concise"],
-                    "description": "Tone of the cover letter",
+        "type": "function",
+        "function": {
+            "name": "score_job_fit",
+            "description": "Score and rank a list of jobs against a CV profile. Returns jobs sorted by composite score.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "jobs": {
+                        "type": "array",
+                        "items": {"type": "object"},
+                        "description": "List of job objects from search_jobs",
+                    },
+                    "cv_profile": {
+                        "type": "object",
+                        "description": "Structured CV profile from extract_cv_profile",
+                    },
                 },
+                "required": ["jobs", "cv_profile"],
             },
-            "required": ["job", "cv_profile"],
         },
     },
     {
-        "name": "apply_to_job",
-        "description": "Submit a job application. Only call this after explicit user approval.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "job_id": {"type": "string"},
-                "cover_letter": {"type": "string"},
-                "cv_profile": {"type": "object"},
-            },
-            "required": ["job_id", "cover_letter", "cv_profile"],
-        },
-    },
-    {
-        "name": "generate_skill_roadmap",
-        "description": "Generate a prioritised skill development roadmap to reduce AI exposure risk.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "skill_risks": {
-                    "type": "array",
-                    "items": {"type": "object"},
-                    "description": "List of scored skill risks",
+        "type": "function",
+        "function": {
+            "name": "generate_cover_letter",
+            "description": "Generate a personalised cover letter for a specific job, grounded in the CV profile.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "job": {"type": "object", "description": "Target job object"},
+                    "cv_profile": {"type": "object", "description": "Structured CV profile"},
+                    "tone": {
+                        "type": "string",
+                        "enum": ["professional", "enthusiastic", "concise"],
+                        "description": "Tone of the cover letter",
+                    },
                 },
-                "target_job": {"type": "object", "description": "Target job to pivot toward"},
+                "required": ["job", "cv_profile"],
             },
-            "required": ["skill_risks"],
         },
     },
     {
-        "name": "lookup_economic_index",
-        "description": "Look up a specific ONET SOC code in the Economic Index for raw exposure data.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "onet_code": {"type": "string", "description": "ONET SOC code e.g. '15-1252.00'"},
+        "type": "function",
+        "function": {
+            "name": "apply_to_job",
+            "description": "Submit a job application. Only call this after explicit user approval.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "job_id": {"type": "string"},
+                    "cover_letter": {"type": "string"},
+                    "cv_profile": {"type": "object"},
+                },
+                "required": ["job_id", "cover_letter", "cv_profile"],
             },
-            "required": ["onet_code"],
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "generate_skill_roadmap",
+            "description": "Generate a prioritised skill development roadmap to reduce AI exposure risk.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "skill_risks": {
+                        "type": "array",
+                        "items": {"type": "object"},
+                        "description": "List of scored skill risks",
+                    },
+                    "target_job": {"type": "object", "description": "Target job to pivot toward"},
+                },
+                "required": ["skill_risks"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "lookup_economic_index",
+            "description": "Look up a specific ONET SOC code in the Economic Index for raw exposure data.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "onet_code": {"type": "string", "description": "ONET SOC code e.g. '15-1252.00'"},
+                },
+                "required": ["onet_code"],
+            },
         },
     },
 ]
@@ -145,24 +176,35 @@ TOOLS = [
 
 async def execute_tool(name: str, tool_input: dict) -> dict:
     if name == "extract_cv_profile":
-        # Claude does the extraction; we just echo back with a structured hint
-        return {
-            "status": "parsed",
-            "cv_text_length": len(tool_input.get("cv_text", "")),
-            "note": "Profile extracted from CV text. Use this data for subsequent tools.",
-            "raw_text_preview": tool_input.get("cv_text", "")[:500],
-        }
+        cv_text = tool_input.get("cv_text", "")
+        resp = await client.chat.completions.create(
+            model=MODEL,
+            response_format={"type": "json_object"},
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "Extract a structured profile from this CV. Return compact JSON with: "
+                        "name, location, skills (array, max 12 most relevant), "
+                        "job_titles (array, max 3), experience_years (number), "
+                        "summary (1 sentence only)."
+                    ),
+                },
+                {"role": "user", "content": cv_text[:4000]},
+            ],
+        )
+        return json.loads(resp.choices[0].message.content)
 
     elif name == "score_ai_risk":
         skills = tool_input.get("skills", [])
         results = []
         for skill in skills:
             data = lookup_by_title(skill)
+            exposure = round(data.get("overall_exposure", 0.5), 2)
             results.append({
                 "skill": skill,
-                "occupation_name": data.get("occupation_name", skill),
-                "overall_exposure": data.get("overall_exposure", 0.5),
-                "risk_level": "high" if data.get("overall_exposure", 0.5) >= 0.5 else "low",
+                "exposure": exposure,
+                "risk": "high" if exposure >= 0.5 else "low",
             })
         return {"skill_risks": results}
 
@@ -191,14 +233,30 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
         job = tool_input.get("job", {})
         cv_profile = tool_input.get("cv_profile", {})
         tone = tool_input.get("tone", "professional")
-        # Claude generates the actual text; we signal readiness
+        resp = await client.chat.completions.create(
+            model=MODEL,
+            messages=[
+                {
+                    "role": "system",
+                    "content": f"Write a {tone} cover letter. Be specific — reference the candidate's actual experience and the job's requirements. 3 paragraphs. No placeholders like [Your Address] or [Date] — omit address headers entirely and start directly with 'Dear Hiring Manager,'.",
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        f"Candidate: {json.dumps(cv_profile)}\n\n"
+                        f"Job: {job.get('title')} at {job.get('company')}\n"
+                        f"Description: {job.get('description', '')}"
+                    ),
+                },
+            ],
+        )
+        letter = resp.choices[0].message.content or ""
         return {
             "status": "ready",
             "job_title": job.get("title", ""),
             "company": job.get("company", ""),
             "candidate_name": cv_profile.get("name", ""),
-            "tone": tone,
-            "instruction": "Generate a compelling cover letter using the CV profile data and job description above.",
+            "cover_letter": letter,
         }
 
     elif name == "apply_to_job":
@@ -210,12 +268,33 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
 
     elif name == "generate_skill_roadmap":
         skill_risks = tool_input.get("skill_risks", [])
-        high_risk = [s for s in skill_risks if s.get("overall_exposure", 0) >= 0.5]
-        return {
-            "status": "generated",
-            "high_risk_skills": len(high_risk),
-            "instruction": "Generate a 6-month roadmap with specific courses and actions to pivot away from high-risk skills.",
-        }
+        target_job = tool_input.get("target_job", {})
+        high_risk = [s for s in skill_risks if s.get("exposure", s.get("overall_exposure", 0)) >= 0.5]
+        resp = await client.chat.completions.create(
+            model=MODEL,
+            response_format={"type": "json_object"},
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "Generate a skill development roadmap. Return JSON with key 'items', an array of objects each with: "
+                        "skill (string), action (string, specific course or project), "
+                        "timeline (one of: '1 month','2 months','3 months','6 months'), "
+                        "resource (string, specific URL or course name). "
+                        "Max 6 items. Focus on reducing AI automation risk and building durable skills."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        f"High-risk skills to pivot away from: {json.dumps(high_risk)}\n"
+                        f"Target job: {json.dumps(target_job)}"
+                    ),
+                },
+            ],
+        )
+        data = json.loads(resp.choices[0].message.content)
+        return {"status": "generated", "items": data.get("items", [])}
 
     elif name == "lookup_economic_index":
         onet_code = tool_input.get("onet_code", "")
@@ -232,104 +311,132 @@ def _sse(event_type: str, data: dict) -> str:
 async def run_pipeline(cv_text: str, location: str = "London") -> AsyncGenerator[str, None]:
     """Yields SSE-formatted strings for each agent step."""
     messages: list[dict] = [
+        {"role": "system", "content": SYSTEM_PROMPT},
         {
             "role": "user",
-            "content": f"Please analyse this CV and find suitable jobs in {location}.\n\nCV:\n{cv_text}",
-        }
+            "content": f"Please analyse this CV and find suitable jobs in {location}.\n\nCV:\n{cv_text[:4000]}",
+        },
     ]
 
     yield _sse("start", {"message": "Pipeline started"})
 
     while True:
-        response = await client.messages.create(
-            model="claude-sonnet-4-6",
-            max_tokens=4096,
-            system=SYSTEM_PROMPT,
+        response = await client.chat.completions.create(
+            model=MODEL,
             tools=TOOLS,
             messages=messages,
         )
 
+        message = response.choices[0].message
+        finish_reason = response.choices[0].finish_reason
+
+        if message.content and message.content.strip():
+            yield _sse("text", {"text": message.content})
+
         tool_results = []
+        if message.tool_calls:
+            for tool_call in message.tool_calls:
+                tool_input = json.loads(tool_call.function.arguments)
+                yield _sse("tool_call", {"tool_name": tool_call.function.name, "tool_input": tool_input})
+                result = await execute_tool(tool_call.function.name, tool_input)
+                yield _sse("tool_result", {"tool_name": tool_call.function.name, "result": result})
+                tool_results.append({
+                    "role": "tool",
+                    "tool_call_id": tool_call.id,
+                    "content": json.dumps(result),
+                })
 
-        for block in response.content:
-            if block.type == "tool_use":
-                yield _sse("tool_call", {"tool_name": block.name, "tool_input": block.input})
-                result = await execute_tool(block.name, block.input)
-                yield _sse("tool_result", {"tool_name": block.name, "result": result})
-                tool_results.append(
-                    {
-                        "type": "tool_result",
-                        "tool_use_id": block.id,
-                        "content": json.dumps(result),
-                    }
-                )
-            elif block.type == "text" and block.text.strip():
-                yield _sse("text", {"text": block.text})
-
-        if response.stop_reason == "end_turn":
+        if finish_reason == "stop" or not message.tool_calls:
             yield _sse("done", {"message": "Pipeline complete"})
             break
 
-        # Push ONE assistant message + ONE user message with ALL tool results
-        messages.append({"role": "assistant", "content": response.content})
-        messages.append({"role": "user", "content": tool_results})
+        messages.append({
+            "role": "assistant",
+            "content": message.content,
+            "tool_calls": [tc.model_dump() for tc in message.tool_calls],
+        })
+        messages.extend(tool_results)
 
 
-async def run_apply(job_id: str, cover_letter: str, cv_profile: dict, skill_risks: list | None = None) -> AsyncGenerator[str, None]:
-    """Short continuation for the apply + roadmap phase after user approval."""
+async def run_apply(
+    job_id: str,
+    job_url: str = "",
+    cover_letter: str = "",
+    cv_profile: dict | None = None,
+    skill_risks: list | None = None,
+    session_id: str = "",
+    instruction_queue: asyncio.Queue | None = None,
+) -> AsyncGenerator[str, None]:
+    """Apply phase: browser automation first, then skill roadmap generation."""
+    cv_profile = cv_profile or {}
     skill_risks = skill_risks or []
+
+    yield _sse("start", {"message": "Starting browser application…", "session_id": session_id})
+
+    # --- Browser phase ---
+    if job_url and instruction_queue is not None:
+        async for step in apply_with_browser(job_url, cv_profile, cover_letter, instruction_queue):
+            event_type = "browser_blocked" if step.get("blocked") else "browser_action"
+            yield _sse(event_type, {
+                "action": step.get("action", ""),
+                "screenshot": step.get("screenshot"),
+                "reason": step.get("reason"),
+            })
+            if step.get("done"):
+                break
+
+    # --- Roadmap phase ---
     messages = [
+        {"role": "system", "content": SYSTEM_PROMPT},
         {
             "role": "user",
             "content": (
-                f"The user has approved the cover letter. Please:\n"
-                f"1. Call apply_to_job with job_id='{job_id}'\n"
-                f"2. Then call generate_skill_roadmap using the skill_risks below\n\n"
-                f"Cover letter:\n{cover_letter}\n\n"
+                f"The browser has submitted the application for job '{job_id}'. "
+                f"Now call generate_skill_roadmap using the skill_risks below.\n\n"
                 f"CV Profile:\n{json.dumps(cv_profile)}\n\n"
                 f"Skill risks (from earlier scoring):\n{json.dumps(skill_risks)}"
             ),
-        }
+        },
     ]
 
-    yield _sse("start", {"message": "Applying..."})
-
-    # Inject skill_risks into the tool executor via closure so generate_skill_roadmap
-    # always gets real data even if Claude fires it in parallel with empty input
     async def execute_tool_with_context(name: str, tool_input: dict) -> dict:
         if name == "generate_skill_roadmap" and not tool_input.get("skill_risks"):
             tool_input = {**tool_input, "skill_risks": skill_risks}
         return await execute_tool(name, tool_input)
 
     while True:
-        response = await client.messages.create(
-            model="claude-sonnet-4-6",
-            max_tokens=4096,
-            system=SYSTEM_PROMPT,
+        response = await client.chat.completions.create(
+            model=MODEL,
             tools=TOOLS,
             messages=messages,
         )
 
+        message = response.choices[0].message
+        finish_reason = response.choices[0].finish_reason
+
+        if message.content and message.content.strip():
+            yield _sse("text", {"text": message.content})
+
         tool_results = []
+        if message.tool_calls:
+            for tool_call in message.tool_calls:
+                tool_input = json.loads(tool_call.function.arguments)
+                yield _sse("tool_call", {"tool_name": tool_call.function.name, "tool_input": tool_input})
+                result = await execute_tool_with_context(tool_call.function.name, tool_input)
+                yield _sse("tool_result", {"tool_name": tool_call.function.name, "result": result})
+                tool_results.append({
+                    "role": "tool",
+                    "tool_call_id": tool_call.id,
+                    "content": json.dumps(result),
+                })
 
-        for block in response.content:
-            if block.type == "tool_use":
-                yield _sse("tool_call", {"tool_name": block.name, "tool_input": block.input})
-                result = await execute_tool_with_context(block.name, block.input)
-                yield _sse("tool_result", {"tool_name": block.name, "result": result})
-                tool_results.append(
-                    {
-                        "type": "tool_result",
-                        "tool_use_id": block.id,
-                        "content": json.dumps(result),
-                    }
-                )
-            elif block.type == "text" and block.text.strip():
-                yield _sse("text", {"text": block.text})
-
-        if response.stop_reason == "end_turn":
+        if finish_reason == "stop" or not message.tool_calls:
             yield _sse("done", {"message": "Done"})
             break
 
-        messages.append({"role": "assistant", "content": response.content})
-        messages.append({"role": "user", "content": tool_results})
+        messages.append({
+            "role": "assistant",
+            "content": message.content,
+            "tool_calls": [tc.model_dump() for tc in message.tool_calls],
+        })
+        messages.extend(tool_results)

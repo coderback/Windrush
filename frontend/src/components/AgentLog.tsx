@@ -3,13 +3,20 @@
 import { useEffect, useRef } from "react";
 
 export interface AgentEvent {
-  type: "start" | "tool_call" | "tool_result" | "text" | "done";
+  type: "start" | "tool_call" | "tool_result" | "text" | "done"
+      | "browser_action" | "browser_blocked";
   timestamp: number;
   tool_name?: string;
   tool_input?: Record<string, unknown>;
   result?: unknown;
   text?: string;
   message?: string;
+  session_id?: string;
+  // Browser events
+  action?: string;
+  screenshot?: string;
+  blocked?: boolean;
+  reason?: string;
 }
 
 interface Props {
@@ -79,6 +86,31 @@ export default function AgentLog({ events }: Props) {
             <div className="text-zinc-300 pl-2 py-0.5 italic border-l-2 border-zinc-700">
               <span className="text-zinc-600 mr-2">[{new Date(ev.timestamp * 1000).toLocaleTimeString()}]</span>
               {ev.text}
+            </div>
+          )}
+
+          {ev.type === "browser_action" && (
+            <div className="border-l-2 border-blue-500 pl-2 py-0.5">
+              <div className="text-blue-400 font-semibold">
+                <span className="text-zinc-600 mr-2">[{new Date(ev.timestamp * 1000).toLocaleTimeString()}]</span>
+                🌐 {ev.action}
+              </div>
+              {ev.screenshot && (
+                <img
+                  src={`data:image/png;base64,${ev.screenshot}`}
+                  alt="Browser step"
+                  className="mt-1 w-40 h-auto rounded border border-zinc-700 opacity-60"
+                />
+              )}
+            </div>
+          )}
+
+          {ev.type === "browser_blocked" && (
+            <div className="border-l-2 border-amber-500 pl-2 py-0.5">
+              <div className="text-amber-400 font-semibold">
+                <span className="text-zinc-600 mr-2">[{new Date(ev.timestamp * 1000).toLocaleTimeString()}]</span>
+                ⏸ {ev.reason ?? ev.action}
+              </div>
             </div>
           )}
 

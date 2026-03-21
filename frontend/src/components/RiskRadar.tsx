@@ -2,9 +2,8 @@
 
 export interface SkillRisk {
   skill: string;
-  occupation_name: string;
-  overall_exposure: number;
-  risk_level: "high" | "low";
+  exposure: number;
+  risk: "high" | "low";
 }
 
 interface Props {
@@ -21,8 +20,8 @@ export default function RiskRadar({ risks }: Props) {
       </h3>
       <div className="space-y-2">
         {risks.map((r, i) => {
-          const pct = Math.round(r.overall_exposure * 100);
-          const isHigh = r.overall_exposure >= 0.35;
+          const pct = Math.round(r.exposure * 100);
+          const isHigh = r.exposure >= 0.35;
           return (
             <div key={i}>
               <div className="flex justify-between text-xs mb-0.5">
