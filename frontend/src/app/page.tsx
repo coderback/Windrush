@@ -193,6 +193,7 @@ export default function Home() {
 
   const isStreaming = phase === "streaming" || phase === "uploading" || phase === "applying";
   const showApproval = phase === "awaiting_approval" && (coverLetter || pendingCoverLetter) && selectedJob;
+  const isApplying = phase === "applying";
 
   return (
     <main className="min-h-screen flex flex-col" style={{ fontFamily: "IBM Plex Mono, monospace" }}>
@@ -331,7 +332,7 @@ export default function Home() {
           company={selectedJob!.company}
           onApprove={handleApprove}
           onSkip={() => { setCoverLetter(""); setPendingCoverLetter(""); setPhase("done"); }}
-          applying={phase === "applying"}
+          applying={isApplying}
         />
       )}
     </main>
