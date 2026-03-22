@@ -1,11 +1,10 @@
 import asyncio
 import json
 import os
-import re
 import time
 from typing import AsyncGenerator
 
-from openai import AsyncOpenAI, BadRequestError
+import anthropic
 
 from .cv_parser import extract_text
 from .risk_scorer import lookup_onet, lookup_by_title, ECONOMIC_INDEX
@@ -18,17 +17,13 @@ from .guardrails import (
     GuardrailViolation,
 )
 
-client = AsyncOpenAI(
-    base_url="https://api.groq.com/openai/v1",
-    api_key=os.environ.get("GROQ_API_KEY", ""),
+anthropic_client = anthropic.AsyncAnthropic(
+    api_key=os.environ.get("ANTHROPIC_API_KEY", ""),
 )
 
-MODEL = "llama-3.3-70b-versatile"
+MODEL = "claude-sonnet-4-6"
 
 SYSTEM_PROMPT = """You are Windrush, an AI career transition advisor helping workers navigate the impact of AI on their careers.
-
-IMPORTANT: You MUST use the structured tool_calls mechanism to call tools. Never write tool calls as plain text like <function=name> or ```json. Always use the API's tool_calls field.
-
 
 Work through this pipeline in order, passing data between tools explicitly:
 
@@ -44,148 +39,124 @@ After generate_cover_letter completes, stop. Do NOT call apply_to_job — the us
 
 TOOLS = [
     {
-        "type": "function",
-        "function": {
-            "name": "extract_cv_profile",
-            "description": "Parse CV text into structured profile: name, skills, job titles, experience years, location.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "cv_text": {"type": "string", "description": "Raw CV text to parse"},
-                },
-                "required": ["cv_text"],
+        "name": "extract_cv_profile",
+        "description": "Parse CV text into structured profile: name, skills, job titles, experience years, location.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "cv_text": {"type": "string", "description": "Raw CV text to parse"},
             },
+            "required": ["cv_text"],
         },
     },
     {
-        "type": "function",
-        "function": {
-            "name": "score_ai_risk",
-            "description": "Look up AI exposure scores for a list of skills or job titles using the Economic Index.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "skills": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "description": "List of skills or occupation titles to score",
-                    },
+        "name": "score_ai_risk",
+        "description": "Look up AI exposure scores for a list of skills or job titles using the Economic Index.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "skills": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "List of skills or occupation titles to score",
                 },
-                "required": ["skills"],
             },
+            "required": ["skills"],
         },
     },
     {
-        "type": "function",
-        "function": {
-            "name": "search_jobs",
-            "description": "Search for job listings matching a query in a given location.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "query": {"type": "string", "description": "Job search query"},
-                    "location": {"type": "string", "description": "Location e.g. 'London'"},
-                },
-                "required": ["query", "location"],
+        "name": "search_jobs",
+        "description": "Search for job listings matching a query in a given location.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Job search query"},
+                "location": {"type": "string", "description": "Location e.g. 'London'"},
             },
+            "required": ["query", "location"],
         },
     },
     {
-        "type": "function",
-        "function": {
-            "name": "score_job_fit",
-            "description": "Score and rank a list of jobs against a CV profile. Returns jobs sorted by composite score.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "jobs": {
-                        "type": "array",
-                        "items": {"type": "object"},
-                        "description": "List of job objects from search_jobs",
-                    },
-                    "cv_profile": {
-                        "type": "object",
-                        "description": "Structured CV profile from extract_cv_profile",
-                    },
+        "name": "score_job_fit",
+        "description": "Score and rank a list of jobs against a CV profile. Returns jobs sorted by composite score.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "jobs": {
+                    "type": "array",
+                    "items": {"type": "object"},
+                    "description": "List of job objects from search_jobs",
                 },
-                "required": ["jobs", "cv_profile"],
+                "cv_profile": {
+                    "type": "object",
+                    "description": "Structured CV profile from extract_cv_profile",
+                },
             },
+            "required": ["jobs", "cv_profile"],
         },
     },
     {
-        "type": "function",
-        "function": {
-            "name": "generate_cover_letter",
-            "description": "Generate a personalised cover letter for a specific job, grounded in the CV profile.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "job": {"type": "object", "description": "Target job object"},
-                    "cv_profile": {"type": "object", "description": "Structured CV profile"},
-                    "tone": {
-                        "type": "string",
-                        "enum": ["professional", "enthusiastic", "concise"],
-                        "description": "Tone of the cover letter",
-                    },
+        "name": "generate_cover_letter",
+        "description": "Generate a personalised cover letter for a specific job, grounded in the CV profile.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "job": {"type": "object", "description": "Target job object"},
+                "cv_profile": {"type": "object", "description": "Structured CV profile"},
+                "tone": {
+                    "type": "string",
+                    "enum": ["professional", "enthusiastic", "concise"],
+                    "description": "Tone of the cover letter",
                 },
-                "required": ["job", "cv_profile"],
             },
+            "required": ["job", "cv_profile"],
         },
     },
     {
-        "type": "function",
-        "function": {
-            "name": "apply_to_job",
-            "description": "Submit a job application. Only call this after explicit user approval.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "job_id": {"type": "string"},
-                    "cover_letter": {"type": "string"},
-                    "cv_profile": {"type": "object"},
-                },
-                "required": ["job_id", "cover_letter", "cv_profile"],
+        "name": "apply_to_job",
+        "description": "Submit a job application. Only call this after explicit user approval.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "job_id": {"type": "string"},
+                "cover_letter": {"type": "string"},
+                "cv_profile": {"type": "object"},
             },
+            "required": ["job_id", "cover_letter", "cv_profile"],
         },
     },
     {
-        "type": "function",
-        "function": {
-            "name": "generate_skill_roadmap",
-            "description": "Generate a prioritised skill development roadmap tailored to the candidate's industry and career goals.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "skill_risks": {
-                        "type": "array",
-                        "items": {"type": "object"},
-                        "description": "List of scored skill risks from score_ai_risk",
-                    },
-                    "cv_profile": {
-                        "type": "object",
-                        "description": "Structured CV profile from extract_cv_profile — used to tailor roadmap to the candidate's industry and background",
-                    },
-                    "target_job_title": {
-                        "type": "string",
-                        "description": "Title of the job the candidate is targeting",
-                    },
+        "name": "generate_skill_roadmap",
+        "description": "Generate a prioritised skill development roadmap tailored to the candidate's industry and career goals.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "skill_risks": {
+                    "type": "array",
+                    "items": {"type": "object"},
+                    "description": "List of scored skill risks from score_ai_risk",
                 },
-                "required": ["skill_risks"],
+                "cv_profile": {
+                    "type": "object",
+                    "description": "Structured CV profile from extract_cv_profile — used to tailor roadmap to the candidate's industry and background",
+                },
+                "target_job_title": {
+                    "type": "string",
+                    "description": "Title of the job the candidate is targeting",
+                },
             },
+            "required": ["skill_risks"],
         },
     },
     {
-        "type": "function",
-        "function": {
-            "name": "lookup_economic_index",
-            "description": "Look up a specific ONET SOC code in the Economic Index for raw exposure data.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "onet_code": {"type": "string", "description": "ONET SOC code e.g. '15-1252.00'"},
-                },
-                "required": ["onet_code"],
+        "name": "lookup_economic_index",
+        "description": "Look up a specific ONET SOC code in the Economic Index for raw exposure data.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "onet_code": {"type": "string", "description": "ONET SOC code e.g. '15-1252.00'"},
             },
+            "required": ["onet_code"],
         },
     },
 ]
@@ -194,26 +165,22 @@ TOOLS = [
 async def execute_tool(name: str, tool_input: dict) -> dict:
     if name == "extract_cv_profile":
         cv_text = tool_input.get("cv_text", "")
-        resp = await client.chat.completions.create(
+        resp = await anthropic_client.messages.create(
             model=MODEL,
-            response_format={"type": "json_object"},
-            messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "Extract a structured profile from this CV. Return compact JSON with: "
-                        "name, email, phone, address (full postal address if present), "
-                        "location (city/region), linkedin (URL or username), github (URL or username), "
-                        "skills (array, max 12 most relevant), job_titles (array, max 3), "
-                        "experience_years (number), summary (1 sentence only), "
-                        "education (array of {institution, degree, dates}), "
-                        "experience (array of {employer, title, dates, summary} — max 5 most recent)."
-                    ),
-                },
-                {"role": "user", "content": cv_text[:4000]},
-            ],
+            max_tokens=2048,
+            system=(
+                "Extract a structured profile from this CV. Return ONLY valid JSON with no markdown fences. "
+                "Include: name, email, phone, address (full postal address if present), "
+                "location (city/region), linkedin (URL or username), github (URL or username), "
+                "skills (array, max 12 most relevant), job_titles (array, max 3), "
+                "experience_years (number), summary (1 sentence only), "
+                "education (array of {institution, degree, dates}), "
+                "experience (array of {employer, title, dates, summary} — max 5 most recent)."
+            ),
+            messages=[{"role": "user", "content": cv_text[:4000]}],
         )
-        return json.loads(resp.choices[0].message.content)
+        text = next((b.text for b in resp.content if b.type == "text"), "{}")
+        return json.loads(text)
 
     elif name == "score_ai_risk":
         skills = tool_input.get("skills", [])
@@ -274,13 +241,11 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
         # Re-inject full description from fixture if not present (stripped from score_job_fit result)
         fixture_by_id = {j["job_id"]: j for j in JOBS_FIXTURE}
         full_job = {**fixture_by_id.get(job.get("job_id", ""), {}), **job}
-        resp = await client.chat.completions.create(
+        resp = await anthropic_client.messages.create(
             model=MODEL,
+            max_tokens=1024,
+            system=f"Write a {tone} cover letter. Be specific — reference the candidate's actual experience and the job's requirements. 3 paragraphs. No placeholders like [Your Address] or [Date] — omit address headers entirely and start directly with 'Dear Hiring Manager,'.",
             messages=[
-                {
-                    "role": "system",
-                    "content": f"Write a {tone} cover letter. Be specific — reference the candidate's actual experience and the job's requirements. 3 paragraphs. No placeholders like [Your Address] or [Date] — omit address headers entirely and start directly with 'Dear Hiring Manager,'.",
-                },
                 {
                     "role": "user",
                     "content": (
@@ -291,7 +256,7 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
                 },
             ],
         )
-        letter = resp.choices[0].message.content or ""
+        letter = next((b.text for b in resp.content if b.type == "text"), "")
         return {
             "status": "ready",
             "job_title": full_job.get("title", ""),
@@ -312,16 +277,12 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
         cv_profile = tool_input.get("cv_profile", {})
         target_job_title = tool_input.get("target_job_title", "")
 
-        # Only flag skills with a confirmed high score — 0.5 is the no-data default,
-        # not a genuine "high risk" signal, so we use a higher threshold.
         confirmed_high = [s for s in skill_risks if s.get("exposure", 0) > 0.65]
         confirmed_low  = [s for s in skill_risks if 0 < s.get("exposure", 0) <= 0.35]
-        # Skills at exactly 0.5 (no ONET data) are omitted from risk labels
         all_skills_str = ", ".join(
             f"{s['skill']} ({int(s.get('exposure',0)*100)}%)" for s in skill_risks
         )
 
-        # Build a concise candidate context for the prompt
         name_str = cv_profile.get("name", "the candidate")
         summary = cv_profile.get("summary", "")
         job_titles = cv_profile.get("job_titles", [])
@@ -332,32 +293,30 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
             f"{e.get('title','')} at {e.get('employer','')}" for e in exp_list[:3]
         )
 
-        resp = await client.chat.completions.create(
+        resp = await anthropic_client.messages.create(
             model=MODEL,
-            response_format={"type": "json_object"},
+            max_tokens=1024,
+            system=(
+                "You are a career coach specialising in AI-resilient career development. "
+                "Given a candidate's background, generate a personalised skill development roadmap. "
+                "Return ONLY valid JSON with no markdown fences. "
+                "JSON key 'items', an array of exactly 6 objects each with: "
+                "skill (string — the skill to develop), "
+                "reason (string — one sentence explaining WHY this skill matters for their specific industry/role), "
+                "action (string — a concrete task: name a specific course, project, certification or open-source contribution), "
+                "timeline (one of: '1 month','2 months','3 months','6 months'), "
+                "resource (string — specific course name or platform). "
+                "STRICT RULES: "
+                "1. Every recommendation must be directly relevant to the candidate's industry and target role. "
+                "2. Build ON their existing technical strengths — deepen and extend, do not replace them. "
+                "3. For each skill at confirmed high AI risk, suggest a way to apply it at a level AI cannot yet reach "
+                "(novel research, production systems, domain-specific expertise, technical leadership). "
+                "4. Do NOT recommend generic soft skills (leadership, communication, PM) unless the candidate is "
+                "already working in a non-technical or hybrid role. "
+                "5. Do NOT recommend skills the candidate already lists. "
+                "6. Keep resources real and specific."
+            ),
             messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "You are a career coach specialising in AI-resilient career development. "
-                        "Given a candidate's background, generate a personalised skill development roadmap. "
-                        "Return JSON with key 'items', an array of exactly 6 objects each with: "
-                        "skill (string — the skill to develop), "
-                        "reason (string — one sentence explaining WHY this skill matters for their specific industry/role), "
-                        "action (string — a concrete task: name a specific course, project, certification or open-source contribution), "
-                        "timeline (one of: '1 month','2 months','3 months','6 months'), "
-                        "resource (string — specific course name or platform). "
-                        "STRICT RULES: "
-                        "1. Every recommendation must be directly relevant to the candidate's industry and target role. "
-                        "2. Build ON their existing technical strengths — deepen and extend, do not replace them. "
-                        "3. For each skill at confirmed high AI risk, suggest a way to apply it at a level AI cannot yet reach "
-                        "(novel research, production systems, domain-specific expertise, technical leadership). "
-                        "4. Do NOT recommend generic soft skills (leadership, communication, PM) unless the candidate is "
-                        "already working in a non-technical or hybrid role. "
-                        "5. Do NOT recommend skills the candidate already lists. "
-                        "6. Keep resources real and specific."
-                    ),
-                },
                 {
                     "role": "user",
                     "content": (
@@ -375,7 +334,8 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
                 },
             ],
         )
-        data = json.loads(resp.choices[0].message.content)
+        text = next((b.text for b in resp.content if b.type == "text"), "{}")
+        data = json.loads(text)
         return {"status": "generated", "items": data.get("items", [])}
 
     elif name == "lookup_economic_index":
@@ -385,68 +345,17 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
     return {"error": f"Unknown tool: {name}"}
 
 
-def _parse_llama_tool_call(error: BadRequestError) -> tuple[str, dict] | None:
-    """
-    Llama 3.x sometimes generates <function=NAME=JSON></function> instead of
-    proper tool_calls. Extract name + args from the error's failed_generation field.
-    """
-    try:
-        body = error.response.json()
-        text = body.get("error", {}).get("failed_generation", "")
-    except Exception:
-        return None
-    match = re.search(r"<function=([^=]+)=(\{.*?\})\s*>", text, re.DOTALL)
-    if not match:
-        return None
-    name = match.group(1).strip()
-    try:
-        args = json.loads(match.group(2))
-    except json.JSONDecodeError:
-        return None
-    return name, args
-
-
-async def _chat(messages: list, tools: list) -> object:
-    """
-    Wrapper around client.chat.completions.create that recovers from the
-    Llama <function=name=args> format bug by returning a synthetic response.
-    """
-    try:
-        return await client.chat.completions.create(model=MODEL, tools=tools, messages=messages)
-    except BadRequestError as e:
-        parsed = _parse_llama_tool_call(e)
-        if parsed is None:
-            raise
-        name, args = parsed
-
-        class _FakeFunction:
-            def __init__(self):
-                self.name = name
-                self.arguments = json.dumps(args)
-
-        class _FakeToolCall:
-            def __init__(self):
-                self.id = "fallback-0"
-                self.function = _FakeFunction()
-            def model_dump(self):
-                return {"id": self.id, "type": "function",
-                        "function": {"name": name, "arguments": json.dumps(args)}}
-
-        class _FakeMessage:
-            def __init__(self):
-                self.content = None
-                self.tool_calls = [_FakeToolCall()]
-
-        class _FakeChoice:
-            def __init__(self):
-                self.message = _FakeMessage()
-                self.finish_reason = "tool_calls"
-
-        class _FakeResponse:
-            def __init__(self):
-                self.choices = [_FakeChoice()]
-
-        return _FakeResponse()
+async def _chat(messages: list, tools: list):
+    """Call Anthropic messages API. Extracts system message from the messages list."""
+    system = next((m["content"] for m in messages if m["role"] == "system"), "")
+    filtered = [m for m in messages if m["role"] != "system"]
+    return await anthropic_client.messages.create(
+        model=MODEL,
+        max_tokens=4096,
+        system=system,
+        messages=filtered,
+        tools=tools,
+    )
 
 
 def _sse(event_type: str, data: dict) -> str:
@@ -469,63 +378,59 @@ async def run_pipeline(cv_text: str, location: str = "London") -> AsyncGenerator
     while True:
         response = await _chat(messages, TOOLS)
 
-        message = response.choices[0].message
-        finish_reason = response.choices[0].finish_reason
+        text_blocks = [b for b in response.content if b.type == "text"]
+        tool_uses   = [b for b in response.content if b.type == "tool_use"]
 
-        if message.content and message.content.strip():
-            yield _sse("text", {"text": message.content})
+        if text_blocks and text_blocks[0].text.strip():
+            yield _sse("text", {"text": text_blocks[0].text})
 
-        tool_results = []
-        if message.tool_calls:
-            for tool_call in message.tool_calls:
-                tool_name = tool_call.function.name
-                tool_input = json.loads(tool_call.function.arguments)
+        tool_results_content = []
 
-                # Mask credentials before streaming the tool_call event
-                sse_input, _ = redact_credentials_from_input(tool_name, tool_input)
-                yield _sse("tool_call", {"tool_name": tool_name, "tool_input": sse_input})
+        for tool_use in tool_uses:
+            tool_name  = tool_use.name
+            tool_input = tool_use.input  # already a dict
 
-                # Validate / sanitise input — may raise GuardrailViolation
-                try:
-                    safe_input = sanitise_tool_input(tool_name, tool_input)
-                except GuardrailViolation as e:
-                    yield _sse("guardrail", {"check": e.check, "detail": e.detail, "tool_name": tool_name, "fired": True})
-                    result = {"error": f"Guardrail blocked this tool call: {e.detail}"}
-                    yield _sse("tool_result", {"tool_name": tool_name, "result": result})
-                    tool_results.append({"role": "tool", "tool_call_id": tool_call.id, "content": json.dumps(result)})
-                    continue
+            sse_input, _ = redact_credentials_from_input(tool_name, tool_input)
+            yield _sse("tool_call", {"tool_name": tool_name, "tool_input": sse_input})
 
-                # Execute with sanitised input
-                result = await execute_tool(tool_name, safe_input)
-
-                # PII-redacted copy for SSE only; LLM gets unredacted result
-                sse_result, pii_fired = redact_pii_from_result(tool_name, result)
-                if pii_fired:
-                    yield _sse("guardrail", {"check": "pii_redact", "tool_name": tool_name, "fired": True, "detail": "PII removed from display"})
-                yield _sse("tool_result", {"tool_name": tool_name, "result": sse_result})
-
-                # Internal message uses UNREDACTED result so the LLM has real contact details
-                tool_results.append({
-                    "role": "tool",
-                    "tool_call_id": tool_call.id,
+            try:
+                safe_input = sanitise_tool_input(tool_name, tool_input)
+            except GuardrailViolation as e:
+                yield _sse("guardrail", {"check": e.check, "detail": e.detail, "tool_name": tool_name, "fired": True})
+                result = {"error": f"Guardrail blocked this tool call: {e.detail}"}
+                yield _sse("tool_result", {"tool_name": tool_name, "result": result})
+                tool_results_content.append({
+                    "type": "tool_result",
+                    "tool_use_id": tool_use.id,
                     "content": json.dumps(result),
                 })
+                continue
 
-                # Stop immediately after cover letter — avoids another LLM call with bloated context
-                if tool_name == "generate_cover_letter":
-                    yield _sse("done", {"message": "Pipeline complete"})
-                    return
+            result = await execute_tool(tool_name, safe_input)
 
-        if finish_reason == "stop" or not message.tool_calls:
+            sse_result, pii_fired = redact_pii_from_result(tool_name, result)
+            if pii_fired:
+                yield _sse("guardrail", {"check": "pii_redact", "tool_name": tool_name, "fired": True, "detail": "PII removed from display"})
+            yield _sse("tool_result", {"tool_name": tool_name, "result": sse_result})
+
+            # Unredacted result for LLM context
+            tool_results_content.append({
+                "type": "tool_result",
+                "tool_use_id": tool_use.id,
+                "content": json.dumps(result),
+            })
+
+            if tool_name == "generate_cover_letter":
+                yield _sse("done", {"message": "Pipeline complete"})
+                return
+
+        if response.stop_reason == "end_turn" or not tool_uses:
             yield _sse("done", {"message": "Pipeline complete"})
             break
 
-        messages.append({
-            "role": "assistant",
-            "content": message.content,
-            "tool_calls": [tc.model_dump() for tc in message.tool_calls],
-        })
-        messages.extend(tool_results)
+        # Append assistant turn + tool results as a single user message
+        messages.append({"role": "assistant", "content": response.content})
+        messages.append({"role": "user", "content": tool_results_content})
 
 
 async def run_apply(
@@ -591,53 +496,54 @@ async def run_apply(
     while True:
         response = await _chat(messages, TOOLS)
 
-        message = response.choices[0].message
-        finish_reason = response.choices[0].finish_reason
+        text_blocks = [b for b in response.content if b.type == "text"]
+        tool_uses   = [b for b in response.content if b.type == "tool_use"]
 
-        if message.content and message.content.strip():
-            yield _sse("text", {"text": message.content})
+        if text_blocks and text_blocks[0].text.strip():
+            yield _sse("text", {"text": text_blocks[0].text})
 
-        tool_results = []
+        tool_results_content = []
         roadmap_done = False
-        if message.tool_calls:
-            for tool_call in message.tool_calls:
-                tool_name = tool_call.function.name
-                tool_input = json.loads(tool_call.function.arguments)
 
-                sse_input, _ = redact_credentials_from_input(tool_name, tool_input)
-                yield _sse("tool_call", {"tool_name": tool_name, "tool_input": sse_input})
+        for tool_use in tool_uses:
+            tool_name  = tool_use.name
+            tool_input = tool_use.input  # already a dict
 
-                try:
-                    safe_input = sanitise_tool_input(tool_name, tool_input)
-                except GuardrailViolation as e:
-                    yield _sse("guardrail", {"check": e.check, "detail": e.detail, "tool_name": tool_name, "fired": True})
-                    result = {"error": f"Guardrail blocked this tool call: {e.detail}"}
-                    yield _sse("tool_result", {"tool_name": tool_name, "result": result})
-                    tool_results.append({"role": "tool", "tool_call_id": tool_call.id, "content": json.dumps(result)})
-                    continue
+            sse_input, _ = redact_credentials_from_input(tool_name, tool_input)
+            yield _sse("tool_call", {"tool_name": tool_name, "tool_input": sse_input})
 
-                result = await execute_tool_with_context(tool_name, safe_input)
-
-                sse_result, pii_fired = redact_pii_from_result(tool_name, result)
-                if pii_fired:
-                    yield _sse("guardrail", {"check": "pii_redact", "tool_name": tool_name, "fired": True, "detail": "PII removed from display"})
-                yield _sse("tool_result", {"tool_name": tool_name, "result": sse_result})
-
-                tool_results.append({
-                    "role": "tool",
-                    "tool_call_id": tool_call.id,
+            try:
+                safe_input = sanitise_tool_input(tool_name, tool_input)
+            except GuardrailViolation as e:
+                yield _sse("guardrail", {"check": e.check, "detail": e.detail, "tool_name": tool_name, "fired": True})
+                result = {"error": f"Guardrail blocked this tool call: {e.detail}"}
+                yield _sse("tool_result", {"tool_name": tool_name, "result": result})
+                tool_results_content.append({
+                    "type": "tool_result",
+                    "tool_use_id": tool_use.id,
                     "content": json.dumps(result),
                 })
-                if tool_name == "generate_skill_roadmap":
-                    roadmap_done = True
+                continue
 
-        if roadmap_done or finish_reason == "stop" or not message.tool_calls:
+            result = await execute_tool_with_context(tool_name, safe_input)
+
+            sse_result, pii_fired = redact_pii_from_result(tool_name, result)
+            if pii_fired:
+                yield _sse("guardrail", {"check": "pii_redact", "tool_name": tool_name, "fired": True, "detail": "PII removed from display"})
+            yield _sse("tool_result", {"tool_name": tool_name, "result": sse_result})
+
+            tool_results_content.append({
+                "type": "tool_result",
+                "tool_use_id": tool_use.id,
+                "content": json.dumps(result),
+            })
+
+            if tool_name == "generate_skill_roadmap":
+                roadmap_done = True
+
+        if roadmap_done or response.stop_reason == "end_turn" or not tool_uses:
             yield _sse("done", {"message": "Done"})
             break
 
-        messages.append({
-            "role": "assistant",
-            "content": message.content,
-            "tool_calls": [tc.model_dump() for tc in message.tool_calls],
-        })
-        messages.extend(tool_results)
+        messages.append({"role": "assistant", "content": response.content})
+        messages.append({"role": "user", "content": tool_results_content})

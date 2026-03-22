@@ -4,13 +4,11 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="657acfba-7aae-4604-a67f-31eee75bbb05" name="Changes" comment="update job title matching logic and implement job scraping functionality">
-      <change beforePath="$PROJECT_DIR$/.env.example" beforeDir="false" afterPath="$PROJECT_DIR$/.env.example" afterDir="false" />
+    <list default="true" id="657acfba-7aae-4604-a67f-31eee75bbb05" name="Changes" comment="add support for Anthropic API and update model configuration for enhanced agent functionality">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/api/app/agent.py" beforeDir="false" afterPath="$PROJECT_DIR$/api/app/agent.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/api/app/browser_agent.py" beforeDir="false" afterPath="$PROJECT_DIR$/api/app/browser_agent.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/api/requirements.txt" beforeDir="false" afterPath="$PROJECT_DIR$/api/requirements.txt" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/docker-compose.yml" beforeDir="false" afterPath="$PROJECT_DIR$/docker-compose.yml" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -187,7 +185,15 @@
       <option name="project" value="LOCAL" />
       <updated>1774166443982</updated>
     </task>
-    <option name="localTasksCounter" value="15" />
+    <task id="LOCAL-00015" summary="add support for Anthropic API and update model configuration for enhanced agent functionality">
+      <option name="closed" value="true" />
+      <created>1774169805278</created>
+      <option name="number" value="00015" />
+      <option name="presentableId" value="LOCAL-00015" />
+      <option name="project" value="LOCAL" />
+      <updated>1774169805279</updated>
+    </task>
+    <option name="localTasksCounter" value="16" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -227,7 +233,8 @@
     <MESSAGE value="update model configuration to use moonshotai/kimi-k2-instruct for improved performance" />
     <MESSAGE value="implement guardrails for CV input validation and job search query sanitization" />
     <MESSAGE value="update job title matching logic and implement job scraping functionality" />
-    <option name="LAST_COMMIT_MESSAGE" value="update job title matching logic and implement job scraping functionality" />
+    <MESSAGE value="add support for Anthropic API and update model configuration for enhanced agent functionality" />
+    <option name="LAST_COMMIT_MESSAGE" value="add support for Anthropic API and update model configuration for enhanced agent functionality" />
   </component>
   <component name="github-copilot-workspace">
     <instructionFileLocations>

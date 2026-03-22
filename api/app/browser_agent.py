@@ -8,7 +8,7 @@ from playwright.async_api import Page
 
 try:
     from browser_use import Agent, BrowserSession, BrowserProfile
-    from langchain_anthropic import ChatAnthropic
+    from browser_use.llm.anthropic.chat import ChatAnthropic
 
     BROWSER_USE_AVAILABLE = True
 except ImportError:
@@ -281,11 +281,13 @@ async def apply_with_browser(
 
     browser_profile = BrowserProfile(
         headless=True,
+        disable_security=True,
         args=[
             "--no-sandbox",
             "--disable-dev-shm-usage",
             "--disable-blink-features=AutomationControlled",
             "--window-size=1280,800",
+            "--disable-extensions",
         ],
     )
     browser_session = BrowserSession(browser_profile=browser_profile)
@@ -312,7 +314,7 @@ async def apply_with_browser(
 
     llm = ChatAnthropic(
         api_key=os.environ.get("ANTHROPIC_API_KEY", ""),
-        model="claude-sonnet-4-6",
+        model="claude-haiku-4-5-20251001",
     )
 
     agent = Agent(
@@ -320,7 +322,8 @@ async def apply_with_browser(
         llm=llm,
         browser_session=browser_session,
         register_new_step_callback=on_step,
-        use_vision=True,
+        use_vision=False,
+        available_file_paths=[cv_path] if cv_path else [],
     )
     agent_task = asyncio.create_task(agent.run())
     screenshotter_task = (
