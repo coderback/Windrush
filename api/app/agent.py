@@ -17,7 +17,7 @@ client = AsyncOpenAI(
     api_key=os.environ.get("GROQ_API_KEY", ""),
 )
 
-MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"
+MODEL = "moonshotai/kimi-k2-instruct-0905"
 
 SYSTEM_PROMPT = """You are Windrush, an AI career transition advisor helping workers navigate the impact of AI on their careers.
 

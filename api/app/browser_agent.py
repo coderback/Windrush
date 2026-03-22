@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import json
 import os
 from typing import AsyncGenerator
@@ -6,12 +7,8 @@ from typing import AsyncGenerator
 from playwright.async_api import Page
 
 try:
-    from langchain_openai import ChatOpenAI as _BaseChatOpenAI
     from browser_use import Agent, BrowserSession, BrowserProfile
-
-    class ChatOpenAI(_BaseChatOpenAI):
-        """Thin subclass that adds `provider` so browser-use's Agent.__init__ check passes."""
-        provider: str = "openai"
+    from browser_use.llm.groq.chat import ChatGroq
 
     BROWSER_USE_AVAILABLE = True
 except ImportError:
@@ -20,11 +17,89 @@ except ImportError:
 
 async def _screenshot_b64(page: Page) -> str:
     try:
-        import base64
-        png = await page.screenshot(full_page=False)
-        return base64.b64encode(png).decode()
+        jpeg = await page.screenshot(full_page=False, type="jpeg", quality=60)
+        return base64.b64encode(jpeg).decode()
     except Exception:
         return ""
+
+
+def _push_frame(frame_queue: asyncio.Queue, frame_b64: str):
+    """Drop oldest frame if full, then push newest."""
+    if frame_queue.full():
+        try:
+            frame_queue.get_nowait()
+        except asyncio.QueueEmpty:
+            pass
+    try:
+        frame_queue.put_nowait(frame_b64)
+    except asyncio.QueueFull:
+        pass
+
+
+async def _cdp_screenshotter(browser_session, frame_queue: asyncio.Queue):
+    """
+    Attach a CDP Page.startScreencast session to the active Playwright page.
+    Chrome pushes JPEG frames at up to ~30fps without us having to poll.
+    Re-attaches automatically when the agent navigates to a new tab.
+    """
+    active: dict = {}  # {"page": Page, "client": CDPSession}
+
+    async def _attach(page):
+        # Tear down previous session
+        old_client = active.get("client")
+        if old_client:
+            try:
+                await old_client.send("Page.stopScreencast")
+            except Exception:
+                pass
+            try:
+                await old_client.detach()
+            except Exception:
+                pass
+        active.clear()
+
+        try:
+            client = await page.context.new_cdp_session(page)
+        except Exception:
+            return
+
+        active["page"] = page
+        active["client"] = client
+
+        async def on_frame(data):
+            frame_b64 = data.get("data", "")
+            if frame_b64:
+                _push_frame(frame_queue, frame_b64)
+            # Ack is required — Chrome stops sending frames without it
+            try:
+                await client.send("Page.screencastFrameAck", {"sessionId": data["sessionId"]})
+            except Exception:
+                pass
+
+        client.on("Page.screencastFrame", on_frame)
+        try:
+            await client.send("Page.startScreencast", {
+                "format": "jpeg",
+                "quality": 60,
+                "maxWidth": 1280,
+                "maxHeight": 800,
+                "everyNthFrame": 1,
+            })
+        except Exception:
+            pass
+
+    last_page = None
+    while True:
+        try:
+            context = getattr(browser_session, "context", None)
+            if context and context.pages:
+                page = context.pages[-1]
+                if page is not last_page:
+                    last_page = page
+                    await _attach(page)
+        except Exception:
+            pass
+        await asyncio.sleep(0.3)  # Only need to poll for page-change events
 
 
 DONE_COMMANDS = {"submit", "done", "skip", "cancel", "abort"}
@@ -217,10 +292,9 @@ async def apply_with_browser(
             "done": False,
         })
 
-    llm = ChatOpenAI(
-        base_url="https://api.groq.com/openai/v1",
+    llm = ChatGroq(
         api_key=os.environ.get("GROQ_API_KEY", ""),
-        model="meta-llama/llama-4-scout-17b-16e-instruct",
+        model="moonshotai/kimi-k2-instruct-0905",
     )
 
     agent = Agent(
@@ -231,6 +305,10 @@ async def apply_with_browser(
         use_vision=False,
     )
     agent_task = asyncio.create_task(agent.run())
+    screenshotter_task = (
+        asyncio.create_task(_cdp_screenshotter(browser_session, frame_queue))
+        if frame_queue is not None else None
+    )
 
     # Stream step events while agent runs
     while not agent_task.done():
@@ -238,6 +316,14 @@ async def apply_with_browser(
             event = await asyncio.wait_for(step_queue.get(), timeout=1.0)
             yield event
         except asyncio.TimeoutError:
+            pass
+
+    # Stop continuous screenshotter
+    if screenshotter_task:
+        screenshotter_task.cancel()
+        try:
+            await screenshotter_task
+        except asyncio.CancelledError:
             pass
 
     # Drain any remaining buffered events

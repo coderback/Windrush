@@ -26,21 +26,38 @@ export default function BrowserView({
 }: Props) {
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
-  const [liveFrame, setLiveFrame] = useState<string | null>(null);
   const imgRef = useRef<HTMLImageElement>(null);
+  // Pending frame from SSE — written without triggering re-render
+  const pendingFrame = useRef<string | null>(null);
 
-  // Open a separate SSE connection for live CDP screencast frames
+  // Open a separate SSE connection for live CDP screencast frames.
+  // Paint frames via requestAnimationFrame to avoid a React re-render per frame.
   useEffect(() => {
     if (!sessionId) return;
     const es = new EventSource(`/api/browser-stream/${sessionId}`);
     es.onmessage = (e) => {
       try {
         const data = JSON.parse(e.data);
-        if (data.frame) setLiveFrame(data.frame);
+        if (data.frame) pendingFrame.current = data.frame;
         if (data.type === "close") es.close();
       } catch {}
     };
-    return () => es.close();
+
+    let rafId: number;
+    const paint = () => {
+      const frame = pendingFrame.current;
+      if (frame && imgRef.current) {
+        imgRef.current.src = `data:image/jpeg;base64,${frame}`;
+        pendingFrame.current = null;
+      }
+      rafId = requestAnimationFrame(paint);
+    };
+    rafId = requestAnimationFrame(paint);
+
+    return () => {
+      es.close();
+      cancelAnimationFrame(rafId);
+    };
   }, [sessionId]);
 
   const send = async (payload: object | string) => {
@@ -101,10 +118,10 @@ export default function BrowserView({
 
       {/* Screenshot */}
       <div className="w-full max-w-5xl border border-zinc-700 rounded-lg overflow-hidden bg-zinc-900 shrink-0">
-        {(liveFrame || screenshot) ? (
+        {screenshot ? (
           <img
             ref={imgRef}
-            src={liveFrame ? `data:image/jpeg;base64,${liveFrame}` : `data:image/png;base64,${screenshot}`}
+            src={`data:image/jpeg;base64,${screenshot}`}
             alt="Browser view"
             className={`w-full h-auto block ${interactive ? "cursor-crosshair select-none" : ""}`}
             onClick={handleImageClick}

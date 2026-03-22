@@ -4,20 +4,12 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="657acfba-7aae-4604-a67f-31eee75bbb05" name="Changes" comment="add MCP server for job application automation with Adzuna API and implement interactive browser control">
-      <change afterPath="$PROJECT_DIR$/frontend/public/.gitkeep" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.env.example" beforeDir="false" afterPath="$PROJECT_DIR$/.env.example" afterDir="false" />
+    <list default="true" id="657acfba-7aae-4604-a67f-31eee75bbb05" name="Changes" comment="update environment configuration and enhance agent functionality for Groq API integration">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/api/app/agent.py" beforeDir="false" afterPath="$PROJECT_DIR$/api/app/agent.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/api/app/browser_agent.py" beforeDir="false" afterPath="$PROJECT_DIR$/api/app/browser_agent.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/api/app/main.py" beforeDir="false" afterPath="$PROJECT_DIR$/api/app/main.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/api/requirements.txt" beforeDir="false" afterPath="$PROJECT_DIR$/api/requirements.txt" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/docker-compose.yml" beforeDir="false" afterPath="$PROJECT_DIR$/docker-compose.yml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/frontend/src/app/page.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/frontend/src/app/page.tsx" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/frontend/src/components/AgentLog.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/frontend/src/components/AgentLog.tsx" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/frontend/src/components/BrowserView.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/frontend/src/components/BrowserView.tsx" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/frontend/src/components/CoverLetter.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/frontend/src/components/CoverLetter.tsx" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/nginx/nginx.conf" beforeDir="false" afterPath="$PROJECT_DIR$/nginx/nginx.conf" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -162,7 +154,15 @@
       <option name="project" value="LOCAL" />
       <updated>1774122643048</updated>
     </task>
-    <option name="localTasksCounter" value="11" />
+    <task id="LOCAL-00011" summary="update environment configuration and enhance agent functionality for Groq API integration">
+      <option name="closed" value="true" />
+      <created>1774147753973</created>
+      <option name="number" value="00011" />
+      <option name="presentableId" value="LOCAL-00011" />
+      <option name="project" value="LOCAL" />
+      <updated>1774147753973</updated>
+    </task>
+    <option name="localTasksCounter" value="12" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -198,7 +198,8 @@
     <MESSAGE value="add occupation exposure scoring using the Anthropic Economic Index and update job proxy fixture" />
     <MESSAGE value="update skill exposure scoring with new AI technologies and improve partial match logic" />
     <MESSAGE value="add MCP server for job application automation with Adzuna API and implement interactive browser control" />
-    <option name="LAST_COMMIT_MESSAGE" value="add MCP server for job application automation with Adzuna API and implement interactive browser control" />
+    <MESSAGE value="update environment configuration and enhance agent functionality for Groq API integration" />
+    <option name="LAST_COMMIT_MESSAGE" value="update environment configuration and enhance agent functionality for Groq API integration" />
   </component>
   <component name="github-copilot-workspace">
     <instructionFileLocations>

@@ -79,7 +79,7 @@ async def apply(
     session_id = str(uuid.uuid4())
 
     q: asyncio.Queue = asyncio.Queue()
-    fq: asyncio.Queue = asyncio.Queue(maxsize=10)
+    fq: asyncio.Queue = asyncio.Queue(maxsize=8)
     _browser_queues[session_id] = q
     _browser_frames[session_id] = fq
 
