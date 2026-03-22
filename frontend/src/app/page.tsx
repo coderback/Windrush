@@ -7,6 +7,7 @@ import JobList, { Job } from "@/components/JobList";
 import CoverLetter from "@/components/CoverLetter";
 import SkillRoadmap, { RoadmapItem } from "@/components/SkillRoadmap";
 import BrowserView from "@/components/BrowserView";
+import GuardrailBadge from "@/components/GuardrailBadge";
 
 interface CVProfile {
   name?: string;
@@ -46,6 +47,7 @@ export default function Home() {
   const [dragOver, setDragOver] = useState(false);
   const [pendingCoverLetter, setPendingCoverLetter] = useState("");
   const [sessionId, setSessionId] = useState("");
+  const [lastGuardrailEvent, setLastGuardrailEvent] = useState<{ fired: boolean; check: string; detail?: string } | null>(null);
   const [cvSessionId, setCvSessionId] = useState("");
   const [jobEmail, setJobEmail] = useState("");
   const [jobPassword, setJobPassword] = useState("");
@@ -72,6 +74,10 @@ export default function Home() {
         ) {
           setCvProfile(input.cv_profile as CVProfile);
         }
+      }
+
+      if (ev.type === "guardrail") {
+        setLastGuardrailEvent({ fired: !!ev.fired, check: ev.check ?? "", detail: ev.detail });
       }
 
       if (ev.type === "start" && (ev as AgentEvent & { session_id?: string }).session_id) {
@@ -269,6 +275,7 @@ export default function Home() {
           <p className="text-xs text-zinc-500 mt-0.5">AI-powered career transition navigator</p>
         </div>
         <div className="flex items-center gap-2">
+          <GuardrailBadge lastGuardrailEvent={lastGuardrailEvent} />
           {isStreaming && (
             <span className="flex items-center gap-1.5 text-xs text-teal-400">
               <span className="w-2 h-2 rounded-full bg-teal-400 animate-pulse" />

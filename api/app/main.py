@@ -10,6 +10,7 @@ from fastapi.responses import StreamingResponse
 
 from .cv_parser import extract_text
 from .agent import run_pipeline, run_apply
+from .guardrails import check_cv_for_injection, get_audit_log, GuardrailViolation
 
 app = FastAPI(title="Windrush API")
 
@@ -31,6 +32,11 @@ async def health():
     return {"status": "ok"}
 
 
+@app.get("/guardrails/audit")
+async def guardrails_audit():
+    return get_audit_log()
+
+
 @app.post("/stream")
 async def pipeline_stream(
     file: UploadFile = File(...),
@@ -38,6 +44,22 @@ async def pipeline_stream(
 ):
     pdf_bytes = await file.read()
     cv_text = extract_text(pdf_bytes)
+
+    # Guardrail: reject CV text containing prompt injection before it reaches the LLM
+    try:
+        check_cv_for_injection(cv_text)
+    except GuardrailViolation as e:
+        import time as _time
+
+        async def _blocked_stream():
+            yield f"data: {json.dumps({'type': 'guardrail', 'check': e.check, 'detail': e.detail, 'fired': True, 'timestamp': _time.time()})}\n\n"
+            yield f"data: {json.dumps({'type': 'done', 'message': 'Upload rejected by guardrails — possible prompt injection detected'})}\n\n"
+
+        return StreamingResponse(
+            _blocked_stream(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no", "Connection": "keep-alive"},
+        )
 
     # Save CV to disk so browser agent can upload it during applications
     cv_session_id = uuid.uuid4().hex

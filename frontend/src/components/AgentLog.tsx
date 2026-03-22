@@ -4,7 +4,7 @@ import { useEffect, useRef } from "react";
 
 export interface AgentEvent {
   type: "start" | "tool_call" | "tool_result" | "text" | "done"
-      | "browser_action" | "browser_blocked" | "cv_session";
+      | "browser_action" | "browser_blocked" | "cv_session" | "guardrail";
   timestamp: number;
   tool_name?: string;
   tool_input?: Record<string, unknown>;
@@ -18,6 +18,10 @@ export interface AgentEvent {
   screenshot?: string;
   blocked?: boolean;
   reason?: string;
+  // Guardrail events
+  check?: string;
+  detail?: string;
+  fired?: boolean;
 }
 
 interface Props {
@@ -112,6 +116,18 @@ export default function AgentLog({ events }: Props) {
                 <span className="text-zinc-600 mr-2">[{new Date(ev.timestamp * 1000).toLocaleTimeString()}]</span>
                 ⏸ {ev.reason ?? ev.action}
               </div>
+            </div>
+          )}
+
+          {ev.type === "guardrail" && (
+            <div className={`border-l-2 pl-2 py-0.5 ${ev.fired ? "border-red-500" : "border-zinc-700"}`}>
+              <div className={`font-semibold ${ev.fired ? "text-red-400" : "text-zinc-500"}`}>
+                <span className="text-zinc-600 mr-2">[{new Date(ev.timestamp * 1000).toLocaleTimeString()}]</span>
+                🛡 {ev.fired ? "Guardrail fired" : "Guardrail ok"}{ev.check ? ` — ${ev.check}` : ""}
+              </div>
+              {ev.fired && ev.detail && (
+                <div className="text-red-300/70 text-[10px] mt-0.5 pl-0.5">{ev.detail}</div>
+              )}
             </div>
           )}
 

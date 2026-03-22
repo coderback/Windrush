@@ -213,14 +213,18 @@ def _build_task(job_url: str, cv_profile: dict, cover_letter: str,
         profile_lines.append(f"LinkedIn: {cv_profile['linkedin']}")
     if cv_profile.get("github"):
         profile_lines.append(f"GitHub: {cv_profile['github']}")
-    for edu in cv_profile.get("education", []):
+    # Keep education/experience minimal — only most recent entry each
+    edu_list = cv_profile.get("education", [])
+    if edu_list:
+        edu = edu_list[0]
         profile_lines.append(
             f"Education: {edu.get('degree', '')} at {edu.get('institution', '')} ({edu.get('dates', '')})"
         )
-    for exp in cv_profile.get("experience", [])[:3]:
+    exp_list = cv_profile.get("experience", [])
+    if exp_list:
+        exp = exp_list[0]
         profile_lines.append(
-            f"Experience: {exp.get('title', '')} at {exp.get('employer', '')} "
-            f"({exp.get('dates', '')}): {exp.get('summary', '')[:100]}"
+            f"Experience: {exp.get('title', '')} at {exp.get('employer', '')} ({exp.get('dates', '')})"
         )
 
     creds_block = "\n".join(lines)
@@ -230,7 +234,7 @@ def _build_task(job_url: str, cv_profile: dict, cover_letter: str,
         task += f"\n\n{creds_block}"
     if profile_block:
         task += f"\n\nApplicant details:\n{profile_block}"
-    task += f"\n\nCover letter:\n{cover_letter[:1500]}"
+    task += f"\n\nCover letter (first 500 chars for context):\n{cover_letter[:500]}"
     task += "\n\nComplete and submit the application. Fill every required field."
     return task
 
@@ -294,7 +298,7 @@ async def apply_with_browser(
 
     llm = ChatGroq(
         api_key=os.environ.get("GROQ_API_KEY", ""),
-        model="moonshotai/kimi-k2-instruct-0905",
+        model="llama-3.3-70b-versatile",
     )
 
     agent = Agent(

@@ -9,15 +9,21 @@ from openai import AsyncOpenAI, BadRequestError
 
 from .cv_parser import extract_text
 from .risk_scorer import lookup_onet, lookup_by_title, ECONOMIC_INDEX
-from .job_proxy import search_jobs
+from .job_proxy import search_jobs, FIXTURE as JOBS_FIXTURE
 from .browser_agent import apply_with_browser
+from .guardrails import (
+    sanitise_tool_input,
+    redact_pii_from_result,
+    redact_credentials_from_input,
+    GuardrailViolation,
+)
 
 client = AsyncOpenAI(
     base_url="https://api.groq.com/openai/v1",
     api_key=os.environ.get("GROQ_API_KEY", ""),
 )
 
-MODEL = "moonshotai/kimi-k2-instruct-0905"
+MODEL = "openai/gpt-oss-120b"
 
 SYSTEM_PROMPT = """You are Windrush, an AI career transition advisor helping workers navigate the impact of AI on their careers.
 
@@ -216,29 +222,50 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
 
     elif name == "search_jobs":
         jobs = await search_jobs(tool_input.get("query", ""), tool_input.get("location", "London"))
-        return {"jobs": jobs, "count": len(jobs)}
+        # Strip descriptions and cap at 5 — model must echo these back in score_job_fit args
+        slim_jobs = [
+            {k: v for k, v in j.items() if k not in ("description", "salary_min", "salary_max")}
+            for j in jobs[:5]
+        ]
+        return {"jobs": slim_jobs, "count": len(slim_jobs)}
 
     elif name == "score_job_fit":
         jobs = tool_input.get("jobs", [])
         cv_profile = tool_input.get("cv_profile", {})
         cv_skills = set(s.lower() for s in cv_profile.get("skills", []))
 
+        # Re-inject descriptions from fixture for scoring, then strip them from the result
+        fixture_by_id = {j["job_id"]: j for j in JOBS_FIXTURE}
+
         scored = []
         for job in jobs:
-            exposure = job.get("exposure_score", 0.5)
-            desc_lower = job.get("description", "").lower()
+            full_job = {**fixture_by_id.get(job.get("job_id", ""), {}), **job}
+            exposure = full_job.get("exposure_score", 0.5)
+            desc_lower = full_job.get("description", "").lower()
             skill_matches = sum(1 for s in cv_skills if s in desc_lower)
             fit_score = min(skill_matches / max(len(cv_skills), 1), 1.0)
             composite = (1 - exposure) * 0.5 + fit_score * 0.5
-            scored.append({**job, "fit_score": round(fit_score, 2), "composite_score": round(composite, 2)})
+            scored.append({
+                "job_id": full_job.get("job_id"),
+                "title": full_job.get("title"),
+                "company": full_job.get("company"),
+                "location": full_job.get("location"),
+                "url": full_job.get("url"),
+                "exposure_score": exposure,
+                "fit_score": round(fit_score, 2),
+                "composite_score": round(composite, 2),
+            })
 
         scored.sort(key=lambda j: j["composite_score"], reverse=True)
-        return {"ranked_jobs": scored}
+        return {"ranked_jobs": scored[:4]}
 
     elif name == "generate_cover_letter":
         job = tool_input.get("job", {})
         cv_profile = tool_input.get("cv_profile", {})
         tone = tool_input.get("tone", "professional")
+        # Re-inject full description from fixture if not present (stripped from score_job_fit result)
+        fixture_by_id = {j["job_id"]: j for j in JOBS_FIXTURE}
+        full_job = {**fixture_by_id.get(job.get("job_id", ""), {}), **job}
         resp = await client.chat.completions.create(
             model=MODEL,
             messages=[
@@ -250,8 +277,8 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
                     "role": "user",
                     "content": (
                         f"Candidate: {json.dumps(cv_profile)}\n\n"
-                        f"Job: {job.get('title')} at {job.get('company')}\n"
-                        f"Description: {job.get('description', '')}"
+                        f"Job: {full_job.get('title')} at {full_job.get('company')}\n"
+                        f"Description: {full_job.get('description', '')}"
                     ),
                 },
             ],
@@ -259,8 +286,8 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
         letter = resp.choices[0].message.content or ""
         return {
             "status": "ready",
-            "job_title": job.get("title", ""),
-            "company": job.get("company", ""),
+            "job_title": full_job.get("title", ""),
+            "company": full_job.get("company", ""),
             "candidate_name": cv_profile.get("name", ""),
             "cover_letter": letter,
         }
@@ -402,15 +429,43 @@ async def run_pipeline(cv_text: str, location: str = "London") -> AsyncGenerator
         tool_results = []
         if message.tool_calls:
             for tool_call in message.tool_calls:
+                tool_name = tool_call.function.name
                 tool_input = json.loads(tool_call.function.arguments)
-                yield _sse("tool_call", {"tool_name": tool_call.function.name, "tool_input": tool_input})
-                result = await execute_tool(tool_call.function.name, tool_input)
-                yield _sse("tool_result", {"tool_name": tool_call.function.name, "result": result})
+
+                # Mask credentials before streaming the tool_call event
+                sse_input, _ = redact_credentials_from_input(tool_name, tool_input)
+                yield _sse("tool_call", {"tool_name": tool_name, "tool_input": sse_input})
+
+                # Validate / sanitise input — may raise GuardrailViolation
+                try:
+                    safe_input = sanitise_tool_input(tool_name, tool_input)
+                except GuardrailViolation as e:
+                    yield _sse("guardrail", {"check": e.check, "detail": e.detail, "tool_name": tool_name, "fired": True})
+                    result = {"error": f"Guardrail blocked this tool call: {e.detail}"}
+                    yield _sse("tool_result", {"tool_name": tool_name, "result": result})
+                    tool_results.append({"role": "tool", "tool_call_id": tool_call.id, "content": json.dumps(result)})
+                    continue
+
+                # Execute with sanitised input
+                result = await execute_tool(tool_name, safe_input)
+
+                # PII-redacted copy for SSE only; LLM gets unredacted result
+                sse_result, pii_fired = redact_pii_from_result(tool_name, result)
+                if pii_fired:
+                    yield _sse("guardrail", {"check": "pii_redact", "tool_name": tool_name, "fired": True, "detail": "PII removed from display"})
+                yield _sse("tool_result", {"tool_name": tool_name, "result": sse_result})
+
+                # Internal message uses UNREDACTED result so the LLM has real contact details
                 tool_results.append({
                     "role": "tool",
                     "tool_call_id": tool_call.id,
                     "content": json.dumps(result),
                 })
+
+                # Stop immediately after cover letter — avoids another LLM call with bloated context
+                if tool_name == "generate_cover_letter":
+                    yield _sse("done", {"message": "Pipeline complete"})
+                    return
 
         if finish_reason == "stop" or not message.tool_calls:
             yield _sse("done", {"message": "Pipeline complete"})
@@ -491,16 +546,34 @@ async def run_apply(
         roadmap_done = False
         if message.tool_calls:
             for tool_call in message.tool_calls:
+                tool_name = tool_call.function.name
                 tool_input = json.loads(tool_call.function.arguments)
-                yield _sse("tool_call", {"tool_name": tool_call.function.name, "tool_input": tool_input})
-                result = await execute_tool_with_context(tool_call.function.name, tool_input)
-                yield _sse("tool_result", {"tool_name": tool_call.function.name, "result": result})
+
+                sse_input, _ = redact_credentials_from_input(tool_name, tool_input)
+                yield _sse("tool_call", {"tool_name": tool_name, "tool_input": sse_input})
+
+                try:
+                    safe_input = sanitise_tool_input(tool_name, tool_input)
+                except GuardrailViolation as e:
+                    yield _sse("guardrail", {"check": e.check, "detail": e.detail, "tool_name": tool_name, "fired": True})
+                    result = {"error": f"Guardrail blocked this tool call: {e.detail}"}
+                    yield _sse("tool_result", {"tool_name": tool_name, "result": result})
+                    tool_results.append({"role": "tool", "tool_call_id": tool_call.id, "content": json.dumps(result)})
+                    continue
+
+                result = await execute_tool_with_context(tool_name, safe_input)
+
+                sse_result, pii_fired = redact_pii_from_result(tool_name, result)
+                if pii_fired:
+                    yield _sse("guardrail", {"check": "pii_redact", "tool_name": tool_name, "fired": True, "detail": "PII removed from display"})
+                yield _sse("tool_result", {"tool_name": tool_name, "result": sse_result})
+
                 tool_results.append({
                     "role": "tool",
                     "tool_call_id": tool_call.id,
                     "content": json.dumps(result),
                 })
-                if tool_call.function.name == "generate_skill_roadmap":
+                if tool_name == "generate_skill_roadmap":
                     roadmap_done = True
 
         if roadmap_done or finish_reason == "stop" or not message.tool_calls:

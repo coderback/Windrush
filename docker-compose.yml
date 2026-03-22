@@ -25,9 +25,10 @@ services:
       - ADZUNA_API_KEY=${ADZUNA_API_KEY}
       - JOB_EMAIL=${JOB_EMAIL}
       - JOB_PASSWORD=${JOB_PASSWORD}
+      - JOBS_MCP_URL=http://civic-guardrails:8002/mcp
     volumes:
       - economic_data:/data:ro
-    depends_on: [jobs-mcp]
+    depends_on: [jobs-mcp, civic-guardrails]
 
   jobs-mcp:
     build: ./jobs-mcp
@@ -38,6 +39,17 @@ services:
       - FASTMCP_HOST=0.0.0.0
       - FASTMCP_PORT=8001
 
+  civic-guardrails:
+    build: ./civic-guardrails
+    expose: ["8002"]
+    environment:
+      - UPSTREAM_MCP_URL=http://jobs-mcp:8001/mcp
+      - AUDIT_LOG_PATH=/logs/audit.jsonl
+      - PORT=8002
+    volumes:
+      - guardrail_logs:/logs
+    depends_on: [jobs-mcp]
+
 volumes:
   economic_data:
     driver: local
@@ -45,3 +57,4 @@ volumes:
       type: none
       o: bind
       device: ./data
+  guardrail_logs:
