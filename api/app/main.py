@@ -1,5 +1,7 @@
 import asyncio
 import json
+import pathlib
+import tempfile
 import uuid
 
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
@@ -18,8 +20,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Session registry: session_id → asyncio.Queue for browser instruction passing
-_browser_queues: dict[str, asyncio.Queue] = {}
+# Session registries
+_browser_queues: dict[str, asyncio.Queue] = {}   # instruction queues
+_browser_frames: dict[str, asyncio.Queue] = {}   # CDP screencast frame queues
+_cv_files: dict[str, str] = {}                   # cv_session_id → temp file path
 
 
 @app.get("/health")
@@ -34,8 +38,21 @@ async def pipeline_stream(
 ):
     pdf_bytes = await file.read()
     cv_text = extract_text(pdf_bytes)
+
+    # Save CV to disk so browser agent can upload it during applications
+    cv_session_id = uuid.uuid4().hex
+    cv_path = pathlib.Path(tempfile.gettempdir()) / f"cv_{cv_session_id}.pdf"
+    cv_path.write_bytes(pdf_bytes)
+    _cv_files[cv_session_id] = str(cv_path)
+
+    async def pipeline_with_cv_session():
+        import json, time
+        yield f"data: {json.dumps({'type': 'cv_session', 'cv_session_id': cv_session_id, 'timestamp': time.time()})}\n\n"
+        async for chunk in run_pipeline(cv_text, location):
+            yield chunk
+
     return StreamingResponse(
-        run_pipeline(cv_text, location),
+        pipeline_with_cv_session(),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
@@ -52,19 +69,30 @@ async def apply(
     cover_letter: str = Form(...),
     cv_profile: str = Form(default="{}"),
     skill_risks: str = Form(default="[]"),
+    job_email: str = Form(default=""),
+    job_password: str = Form(default=""),
+    cv_session_id: str = Form(default=""),
 ):
     profile = json.loads(cv_profile)
     risks = json.loads(skill_risks)
+    cv_path = _cv_files.get(cv_session_id, "")
     session_id = str(uuid.uuid4())
+
     q: asyncio.Queue = asyncio.Queue()
+    fq: asyncio.Queue = asyncio.Queue(maxsize=10)
     _browser_queues[session_id] = q
+    _browser_frames[session_id] = fq
 
     async def cleanup_gen():
         try:
-            async for chunk in run_apply(job_id, job_url, cover_letter, profile, risks, session_id, q):
+            async for chunk in run_apply(
+                job_id, job_url, cover_letter, profile, risks, session_id, q, fq,
+                job_email=job_email, job_password=job_password, cv_path=cv_path,
+            ):
                 yield chunk
         finally:
             _browser_queues.pop(session_id, None)
+            _browser_frames.pop(session_id, None)
 
     return StreamingResponse(
         cleanup_gen(),
@@ -85,3 +113,30 @@ async def browser_input(session_id: str, body: dict):
         raise HTTPException(status_code=404, detail="Session not found or already complete")
     await q.put(body.get("instruction", ""))
     return {"queued": True}
+
+
+@app.get("/browser-stream/{session_id}")
+async def browser_stream(session_id: str):
+    """SSE stream of live CDP screencast JPEG frames."""
+    async def gen():
+        while True:
+            fq = _browser_frames.get(session_id)
+            if fq is None:
+                # Session ended — send close event and stop
+                yield f"data: {json.dumps({'type': 'close'})}\n\n"
+                return
+            try:
+                frame = await asyncio.wait_for(fq.get(), timeout=5.0)
+                yield f"data: {json.dumps({'frame': frame})}\n\n"
+            except asyncio.TimeoutError:
+                yield ": keepalive\n\n"  # SSE comment — keeps connection alive
+
+    return StreamingResponse(
+        gen(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
+    )

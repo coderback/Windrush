@@ -4,21 +4,20 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="657acfba-7aae-4604-a67f-31eee75bbb05" name="Changes" comment="update skill exposure scoring with new AI technologies and improve partial match logic">
+    <list default="true" id="657acfba-7aae-4604-a67f-31eee75bbb05" name="Changes" comment="add MCP server for job application automation with Adzuna API and implement interactive browser control">
+      <change afterPath="$PROJECT_DIR$/frontend/public/.gitkeep" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.env.example" beforeDir="false" afterPath="$PROJECT_DIR$/.env.example" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/api/Dockerfile" beforeDir="false" afterPath="$PROJECT_DIR$/api/Dockerfile" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/api/app/agent.py" beforeDir="false" afterPath="$PROJECT_DIR$/api/app/agent.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/api/app/job_proxy.py" beforeDir="false" afterPath="$PROJECT_DIR$/api/app/job_proxy.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/api/app/browser_agent.py" beforeDir="false" afterPath="$PROJECT_DIR$/api/app/browser_agent.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/api/app/main.py" beforeDir="false" afterPath="$PROJECT_DIR$/api/app/main.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/api/app/risk_scorer.py" beforeDir="false" afterPath="$PROJECT_DIR$/api/app/risk_scorer.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/api/requirements.txt" beforeDir="false" afterPath="$PROJECT_DIR$/api/requirements.txt" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/docker-compose.yml" beforeDir="false" afterPath="$PROJECT_DIR$/docker-compose.yml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/frontend/src/app/page.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/frontend/src/app/page.tsx" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/frontend/src/components/AgentLog.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/frontend/src/components/AgentLog.tsx" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/frontend/src/components/RiskRadar.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/frontend/src/components/RiskRadar.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/frontend/src/components/BrowserView.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/frontend/src/components/BrowserView.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/frontend/src/components/CoverLetter.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/frontend/src/components/CoverLetter.tsx" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/nginx/nginx.conf" beforeDir="false" afterPath="$PROJECT_DIR$/nginx/nginx.conf" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/scripts/download_economic_index.py" beforeDir="false" afterPath="$PROJECT_DIR$/scripts/download_economic_index.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -53,15 +52,21 @@
     <option name="hideEmptyMiddlePackages" value="true" />
     <option name="showLibraryContents" value="true" />
   </component>
-  <component name="PropertiesComponent">{
-  &quot;keyToString&quot;: {
-    &quot;ModuleVcsDetector.initialDetectionPerformed&quot;: &quot;true&quot;,
-    &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
-    &quot;RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252&quot;: &quot;true&quot;,
-    &quot;RunOnceActivity.git.unshallow&quot;: &quot;true&quot;,
-    &quot;git-widget-placeholder&quot;: &quot;main&quot;
+  <component name="PropertiesComponent"><![CDATA[{
+  "keyToString": {
+    "ModuleVcsDetector.initialDetectionPerformed": "true",
+    "RunOnceActivity.ShowReadmeOnStart": "true",
+    "RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252": "true",
+    "RunOnceActivity.git.unshallow": "true",
+    "git-widget-placeholder": "main",
+    "last_opened_file_path": "C:/Users/tobio/PycharmProjects/Windrush"
   }
-}</component>
+}]]></component>
+  <component name="RecentsManager">
+    <key name="CopyFile.RECENT_KEYS">
+      <recent name="C:\Users\tobio\PycharmProjects\Windrush" />
+    </key>
+  </component>
   <component name="SharedIndexes">
     <attachedChunks>
       <set>
@@ -141,7 +146,23 @@
       <option name="project" value="LOCAL" />
       <updated>1774104975330</updated>
     </task>
-    <option name="localTasksCounter" value="9" />
+    <task id="LOCAL-00009" summary="update skill exposure scoring with new AI technologies and improve partial match logic">
+      <option name="closed" value="true" />
+      <created>1774122090210</created>
+      <option name="number" value="00009" />
+      <option name="presentableId" value="LOCAL-00009" />
+      <option name="project" value="LOCAL" />
+      <updated>1774122090210</updated>
+    </task>
+    <task id="LOCAL-00010" summary="add MCP server for job application automation with Adzuna API and implement interactive browser control">
+      <option name="closed" value="true" />
+      <created>1774122643048</created>
+      <option name="number" value="00010" />
+      <option name="presentableId" value="LOCAL-00010" />
+      <option name="project" value="LOCAL" />
+      <updated>1774122643048</updated>
+    </task>
+    <option name="localTasksCounter" value="11" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -176,7 +197,8 @@
     <MESSAGE value="inject skill risks into tool executor for generate_skill_roadmap and increase max_tokens" />
     <MESSAGE value="add occupation exposure scoring using the Anthropic Economic Index and update job proxy fixture" />
     <MESSAGE value="update skill exposure scoring with new AI technologies and improve partial match logic" />
-    <option name="LAST_COMMIT_MESSAGE" value="update skill exposure scoring with new AI technologies and improve partial match logic" />
+    <MESSAGE value="add MCP server for job application automation with Adzuna API and implement interactive browser control" />
+    <option name="LAST_COMMIT_MESSAGE" value="add MCP server for job application automation with Adzuna API and implement interactive browser control" />
   </component>
   <component name="github-copilot-workspace">
     <instructionFileLocations>

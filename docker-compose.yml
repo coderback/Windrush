@@ -18,11 +18,13 @@ services:
     build: ./api
     expose: ["8000"]
     environment:
-      - GITHUB_TOKEN=${GITHUB_TOKEN}
+      - GROQ_API_KEY=${GROQ_API_KEY}
       - ECONOMIC_INDEX_PATH=/data/economic_index.json
       - TASK_PENETRATION_PATH=/data/task_penetration.csv
       - ADZUNA_APP_ID=${ADZUNA_APP_ID}
       - ADZUNA_API_KEY=${ADZUNA_API_KEY}
+      - JOB_EMAIL=${JOB_EMAIL}
+      - JOB_PASSWORD=${JOB_PASSWORD}
     volumes:
       - economic_data:/data:ro
     depends_on: [jobs-mcp]

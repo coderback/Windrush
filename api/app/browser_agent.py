@@ -1,69 +1,44 @@
 import asyncio
-import base64
 import json
+import os
 from typing import AsyncGenerator
 
-from playwright.async_api import async_playwright, Page
+from playwright.async_api import Page
+
+try:
+    from langchain_openai import ChatOpenAI as _BaseChatOpenAI
+    from browser_use import Agent, BrowserSession, BrowserProfile
+
+    class ChatOpenAI(_BaseChatOpenAI):
+        """Thin subclass that adds `provider` so browser-use's Agent.__init__ check passes."""
+        provider: str = "openai"
+
+    BROWSER_USE_AVAILABLE = True
+except ImportError:
+    BROWSER_USE_AVAILABLE = False
 
 
-FIELD_HINTS: dict[str, list[str]] = {
-    "name":         ["name", "full name", "fullname", "full_name", "applicant"],
-    "email":        ["email", "e-mail", "email address", "email_address"],
-    "phone":        ["phone", "mobile", "telephone", "tel", "contact number"],
-    "cover_letter": ["cover", "letter", "message", "motivation", "statement", "additional information"],
-}
+async def _screenshot_b64(page: Page) -> str:
+    try:
+        import base64
+        png = await page.screenshot(full_page=False)
+        return base64.b64encode(png).decode()
+    except Exception:
+        return ""
+
 
 DONE_COMMANDS = {"submit", "done", "skip", "cancel", "abort"}
 
 
-async def _screenshot_b64(page: Page) -> str:
-    png = await page.screenshot(full_page=False)
-    return base64.b64encode(png).decode()
-
-
-async def _fill_field(page: Page, value: str, hints: list[str]) -> bool:
-    """Try common selector strategies to fill a field. Returns True if filled."""
-    for hint in hints:
-        for strategy in [
-            lambda h: page.get_by_label(h, exact=False),
-            lambda h: page.locator(f'input[name*="{h}" i], textarea[name*="{h}" i]'),
-            lambda h: page.locator(f'input[placeholder*="{h}" i], textarea[placeholder*="{h}" i]'),
-            lambda h: page.locator(f'input[id*="{h}" i], textarea[id*="{h}" i]'),
-        ]:
-            try:
-                loc = strategy(hint)
-                if await loc.count() > 0 and await loc.first.is_visible():
-                    await loc.first.fill(value)
-                    return True
-            except Exception:
-                pass
-    return False
-
-
-def _detect_blocked(content: str) -> tuple[bool, str | None]:
-    lower = content.lower()
-    if any(kw in lower for kw in ["sign in to apply", "log in to apply", "login to apply", "create an account to apply", "suspicious", "unusual behaviour"]):
-        return True, "Login or verification required — take over below"
-    if any(kw in lower for kw in ["captcha", "i'm not a robot", "verify you are human", "prove you're human"]):
-        return True, "CAPTCHA detected — complete it below"
-    return False, None
-
-
-async def _interactive_session(page: Page, instruction_queue: asyncio.Queue) -> AsyncGenerator[dict, None]:
+async def _interactive_session(page: Page, instruction_queue: asyncio.Queue, context=None) -> AsyncGenerator[dict, None]:
     """
-    Hand control to the user. Loops processing commands from instruction_queue:
-      { "type": "click", "x": N, "y": N }
-      { "type": "type", "text": "..." }
-      { "type": "key", "key": "Enter" }
-      { "type": "scroll", "delta": N }
-      plain text "submit" / "skip" / "done" → exits loop
-
-    Yields a fresh screenshot after every command.
+    Hand control to the user. Loops processing commands from instruction_queue.
+    Automatically follows new tabs opened by clicks.
     """
     screenshot = await _screenshot_b64(page)
     yield {
         "action": "You have control — click the screenshot or type below",
-        "screenshot": screenshot,
+        "screenshot": screenshot or None,
         "blocked": True,
         "reason": "Click anywhere on the screenshot to interact, type in the box, or type 'submit' / 'skip'.",
         "done": False,
@@ -77,7 +52,6 @@ async def _interactive_session(page: Page, instruction_queue: asyncio.Queue) -> 
             yield {"action": "Session timed out", "screenshot": None, "blocked": False, "reason": None, "done": True}
             return
 
-        # Try to parse as structured command
         cmd: dict | None = None
         try:
             parsed = json.loads(raw)
@@ -89,8 +63,16 @@ async def _interactive_session(page: Page, instruction_queue: asyncio.Queue) -> 
         if cmd:
             kind = cmd.get("type", "")
             if kind == "click":
+                pages_before = list(context.pages) if context else []
                 await page.mouse.click(float(cmd["x"]), float(cmd["y"]))
-                await page.wait_for_timeout(600)
+                await page.wait_for_timeout(800)
+                if context and len(context.pages) > len(pages_before):
+                    new_page = context.pages[-1]
+                    try:
+                        await new_page.wait_for_load_state("domcontentloaded", timeout=10000)
+                        page = new_page
+                    except Exception:
+                        pass
             elif kind == "type":
                 await page.keyboard.type(str(cmd.get("text", "")))
                 await page.wait_for_timeout(200)
@@ -107,7 +89,7 @@ async def _interactive_session(page: Page, instruction_queue: asyncio.Queue) -> 
             screenshot = await _screenshot_b64(page)
             yield {
                 "action": f"Executed: {kind}",
-                "screenshot": screenshot,
+                "screenshot": screenshot or None,
                 "blocked": True,
                 "reason": "Click the screenshot or type below. Type 'submit' when done.",
                 "done": False,
@@ -115,7 +97,6 @@ async def _interactive_session(page: Page, instruction_queue: asyncio.Queue) -> 
             }
 
         else:
-            # Plain text command
             text = str(raw).strip().lower()
             if text in DONE_COMMANDS:
                 if text in ("skip", "cancel", "abort"):
@@ -123,13 +104,12 @@ async def _interactive_session(page: Page, instruction_queue: asyncio.Queue) -> 
                 else:
                     yield {"action": "User confirmed — proceeding", "screenshot": None, "blocked": False, "reason": None, "done": True}
                 return
-            # Treat as keyboard input
             await page.keyboard.type(str(raw))
             await page.wait_for_timeout(200)
             screenshot = await _screenshot_b64(page)
             yield {
                 "action": f"Typed: {raw[:40]}",
-                "screenshot": screenshot,
+                "screenshot": screenshot or None,
                 "blocked": True,
                 "reason": "Click the screenshot or type below. Type 'submit' when done.",
                 "done": False,
@@ -137,119 +117,197 @@ async def _interactive_session(page: Page, instruction_queue: asyncio.Queue) -> 
             }
 
 
+def _build_task(job_url: str, cv_profile: dict, cover_letter: str,
+                job_email: str, job_password: str, cv_path: str) -> str:
+    lines = []
+    if job_email:
+        lines.append(f"If asked to log in, use: email={job_email}, password={job_password}")
+    if cv_path:
+        lines.append(f"If asked to upload a CV/resume, upload the file at: {cv_path}")
+
+    profile_lines = []
+    if cv_profile.get("name"):
+        profile_lines.append(f"Full name: {cv_profile['name']}")
+    if cv_profile.get("email") or job_email:
+        profile_lines.append(f"Email: {cv_profile.get('email') or job_email}")
+    if cv_profile.get("phone"):
+        profile_lines.append(f"Phone: {cv_profile['phone']}")
+    if cv_profile.get("address"):
+        profile_lines.append(f"Address: {cv_profile['address']}")
+    if cv_profile.get("linkedin"):
+        profile_lines.append(f"LinkedIn: {cv_profile['linkedin']}")
+    if cv_profile.get("github"):
+        profile_lines.append(f"GitHub: {cv_profile['github']}")
+    for edu in cv_profile.get("education", []):
+        profile_lines.append(
+            f"Education: {edu.get('degree', '')} at {edu.get('institution', '')} ({edu.get('dates', '')})"
+        )
+    for exp in cv_profile.get("experience", [])[:3]:
+        profile_lines.append(
+            f"Experience: {exp.get('title', '')} at {exp.get('employer', '')} "
+            f"({exp.get('dates', '')}): {exp.get('summary', '')[:100]}"
+        )
+
+    creds_block = "\n".join(lines)
+    profile_block = "\n".join(profile_lines)
+    task = f"Apply for the job at: {job_url}"
+    if creds_block:
+        task += f"\n\n{creds_block}"
+    if profile_block:
+        task += f"\n\nApplicant details:\n{profile_block}"
+    task += f"\n\nCover letter:\n{cover_letter[:1500]}"
+    task += "\n\nComplete and submit the application. Fill every required field."
+    return task
+
+
 async def apply_with_browser(
     job_url: str,
     cv_profile: dict,
     cover_letter: str,
     instruction_queue: asyncio.Queue,
+    frame_queue: asyncio.Queue | None = None,
+    job_email: str = "",
+    job_password: str = "",
+    cv_path: str = "",
 ) -> AsyncGenerator[dict, None]:
     """
-    Async generator — navigate to job_url and attempt to fill the application form.
-
-    Yields dicts:
-        { action, screenshot (base64|None), blocked (bool), reason (str|None), done (bool) }
-
-    Provides interactive takeover via _interactive_session() at both block points and
-    the pre-submit review pause.
+    Async generator — uses browser-use LLM agent to autonomously complete a job application.
+    Falls back to interactive session if the agent fails.
+    Yields dicts: { action, screenshot (base64|None), blocked (bool), reason (str|None), done (bool) }
     """
-    async with async_playwright() as pw:
-        browser = await pw.chromium.launch(
-            headless=True,
-            args=[
-                "--no-sandbox",
-                "--disable-dev-shm-usage",
-                "--disable-blink-features=AutomationControlled",
-                "--disable-infobars",
-                "--window-size=1280,800",
-            ],
-        )
-        context = await browser.new_context(
-            viewport={"width": 1280, "height": 800},
-            user_agent=(
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-            ),
-        )
-        page = await context.new_page()
-        await page.add_init_script("""
-            Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-            Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3] });
-            Object.defineProperty(navigator, 'languages', { get: () => ['en-GB', 'en'] });
-            window.chrome = { runtime: {} };
-        """)
+    if not BROWSER_USE_AVAILABLE:
+        yield {
+            "action": "browser-use not installed — please rebuild the Docker image",
+            "screenshot": None, "blocked": False, "reason": None, "done": True,
+        }
+        return
 
-        try:
-            # 1. Navigate
-            yield {"action": "Navigating to job listing…", "screenshot": None, "blocked": False, "reason": None, "done": False}
+    task = _build_task(job_url, cv_profile, cover_letter, job_email, job_password, cv_path)
+
+    yield {"action": "Browser agent starting…", "screenshot": None, "blocked": False, "reason": None, "done": False}
+
+    browser_profile = BrowserProfile(
+        headless=True,
+        args=[
+            "--no-sandbox",
+            "--disable-dev-shm-usage",
+            "--disable-blink-features=AutomationControlled",
+            "--window-size=1280,800",
+        ],
+    )
+    browser_session = BrowserSession(browser_profile=browser_profile)
+
+    step_queue: asyncio.Queue = asyncio.Queue()
+
+    async def on_step(browser_state, agent_output, step_number):
+        screenshot = browser_state.screenshot  # already base64 JPEG
+        if frame_queue is not None and screenshot:
             try:
-                await page.goto(job_url, wait_until="domcontentloaded", timeout=30000)
-            except Exception as e:
-                yield {"action": f"Navigation failed: {e}", "screenshot": None, "blocked": False, "reason": None, "done": True}
-                return
-            await page.wait_for_timeout(1500)
+                frame_queue.put_nowait(screenshot)
+            except asyncio.QueueFull:
+                pass
+        goal = getattr(agent_output, "next_goal", "") or ""
+        actions = getattr(agent_output, "action", None) or []
+        action_str = str(goal or (actions[0] if actions else agent_output))[:120]
+        await step_queue.put({
+            "action": f"Step {step_number}: {action_str}",
+            "screenshot": screenshot,
+            "blocked": False,
+            "reason": None,
+            "done": False,
+        })
 
-            screenshot = await _screenshot_b64(page)
-            yield {"action": "Arrived at job page", "screenshot": screenshot, "blocked": False, "reason": None, "done": False}
+    llm = ChatOpenAI(
+        base_url="https://api.groq.com/openai/v1",
+        api_key=os.environ.get("GROQ_API_KEY", ""),
+        model="meta-llama/llama-4-scout-17b-16e-instruct",
+    )
 
-            # 2. Check for hard blockers — hand to interactive session if blocked
-            content = await page.content()
-            blocked, reason = _detect_blocked(content)
-            if blocked:
-                screenshot = await _screenshot_b64(page)
-                yield {"action": "Blocked — handing control to you", "screenshot": screenshot, "blocked": True, "reason": reason, "done": False}
-                async for step in _interactive_session(page, instruction_queue):
-                    yield step
-                    if step.get("done"):
-                        return
-                # After user takes over, take fresh screenshot and continue
-                await page.wait_for_timeout(500)
+    agent = Agent(
+        task=task,
+        llm=llm,
+        browser_session=browser_session,
+        register_new_step_callback=on_step,
+        use_vision=False,
+    )
+    agent_task = asyncio.create_task(agent.run())
 
-            # 3. Find and click Apply button
-            apply_selectors = [
-                'a:has-text("Apply now")', 'button:has-text("Apply now")',
-                'a:has-text("Apply")', 'button:has-text("Apply")',
-                '[data-testid*="apply"]', '[aria-label*="apply" i]',
-            ]
-            clicked = False
-            for sel in apply_selectors:
+    # Stream step events while agent runs
+    while not agent_task.done():
+        try:
+            event = await asyncio.wait_for(step_queue.get(), timeout=1.0)
+            yield event
+        except asyncio.TimeoutError:
+            pass
+
+    # Drain any remaining buffered events
+    while not step_queue.empty():
+        yield await step_queue.get()
+
+    # Check agent result
+    agent_error = None
+    try:
+        result = agent_task.result()
+        result_str = str(result)[:200] if result else "Done"
+        yield {"action": f"Agent finished: {result_str}", "screenshot": None, "blocked": False, "reason": None, "done": False}
+    except Exception as e:
+        agent_error = e
+
+    # Get current Playwright page via browser_session.context
+    page = None
+    pw_context = None
+    try:
+        pw_context = getattr(browser_session, "context", None)
+        if pw_context and pw_context.pages:
+            page = pw_context.pages[-1]
+    except Exception:
+        pass
+
+    if agent_error and page:
+        screenshot = await _screenshot_b64(page)
+        yield {
+            "action": f"Agent encountered an issue — handing control to you ({agent_error})",
+            "screenshot": screenshot or None,
+            "blocked": True,
+            "reason": "Take over to complete the application, then type 'submit'.",
+            "done": False,
+            "interactive": True,
+        }
+        async for step in _interactive_session(page, instruction_queue, pw_context):
+            yield step
+            if step.get("done"):
                 try:
-                    loc = page.locator(sel).first
-                    if await loc.count() > 0 and await loc.is_visible():
-                        await loc.click()
-                        clicked = True
-                        await page.wait_for_timeout(2000)
-                        break
+                    await browser_session.close()
                 except Exception:
                     pass
+                return
+    elif agent_error:
+        yield {"action": f"Browser error: {agent_error}", "screenshot": None, "blocked": False, "reason": None, "done": True}
+        try:
+            await browser_session.close()
+        except Exception:
+            pass
+        return
 
-            screenshot = await _screenshot_b64(page)
-            yield {
-                "action": "Clicked Apply — loading form" if clicked else "No Apply button found — attempting direct form fill",
-                "screenshot": screenshot,
-                "blocked": False,
-                "reason": None,
-                "done": False,
-            }
+    # Final interactive review before submit
+    if page:
+        screenshot = await _screenshot_b64(page)
+        yield {
+            "action": "Review the filled form — type 'submit' to submit or 'skip' to skip",
+            "screenshot": screenshot or None,
+            "blocked": True,
+            "reason": "Check the form looks correct before submitting.",
+            "done": False,
+            "interactive": True,
+        }
+        async for step in _interactive_session(page, instruction_queue, pw_context):
+            yield step
+            if step.get("done"):
+                break
+    else:
+        yield {"action": "Application complete", "screenshot": None, "blocked": False, "reason": None, "done": True}
 
-            # 4. Auto-fill fields
-            fill_map = {
-                "name":         cv_profile.get("name", ""),
-                "email":        cv_profile.get("email", ""),
-                "phone":        cv_profile.get("phone", ""),
-                "cover_letter": cover_letter,
-            }
-            for field_key, value in fill_map.items():
-                if not value:
-                    continue
-                filled = await _fill_field(page, value, FIELD_HINTS[field_key])
-                if filled:
-                    yield {"action": f"Filled {field_key.replace('_', ' ')}", "screenshot": None, "blocked": False, "reason": None, "done": False}
-
-            # 5. Hand to interactive session for review + submit
-            async for step in _interactive_session(page, instruction_queue):
-                yield step
-                if step.get("done"):
-                    return
-
-        finally:
-            await browser.close()
+    try:
+        await browser_session.close()
+    except Exception:
+        pass

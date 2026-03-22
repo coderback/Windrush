@@ -1,10 +1,11 @@
 import asyncio
 import json
 import os
+import re
 import time
 from typing import AsyncGenerator
 
-from openai import AsyncOpenAI
+from openai import AsyncOpenAI, BadRequestError
 
 from .cv_parser import extract_text
 from .risk_scorer import lookup_onet, lookup_by_title, ECONOMIC_INDEX
@@ -12,13 +13,16 @@ from .job_proxy import search_jobs
 from .browser_agent import apply_with_browser
 
 client = AsyncOpenAI(
-    base_url="https://models.inference.ai.azure.com",
-    api_key=os.environ.get("GITHUB_TOKEN", ""),
+    base_url="https://api.groq.com/openai/v1",
+    api_key=os.environ.get("GROQ_API_KEY", ""),
 )
 
-MODEL = "gpt-4o-mini"
+MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"
 
 SYSTEM_PROMPT = """You are Windrush, an AI career transition advisor helping workers navigate the impact of AI on their careers.
+
+IMPORTANT: You MUST use the structured tool_calls mechanism to call tools. Never write tool calls as plain text like <function=name> or ```json. Always use the API's tool_calls field.
+
 
 Work through this pipeline in order, passing data between tools explicitly:
 
@@ -151,7 +155,6 @@ TOOLS = [
                         "items": {"type": "object"},
                         "description": "List of scored skill risks",
                     },
-                    "target_job": {"type": "object", "description": "Target job to pivot toward"},
                 },
                 "required": ["skill_risks"],
             },
@@ -185,9 +188,12 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
                     "role": "system",
                     "content": (
                         "Extract a structured profile from this CV. Return compact JSON with: "
-                        "name, location, skills (array, max 12 most relevant), "
-                        "job_titles (array, max 3), experience_years (number), "
-                        "summary (1 sentence only)."
+                        "name, email, phone, address (full postal address if present), "
+                        "location (city/region), linkedin (URL or username), github (URL or username), "
+                        "skills (array, max 12 most relevant), job_titles (array, max 3), "
+                        "experience_years (number), summary (1 sentence only), "
+                        "education (array of {institution, degree, dates}), "
+                        "experience (array of {employer, title, dates, summary} — max 5 most recent)."
                     ),
                 },
                 {"role": "user", "content": cv_text[:4000]},
@@ -303,6 +309,70 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
     return {"error": f"Unknown tool: {name}"}
 
 
+def _parse_llama_tool_call(error: BadRequestError) -> tuple[str, dict] | None:
+    """
+    Llama 3.x sometimes generates <function=NAME=JSON></function> instead of
+    proper tool_calls. Extract name + args from the error's failed_generation field.
+    """
+    try:
+        body = error.response.json()
+        text = body.get("error", {}).get("failed_generation", "")
+    except Exception:
+        return None
+    match = re.search(r"<function=([^=]+)=(\{.*?\})\s*>", text, re.DOTALL)
+    if not match:
+        return None
+    name = match.group(1).strip()
+    try:
+        args = json.loads(match.group(2))
+    except json.JSONDecodeError:
+        return None
+    return name, args
+
+
+async def _chat(messages: list, tools: list) -> object:
+    """
+    Wrapper around client.chat.completions.create that recovers from the
+    Llama <function=name=args> format bug by returning a synthetic response.
+    """
+    try:
+        return await client.chat.completions.create(model=MODEL, tools=tools, messages=messages)
+    except BadRequestError as e:
+        parsed = _parse_llama_tool_call(e)
+        if parsed is None:
+            raise
+        name, args = parsed
+
+        class _FakeFunction:
+            def __init__(self):
+                self.name = name
+                self.arguments = json.dumps(args)
+
+        class _FakeToolCall:
+            def __init__(self):
+                self.id = "fallback-0"
+                self.function = _FakeFunction()
+            def model_dump(self):
+                return {"id": self.id, "type": "function",
+                        "function": {"name": name, "arguments": json.dumps(args)}}
+
+        class _FakeMessage:
+            def __init__(self):
+                self.content = None
+                self.tool_calls = [_FakeToolCall()]
+
+        class _FakeChoice:
+            def __init__(self):
+                self.message = _FakeMessage()
+                self.finish_reason = "tool_calls"
+
+        class _FakeResponse:
+            def __init__(self):
+                self.choices = [_FakeChoice()]
+
+        return _FakeResponse()
+
+
 def _sse(event_type: str, data: dict) -> str:
     payload = {"type": event_type, "timestamp": time.time(), **data}
     return f"data: {json.dumps(payload)}\n\n"
@@ -321,11 +391,7 @@ async def run_pipeline(cv_text: str, location: str = "London") -> AsyncGenerator
     yield _sse("start", {"message": "Pipeline started"})
 
     while True:
-        response = await client.chat.completions.create(
-            model=MODEL,
-            tools=TOOLS,
-            messages=messages,
-        )
+        response = await _chat(messages, TOOLS)
 
         message = response.choices[0].message
         finish_reason = response.choices[0].finish_reason
@@ -366,6 +432,10 @@ async def run_apply(
     skill_risks: list | None = None,
     session_id: str = "",
     instruction_queue: asyncio.Queue | None = None,
+    frame_queue: asyncio.Queue | None = None,
+    job_email: str = "",
+    job_password: str = "",
+    cv_path: str = "",
 ) -> AsyncGenerator[str, None]:
     """Apply phase: browser automation first, then skill roadmap generation."""
     cv_profile = cv_profile or {}
@@ -375,12 +445,16 @@ async def run_apply(
 
     # --- Browser phase ---
     if job_url and instruction_queue is not None:
-        async for step in apply_with_browser(job_url, cv_profile, cover_letter, instruction_queue):
+        async for step in apply_with_browser(
+            job_url, cv_profile, cover_letter, instruction_queue, frame_queue,
+            job_email=job_email, job_password=job_password, cv_path=cv_path,
+        ):
             event_type = "browser_blocked" if step.get("blocked") else "browser_action"
             yield _sse(event_type, {
                 "action": step.get("action", ""),
                 "screenshot": step.get("screenshot"),
                 "reason": step.get("reason"),
+                "interactive": step.get("interactive", False),
             })
             if step.get("done"):
                 break
@@ -405,11 +479,7 @@ async def run_apply(
         return await execute_tool(name, tool_input)
 
     while True:
-        response = await client.chat.completions.create(
-            model=MODEL,
-            tools=TOOLS,
-            messages=messages,
-        )
+        response = await _chat(messages, TOOLS)
 
         message = response.choices[0].message
         finish_reason = response.choices[0].finish_reason
@@ -418,6 +488,7 @@ async def run_apply(
             yield _sse("text", {"text": message.content})
 
         tool_results = []
+        roadmap_done = False
         if message.tool_calls:
             for tool_call in message.tool_calls:
                 tool_input = json.loads(tool_call.function.arguments)
@@ -429,8 +500,10 @@ async def run_apply(
                     "tool_call_id": tool_call.id,
                     "content": json.dumps(result),
                 })
+                if tool_call.function.name == "generate_skill_roadmap":
+                    roadmap_done = True
 
-        if finish_reason == "stop" or not message.tool_calls:
+        if roadmap_done or finish_reason == "stop" or not message.tool_calls:
             yield _sse("done", {"message": "Done"})
             break
 

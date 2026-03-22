@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useRef, useState, useEffect } from "react";
 
 interface Props {
   action: string;
@@ -26,7 +26,22 @@ export default function BrowserView({
 }: Props) {
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
+  const [liveFrame, setLiveFrame] = useState<string | null>(null);
   const imgRef = useRef<HTMLImageElement>(null);
+
+  // Open a separate SSE connection for live CDP screencast frames
+  useEffect(() => {
+    if (!sessionId) return;
+    const es = new EventSource(`/api/browser-stream/${sessionId}`);
+    es.onmessage = (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        if (data.frame) setLiveFrame(data.frame);
+        if (data.type === "close") es.close();
+      } catch {}
+    };
+    return () => es.close();
+  }, [sessionId]);
 
   const send = async (payload: object | string) => {
     const instruction = typeof payload === "string" ? payload : JSON.stringify(payload);
@@ -86,10 +101,10 @@ export default function BrowserView({
 
       {/* Screenshot */}
       <div className="w-full max-w-5xl border border-zinc-700 rounded-lg overflow-hidden bg-zinc-900 shrink-0">
-        {screenshot ? (
+        {(liveFrame || screenshot) ? (
           <img
             ref={imgRef}
-            src={`data:image/png;base64,${screenshot}`}
+            src={liveFrame ? `data:image/jpeg;base64,${liveFrame}` : `data:image/png;base64,${screenshot}`}
             alt="Browser view"
             className={`w-full h-auto block ${interactive ? "cursor-crosshair select-none" : ""}`}
             onClick={handleImageClick}

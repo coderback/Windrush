@@ -11,11 +11,17 @@ import BrowserView from "@/components/BrowserView";
 interface CVProfile {
   name?: string;
   email?: string;
+  phone?: string;
+  address?: string;
   location?: string;
+  linkedin?: string;
+  github?: string;
   skills?: string[];
   job_titles?: string[];
   experience_years?: number;
   summary?: string;
+  education?: { institution: string; degree: string; dates: string }[];
+  experience?: { employer: string; title: string; dates: string; summary: string }[];
 }
 
 type Phase =
@@ -40,6 +46,9 @@ export default function Home() {
   const [dragOver, setDragOver] = useState(false);
   const [pendingCoverLetter, setPendingCoverLetter] = useState("");
   const [sessionId, setSessionId] = useState("");
+  const [cvSessionId, setCvSessionId] = useState("");
+  const [jobEmail, setJobEmail] = useState("");
+  const [jobPassword, setJobPassword] = useState("");
   const [browserScreenshot, setBrowserScreenshot] = useState<string | null>(null);
   const [browserAction, setBrowserAction] = useState("");
   const [browserBlocked, setBrowserBlocked] = useState(false);
@@ -67,6 +76,10 @@ export default function Home() {
 
       if (ev.type === "start" && (ev as AgentEvent & { session_id?: string }).session_id) {
         setSessionId((ev as AgentEvent & { session_id?: string }).session_id!);
+      }
+
+      if (ev.type === "cv_session" && (ev as AgentEvent & { cv_session_id?: string }).cv_session_id) {
+        setCvSessionId((ev as AgentEvent & { cv_session_id?: string }).cv_session_id!);
       }
 
       if (ev.type === "browser_action") {
@@ -141,6 +154,7 @@ export default function Home() {
     setPendingCoverLetter("");
     setRoadmap([]);
     setAppliedConfirmation("");
+    setCvSessionId("");
 
     const form = new FormData();
     form.append("file", file);
@@ -198,6 +212,9 @@ export default function Home() {
     form.append("cover_letter", cl);
     form.append("cv_profile", JSON.stringify(cvProfile ?? {}));
     form.append("skill_risks", JSON.stringify(skillRisks));
+    form.append("job_email", jobEmail);
+    form.append("job_password", jobPassword);
+    form.append("cv_session_id", cvSessionId);
 
     const response = await fetch("/api/apply", { method: "POST", body: form });
     const reader = response.body!.getReader();
@@ -388,6 +405,10 @@ export default function Home() {
           onApprove={handleApprove}
           onSkip={() => { setCoverLetter(""); setPendingCoverLetter(""); setPhase("done"); }}
           applying={isApplying}
+          jobEmail={jobEmail}
+          jobPassword={jobPassword}
+          onJobEmailChange={setJobEmail}
+          onJobPasswordChange={setJobPassword}
         />
       )}
     </main>

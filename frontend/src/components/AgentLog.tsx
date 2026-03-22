@@ -4,7 +4,7 @@ import { useEffect, useRef } from "react";
 
 export interface AgentEvent {
   type: "start" | "tool_call" | "tool_result" | "text" | "done"
-      | "browser_action" | "browser_blocked";
+      | "browser_action" | "browser_blocked" | "cv_session";
   timestamp: number;
   tool_name?: string;
   tool_input?: Record<string, unknown>;
@@ -12,6 +12,7 @@ export interface AgentEvent {
   text?: string;
   message?: string;
   session_id?: string;
+  cv_session_id?: string;
   // Browser events
   action?: string;
   screenshot?: string;
