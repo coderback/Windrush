@@ -8,7 +8,7 @@ from playwright.async_api import Page
 
 try:
     from browser_use import Agent, BrowserSession, BrowserProfile
-    from browser_use.llm.groq.chat import ChatGroq
+    from langchain_anthropic import ChatAnthropic
 
     BROWSER_USE_AVAILABLE = True
 except ImportError:
@@ -213,18 +213,19 @@ def _build_task(job_url: str, cv_profile: dict, cover_letter: str,
         profile_lines.append(f"LinkedIn: {cv_profile['linkedin']}")
     if cv_profile.get("github"):
         profile_lines.append(f"GitHub: {cv_profile['github']}")
-    # Keep education/experience minimal — only most recent entry each
-    edu_list = cv_profile.get("education", [])
-    if edu_list:
-        edu = edu_list[0]
+    if cv_profile.get("experience_years"):
+        profile_lines.append(f"Years of experience: {cv_profile['experience_years']}")
+
+    # All education entries — applications often ask about each degree separately
+    for edu in cv_profile.get("education", []):
         profile_lines.append(
             f"Education: {edu.get('degree', '')} at {edu.get('institution', '')} ({edu.get('dates', '')})"
         )
-    exp_list = cv_profile.get("experience", [])
-    if exp_list:
-        exp = exp_list[0]
+    # Up to 3 experience entries — needed to fill work history sections
+    for exp in cv_profile.get("experience", [])[:3]:
         profile_lines.append(
-            f"Experience: {exp.get('title', '')} at {exp.get('employer', '')} ({exp.get('dates', '')})"
+            f"Experience: {exp.get('title', '')} at {exp.get('employer', '')} "
+            f"({exp.get('dates', '')})"
         )
 
     creds_block = "\n".join(lines)
@@ -234,8 +235,21 @@ def _build_task(job_url: str, cv_profile: dict, cover_letter: str,
         task += f"\n\n{creds_block}"
     if profile_block:
         task += f"\n\nApplicant details:\n{profile_block}"
-    task += f"\n\nCover letter (first 500 chars for context):\n{cover_letter[:500]}"
-    task += "\n\nComplete and submit the application. Fill every required field."
+
+    task += (
+        "\n\nFor dropdown / multiple-choice questions use these answers:"
+        "\n- Right to work / work authorisation in the UK: Yes"
+        "\n- Require visa sponsorship: No"
+        "\n- Gender: Prefer not to say"
+        "\n- Ethnicity / diversity questions: Prefer not to say"
+        "\n- Disability: No"
+        "\n- Salary expectations: leave blank or select 'Negotiable' if forced"
+        "\n- How did you hear about us: Website / Internet search"
+        "\n- Are you currently employed: Yes if experience list is non-empty, else No"
+    )
+
+    task += f"\n\nFull cover letter to paste into any cover letter field:\n{cover_letter}"
+    task += "\n\nComplete and submit the application. Fill every required field. If a field is optional and you don't have the answer, leave it blank."
     return task
 
 
@@ -296,9 +310,9 @@ async def apply_with_browser(
             "done": False,
         })
 
-    llm = ChatGroq(
-        api_key=os.environ.get("GROQ_API_KEY", ""),
-        model="meta-llama/llama-4-scout-17b-16e-instruct",
+    llm = ChatAnthropic(
+        api_key=os.environ.get("ANTHROPIC_API_KEY", ""),
+        model="claude-sonnet-4-6",
     )
 
     agent = Agent(
@@ -306,7 +320,7 @@ async def apply_with_browser(
         llm=llm,
         browser_session=browser_session,
         register_new_step_callback=on_step,
-        use_vision=False,
+        use_vision=True,
     )
     agent_task = asyncio.create_task(agent.run())
     screenshotter_task = (

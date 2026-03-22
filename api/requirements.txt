@@ -10,3 +10,4 @@ numpy>=1.26
 playwright>=1.45
 browser-use>=0.1
 langchain-openai>=0.2
+langchain-anthropic>=0.3

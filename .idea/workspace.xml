@@ -4,9 +4,13 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="657acfba-7aae-4604-a67f-31eee75bbb05" name="Changes" comment="implement guardrails for CV input validation and job search query sanitization">
+    <list default="true" id="657acfba-7aae-4604-a67f-31eee75bbb05" name="Changes" comment="update job title matching logic and implement job scraping functionality">
+      <change beforePath="$PROJECT_DIR$/.env.example" beforeDir="false" afterPath="$PROJECT_DIR$/.env.example" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/api/app/agent.py" beforeDir="false" afterPath="$PROJECT_DIR$/api/app/agent.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/api/app/browser_agent.py" beforeDir="false" afterPath="$PROJECT_DIR$/api/app/browser_agent.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/api/requirements.txt" beforeDir="false" afterPath="$PROJECT_DIR$/api/requirements.txt" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/docker-compose.yml" beforeDir="false" afterPath="$PROJECT_DIR$/docker-compose.yml" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -175,7 +179,15 @@
       <option name="project" value="LOCAL" />
       <updated>1774164374346</updated>
     </task>
-    <option name="localTasksCounter" value="14" />
+    <task id="LOCAL-00014" summary="update job title matching logic and implement job scraping functionality">
+      <option name="closed" value="true" />
+      <created>1774166443982</created>
+      <option name="number" value="00014" />
+      <option name="presentableId" value="LOCAL-00014" />
+      <option name="project" value="LOCAL" />
+      <updated>1774166443982</updated>
+    </task>
+    <option name="localTasksCounter" value="15" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -214,7 +226,8 @@
     <MESSAGE value="update environment configuration and enhance agent functionality for Groq API integration" />
     <MESSAGE value="update model configuration to use moonshotai/kimi-k2-instruct for improved performance" />
     <MESSAGE value="implement guardrails for CV input validation and job search query sanitization" />
-    <option name="LAST_COMMIT_MESSAGE" value="implement guardrails for CV input validation and job search query sanitization" />
+    <MESSAGE value="update job title matching logic and implement job scraping functionality" />
+    <option name="LAST_COMMIT_MESSAGE" value="update job title matching logic and implement job scraping functionality" />
   </component>
   <component name="github-copilot-workspace">
     <instructionFileLocations>

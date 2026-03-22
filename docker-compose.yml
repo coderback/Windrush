@@ -19,6 +19,7 @@ services:
     expose: ["8000"]
     environment:
       - GROQ_API_KEY=${GROQ_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - ECONOMIC_INDEX_PATH=/data/economic_index.json
       - TASK_PENETRATION_PATH=/data/task_penetration.csv
       - ADZUNA_APP_ID=${ADZUNA_APP_ID}

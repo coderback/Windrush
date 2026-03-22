@@ -23,7 +23,7 @@ client = AsyncOpenAI(
     api_key=os.environ.get("GROQ_API_KEY", ""),
 )
 
-MODEL = "openai/gpt-oss-120b"
+MODEL = "llama-3.3-70b-versatile"
 
 SYSTEM_PROMPT = """You are Windrush, an AI career transition advisor helping workers navigate the impact of AI on their careers.
 
@@ -152,14 +152,22 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "generate_skill_roadmap",
-            "description": "Generate a prioritised skill development roadmap to reduce AI exposure risk.",
+            "description": "Generate a prioritised skill development roadmap tailored to the candidate's industry and career goals.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "skill_risks": {
                         "type": "array",
                         "items": {"type": "object"},
-                        "description": "List of scored skill risks",
+                        "description": "List of scored skill risks from score_ai_risk",
+                    },
+                    "cv_profile": {
+                        "type": "object",
+                        "description": "Structured CV profile from extract_cv_profile — used to tailor roadmap to the candidate's industry and background",
+                    },
+                    "target_job_title": {
+                        "type": "string",
+                        "description": "Title of the job the candidate is targeting",
                     },
                 },
                 "required": ["skill_risks"],
@@ -301,8 +309,29 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
 
     elif name == "generate_skill_roadmap":
         skill_risks = tool_input.get("skill_risks", [])
-        target_job = tool_input.get("target_job", {})
-        high_risk = [s for s in skill_risks if s.get("exposure", s.get("overall_exposure", 0)) >= 0.5]
+        cv_profile = tool_input.get("cv_profile", {})
+        target_job_title = tool_input.get("target_job_title", "")
+
+        # Only flag skills with a confirmed high score — 0.5 is the no-data default,
+        # not a genuine "high risk" signal, so we use a higher threshold.
+        confirmed_high = [s for s in skill_risks if s.get("exposure", 0) > 0.65]
+        confirmed_low  = [s for s in skill_risks if 0 < s.get("exposure", 0) <= 0.35]
+        # Skills at exactly 0.5 (no ONET data) are omitted from risk labels
+        all_skills_str = ", ".join(
+            f"{s['skill']} ({int(s.get('exposure',0)*100)}%)" for s in skill_risks
+        )
+
+        # Build a concise candidate context for the prompt
+        name_str = cv_profile.get("name", "the candidate")
+        summary = cv_profile.get("summary", "")
+        job_titles = cv_profile.get("job_titles", [])
+        edu = cv_profile.get("education", [{}])[0] if cv_profile.get("education") else {}
+        edu_str = f"{edu.get('degree','')} at {edu.get('institution','')}" if edu else ""
+        exp_list = cv_profile.get("experience", [])
+        exp_str = "; ".join(
+            f"{e.get('title','')} at {e.get('employer','')}" for e in exp_list[:3]
+        )
+
         resp = await client.chat.completions.create(
             model=MODEL,
             response_format={"type": "json_object"},
@@ -310,18 +339,38 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
                 {
                     "role": "system",
                     "content": (
-                        "Generate a skill development roadmap. Return JSON with key 'items', an array of objects each with: "
-                        "skill (string), action (string, specific course or project), "
+                        "You are a career coach specialising in AI-resilient career development. "
+                        "Given a candidate's background, generate a personalised skill development roadmap. "
+                        "Return JSON with key 'items', an array of exactly 6 objects each with: "
+                        "skill (string — the skill to develop), "
+                        "reason (string — one sentence explaining WHY this skill matters for their specific industry/role), "
+                        "action (string — a concrete task: name a specific course, project, certification or open-source contribution), "
                         "timeline (one of: '1 month','2 months','3 months','6 months'), "
-                        "resource (string, specific URL or course name). "
-                        "Max 6 items. Focus on reducing AI automation risk and building durable skills."
+                        "resource (string — specific course name or platform). "
+                        "STRICT RULES: "
+                        "1. Every recommendation must be directly relevant to the candidate's industry and target role. "
+                        "2. Build ON their existing technical strengths — deepen and extend, do not replace them. "
+                        "3. For each skill at confirmed high AI risk, suggest a way to apply it at a level AI cannot yet reach "
+                        "(novel research, production systems, domain-specific expertise, technical leadership). "
+                        "4. Do NOT recommend generic soft skills (leadership, communication, PM) unless the candidate is "
+                        "already working in a non-technical or hybrid role. "
+                        "5. Do NOT recommend skills the candidate already lists. "
+                        "6. Keep resources real and specific."
                     ),
                 },
                 {
                     "role": "user",
                     "content": (
-                        f"High-risk skills to pivot away from: {json.dumps(high_risk)}\n"
-                        f"Target job: {json.dumps(target_job)}"
+                        f"Candidate: {name_str}\n"
+                        f"Background: {summary}\n"
+                        f"Education: {edu_str}\n"
+                        f"Experience: {exp_str}\n"
+                        f"Current job titles: {', '.join(job_titles)}\n"
+                        f"Target role: {target_job_title or 'not specified'}\n\n"
+                        f"All skills with AI exposure scores: {all_skills_str}\n"
+                        + (f"Confirmed high AI-exposure (score > 65%): {', '.join(s['skill'] for s in confirmed_high)}\n" if confirmed_high else "")
+                        + (f"Confirmed lower AI-exposure (safer foundation): {', '.join(s['skill'] for s in confirmed_low)}\n" if confirmed_low else "")
+                        + "\nGenerate 6 skill development recommendations that deepen this candidate's technical profile and make them more competitive for their target role."
                     ),
                 },
             ],
@@ -521,16 +570,22 @@ async def run_apply(
             "role": "user",
             "content": (
                 f"The browser has submitted the application for job '{job_id}'. "
-                f"Now call generate_skill_roadmap using the skill_risks below.\n\n"
-                f"CV Profile:\n{json.dumps(cv_profile)}\n\n"
-                f"Skill risks (from earlier scoring):\n{json.dumps(skill_risks)}"
+                f"Now call generate_skill_roadmap with: skill_risks (below), "
+                f"cv_profile (below), and target_job_title='{job_id}'.\n\n"
+                f"CV Profile summary: name={cv_profile.get('name','')}, "
+                f"summary={cv_profile.get('summary','')[:120]}, "
+                f"job_titles={cv_profile.get('job_titles',[])}\n\n"
+                f"Skill risks:\n{json.dumps(skill_risks)}"
             ),
         },
     ]
 
     async def execute_tool_with_context(name: str, tool_input: dict) -> dict:
-        if name == "generate_skill_roadmap" and not tool_input.get("skill_risks"):
-            tool_input = {**tool_input, "skill_risks": skill_risks}
+        if name == "generate_skill_roadmap":
+            if not tool_input.get("skill_risks"):
+                tool_input = {**tool_input, "skill_risks": skill_risks}
+            if not tool_input.get("cv_profile") and cv_profile:
+                tool_input = {**tool_input, "cv_profile": cv_profile}
         return await execute_tool(name, tool_input)
 
     while True:
