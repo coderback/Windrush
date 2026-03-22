@@ -1,0 +1,202 @@
+[
+  {
+    "job_id": "j1",
+    "title": "Graduate Software Engineer",
+    "company": "AlphaSights",
+    "location": "London, UK",
+    "description": "We are looking for highly driven, aspiring software engineers who take pride in their work, to expand our Engineering team in London. Successful candidates will join a cross-functional team including product managers and designers working closely with the rest of our business to deliver working code that solves real problems.",
+    "url": "https://www.alphasights.com/job/graduate-software-engineer/",
+    "salary_min": null,
+    "salary_max": null
+  },
+  {
+    "job_id": "j2",
+    "title": "Graduate Software Tester",
+    "company": "TGW Group",
+    "location": "United Kingdom",
+    "description": "As a Graduate Software Test Engineer, you will work as part of an agile project team to help ensure that TGW Warehouse Control System software meets both business and technical requirements. You will collaborate closely with the Project Architect, IT Project Manager, and Developers to understand requirements, define your test scope in TestRail, and contribute to the creation of manual and automated test cases. Testing will be carried out using Azure DevOps, with any defects recorded and tracked in Jira.",
+    "url": "https://www.tgw-group.com/en/career/jobs/detail/graduate-software-tester-1300/",
+    "salary_min": null,
+    "salary_max": null
+  },
+  {
+    "job_id": "j3",
+    "title": "2026 Graduate Software Engineer - PyTorch",
+    "company": "Graphcore",
+    "location": "Bristol, UK",
+    "description": "Graphcore is one of the world's leading innovators in Artificial Intelligence compute, developing hardware, software and systems infrastructure that will unlock the next generation of AI breakthroughs. As part of the SoftBank Group, Graphcore is a member of an elite family of companies responsible for some of the world's most transformative technologies. You will join a team working on PyTorch integration and AI compute systems.",
+    "url": "https://job-boards.greenhouse.io/graphcore/jobs/8235270002/",
+    "salary_min": null,
+    "salary_max": null
+  },
+  {
+    "job_id": "j4",
+    "title": "Graduate Programme (FY27)",
+    "company": "Accenture",
+    "location": "Multiple cities, UK",
+    "description": "Register your interest in Accenture's Undergraduate & Graduate Programmes for FY27. Accenture is a global professional services company with leading capabilities in digital, cloud and security. We offer careers across Strategy & Consulting, Technology, Operations, Industry X and Song.",
+    "url": "https://accenture.pinpointhq.com/en/postings/054f2860-7401-49f9-8794-6b379f43868c/",
+    "salary_min": null,
+    "salary_max": null
+  },
+  {
+    "job_id": "j5",
+    "title": "Software Engineer",
+    "company": "Jane Street",
+    "location": "London, UK",
+    "description": "Jane Street is a quantitative trading firm and liquidity provider with a unique focus on technology and collaborative problem solving. We are looking for software engineers to join our London office. You will work on systems that trade billions of dollars of securities each day, building tools and infrastructure that give us an edge in global markets.",
+    "url": "https://www.janestreet.com/join-jane-street/position/8092065002/",
+    "salary_min": null,
+    "salary_max": null
+  },
+  {
+    "job_id": "j6",
+    "title": "Graduate Quant Developer",
+    "company": "B2C2",
+    "location": "London, UK",
+    "description": "Founded in 2015, B2C2 is a global leader for institutional liquidity within digital assets, providing 24/7 365 days a year deep, reliable pricing for spot, futures, options, CFDs, and NDFs across all market conditions. Our growing team has deep expertise across pricing, structuring, risk, systems, and regulation. As a Graduate Quant Developer you will work on quantitative models and trading systems.",
+    "url": "https://job-boards.eu.greenhouse.io/b2c2/jobs/4745320101/",
+    "salary_min": null,
+    "salary_max": null
+  },
+  {
+    "job_id": "j7",
+    "title": "Product Graduate AI Engineer",
+    "company": "ThreatAware",
+    "location": "United Kingdom",
+    "description": "ThreatAware is a cybersecurity platform that leverages API feeds from existing tools to validate that controls are correctly deployed and functioning across every cyber asset. As a Product Graduate AI Engineer you will help build AI-powered features to enhance our security posture management platform, working across product, engineering and customer success teams.",
+    "url": "https://threataware.com/careers/job?id=51a822b7-03b7-4f04-a780-2b7f80476494/",
+    "salary_min": null,
+    "salary_max": null
+  },
+  {
+    "job_id": "j8",
+    "title": "Graduate Machine Learning Researcher",
+    "company": "Longshot Systems",
+    "location": "United Kingdom",
+    "description": "At Longshot Systems we're building advanced platforms for sports betting analytics and trading. We're hiring Graduate Machine Learning Researchers for our quantitative modelling team. The primary goal of this team is to improve the predictive power of our models across a wide range of sporting events using novel machine learning techniques.",
+    "url": "https://apply.workable.com/longshot-systems-ltd/j/CDC0152ADC/",
+    "salary_min": null,
+    "salary_max": null
+  },
+  {
+    "job_id": "j9",
+    "title": "Junior Data Scientist",
+    "company": "Volcore",
+    "location": "United Kingdom",
+    "description": "Join our team of technical experts and traders working to keep the electricity system stable as we pursue Net Zero. You will develop data-driven models to support energy trading and grid balancing decisions, working with large time-series datasets from electricity markets and grid operations.",
+    "url": "https://www.volcore.co.uk/junior-data-scientist/",
+    "salary_min": null,
+    "salary_max": null
+  },
+  {
+    "job_id": "j10",
+    "title": "Software Engineer",
+    "company": "MongoDB",
+    "location": "Dublin, Ireland",
+    "description": "We are seeking passionate and driven individuals with a strong foundation in computer science to join our team. You'll have the opportunity to design, build, and test software that enhances MongoDB products while solving complex technical challenges. You'll collaborate with cross-functional teams, balance innovation with delivery, and contribute to features that empower our global community of users.",
+    "url": "https://www.mongodb.com/careers/jobs/7613695/",
+    "salary_min": null,
+    "salary_max": null
+  },
+  {
+    "job_id": "j11",
+    "title": "Graduate Trader",
+    "company": "B2C2",
+    "location": "London, UK",
+    "description": "Founded in 2015, B2C2 is a global leader for institutional liquidity within digital assets. We bring 24/7 deep, reliable pricing for spot, futures, options, CFDs, and NDFs across all market conditions. As a Graduate Trader you will work alongside experienced traders to provide liquidity across digital asset markets, developing expertise in pricing, risk management, and market microstructure.",
+    "url": "https://job-boards.eu.greenhouse.io/b2c2/jobs/4743253101/",
+    "salary_min": null,
+    "salary_max": null
+  },
+  {
+    "job_id": "j12",
+    "title": "Graduate Equity Research Analyst",
+    "company": "Rothschild & Co",
+    "location": "London, UK",
+    "description": "Rothschild & Co is one of the world's largest independent financial advisory groups. As a Graduate Equity Research Analyst you will support senior analysts in producing research on listed companies, conducting financial modelling, industry analysis, and company valuations to inform investment decisions for institutional clients.",
+    "url": "https://rothschildandco.tal.net/vx/lang-en-GB/mobile-0/appcentre-1/brand-4/xf-e505e026c746/candidate/so/pm/1/pl/2/opp/919-2026-UK-Rothschild-Co-Graduate-Equity-Research-Analyst-London/en-GB/",
+    "salary_min": null,
+    "salary_max": null
+  },
+  {
+    "job_id": "j13",
+    "title": "Investment Analyst Program 2026",
+    "company": "Arena Investors",
+    "location": "London, UK",
+    "description": "Arena is a global investment management firm that seeks to generate attractive risk-adjusted, consistent and uncorrelated returns by employing a fundamentals-based, asset-oriented financing and investing strategy across the entire credit spectrum. As an Investment Analyst you will support portfolio managers in deal sourcing, underwriting, and portfolio monitoring.",
+    "url": "https://apply.workable.com/arena-investors-lp/j/365DC07D3D/",
+    "salary_min": null,
+    "salary_max": null
+  },
+  {
+    "job_id": "j14",
+    "title": "Corporate Finance Graduate",
+    "company": "Headford Capital",
+    "location": "United Kingdom",
+    "description": "Are you a driven and detail-oriented graduate eager to begin your journey in corporate finance? Gain practical exposure to mergers and acquisitions (M&A), financial modelling, and market analysis while contributing to live deals. Headford Capital is recruiting graduates for their analyst cohort, offering hands-on experience across the full deal lifecycle.",
+    "url": "https://workforheadfordgroup.com/jobs/corporate-finance-graduate/",
+    "salary_min": null,
+    "salary_max": null
+  },
+  {
+    "job_id": "j15",
+    "title": "New Analyst Program 2026",
+    "company": "Goldman Sachs",
+    "location": "London, UK",
+    "description": "Our New Analyst Program is a full-time program for final year undergraduate and graduate students. As a new analyst, you will learn about our businesses, develop important relationships, and build career-enhancing skills. You will gain unlimited access to training and guidance, build your professional network, and interact with colleagues across the firm.",
+    "url": "https://higher.gs.com/roles/154917/",
+    "salary_min": null,
+    "salary_max": null
+  },
+  {
+    "job_id": "j16",
+    "title": "Associate, Client Service (English Speaker) 2026",
+    "company": "AlphaSights",
+    "location": "London, UK",
+    "description": "Looking to start your career in a fast-paced commercial role with immediate personal impact and a clear career path? Our Associate Program places you at the intersection of business and knowledge, connecting executives with world-class experts. You'll thrive in a results-oriented environment with a client-first mindset.",
+    "url": "https://www.alphasights.com/job/associate-client-service-english-speaker-2026-3/",
+    "salary_min": null,
+    "salary_max": null
+  },
+  {
+    "job_id": "j17",
+    "title": "Graduate Consultant 2025/26",
+    "company": "Newton Europe",
+    "location": "UK (Field based)",
+    "description": "Newton is a management consulting firm that specialises in operational improvement. As a Graduate Consultant you will work on client sites across the UK, solving complex operational problems across industries including healthcare, logistics, manufacturing, and financial services. Newton is known for its hands-on, results-driven approach.",
+    "url": "https://newton.tal.net/vx/appcentre-ext/brand-7/spa-1/candidate/so/pm/1/pl/2/opp/25-Graduate-Consultant-2025-26/en-GB/",
+    "salary_min": null,
+    "salary_max": null
+  },
+  {
+    "job_id": "j18",
+    "title": "Trainee Solicitor (Training Contract)",
+    "company": "Accutrainee",
+    "location": "London (Regional), UK",
+    "description": "Accutrainee has over 10 years of experience helping legal professionals qualify as Solicitors. This training contract or QWE position offers aspiring solicitors the opportunity to complete their qualification while gaining practical experience across multiple areas of law in a supportive environment.",
+    "url": "https://careers.accutrainee.com/jobs/129473-trainee-solicitor-training-contract-or-qwe-london-regional/",
+    "salary_min": null,
+    "salary_max": null
+  },
+  {
+    "job_id": "j19",
+    "title": "Trainee Solicitor Programme",
+    "company": "B P Collins Solicitors",
+    "location": "United Kingdom",
+    "description": "B P Collins provides work experience placements and trainee programmes to law undergraduates, graduates and non-law graduates. The firm offers a structured programme covering multiple areas of law, with mentoring from experienced solicitors and support through the qualification process.",
+    "url": "https://www.bpcollins.co.uk/careers/earlycareers/graduate-programme/",
+    "salary_min": null,
+    "salary_max": null
+  },
+  {
+    "job_id": "j20",
+    "title": "Trainee Solicitor – 2027 entry (SQE or LPC Route)",
+    "company": "Humphries Kirk Solicitors",
+    "location": "Dorset, UK",
+    "description": "Humphries Kirk is a well-established regional law firm recruiting Trainee Solicitors for 2027 entry via either the SQE or LPC route. Trainees will gain experience across the firm's practice areas including private client, commercial property, dispute resolution, and corporate law.",
+    "url": "https://hklaw.uk/vacancies/trainee-solicitor-2027-entry-sqe-route-or-lpc-route/",
+    "salary_min": null,
+    "salary_max": null
+  }
+]
