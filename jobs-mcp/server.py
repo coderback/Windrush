@@ -6,8 +6,8 @@ import os
 import httpx
 from mcp.server.fastmcp import FastMCP
 
-ADZUNA_APP_ID = os.environ["ADZUNA_APP_ID"]
-ADZUNA_API_KEY = os.environ["ADZUNA_API_KEY"]
+ADZUNA_APP_ID = os.environ.get("ADZUNA_APP_ID", "")
+ADZUNA_API_KEY = os.environ.get("ADZUNA_API_KEY", "")
 ADZUNA_BASE = "https://api.adzuna.com/v1/api/jobs/gb/search/1"
 
 mcp = FastMCP("windrush-jobs")
@@ -33,6 +33,9 @@ async def search_jobs(query: str, location: str, results: int = 8) -> list[dict]
         "results_per_page": min(results, 15),
         "content-type": "application/json",
     }
+
+    if not ADZUNA_APP_ID or not ADZUNA_API_KEY:
+        return [{"error": "Adzuna credentials not configured"}]
 
     async with httpx.AsyncClient(timeout=10.0) as client:
         resp = await client.get(ADZUNA_BASE, params=params)

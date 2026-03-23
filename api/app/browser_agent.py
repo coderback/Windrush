@@ -122,7 +122,7 @@ async def _interactive_session(page: Page, instruction_queue: asyncio.Queue, con
 
     while True:
         try:
-            raw = await asyncio.wait_for(instruction_queue.get(), timeout=300)
+            raw = await asyncio.wait_for(instruction_queue.get(), timeout=120)
         except asyncio.TimeoutError:
             yield {"action": "Session timed out", "screenshot": None, "blocked": False, "reason": None, "done": True}
             return

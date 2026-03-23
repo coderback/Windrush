@@ -44,6 +44,11 @@ class RateLimitHook extends AbstractHook {
     this._max = maxRequests;
     this._window = windowMs;
     this._counts = new Map(); // key → { count, resetAt }
+    // Evict expired entries every minute to prevent unbounded growth
+    setInterval(() => {
+      const now = Date.now();
+      for (const [k, v] of this._counts) if (now > v.resetAt) this._counts.delete(k);
+    }, 60_000);
   }
 
   async processCallToolRequest(request, requestExtra) {

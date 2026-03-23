@@ -62,7 +62,7 @@ PII_PATTERNS: list[tuple[re.Pattern, str]] = [
 CREDENTIAL_FIELD_NAMES = {"password", "job_password", "secret", "token", "api_key"}
 
 # Tools whose results contain derived CV data and should have PII masked in SSE
-_PII_REDACT_TOOLS = {"extract_cv_profile", "generate_cover_letter", "score_job_fit", "apply_to_job"}
+_PII_REDACT_TOOLS = {"extract_cv_profile", "generate_cover_letter", "score_job_fit", "apply_to_job", "generate_skill_roadmap"}
 
 # ── 5. Audit log ─────────────────────────────────────────────────────────────
 

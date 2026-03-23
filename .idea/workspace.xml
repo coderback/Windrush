@@ -4,10 +4,19 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="657acfba-7aae-4604-a67f-31eee75bbb05" name="Changes" comment="refactor agent to integrate Anthropic API and update model configuration for improved performance">
+    <list default="true" id="657acfba-7aae-4604-a67f-31eee75bbb05" name="Changes" comment="refactor agent to enhance skill roadmap generation and improve job application process">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/README.md" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/api/app/agent.py" beforeDir="false" afterPath="$PROJECT_DIR$/api/app/agent.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/api/app/browser_agent.py" beforeDir="false" afterPath="$PROJECT_DIR$/api/app/browser_agent.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/api/app/cv_parser.py" beforeDir="false" afterPath="$PROJECT_DIR$/api/app/cv_parser.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/api/app/guardrails.py" beforeDir="false" afterPath="$PROJECT_DIR$/api/app/guardrails.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/api/app/job_proxy.py" beforeDir="false" afterPath="$PROJECT_DIR$/api/app/job_proxy.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/api/app/main.py" beforeDir="false" afterPath="$PROJECT_DIR$/api/app/main.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/civic-guardrails/server.js" beforeDir="false" afterPath="$PROJECT_DIR$/civic-guardrails/server.js" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/docker-compose.yml" beforeDir="false" afterPath="$PROJECT_DIR$/docker-compose.yml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/frontend/src/app/page.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/frontend/src/app/page.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/jobs-mcp/server.py" beforeDir="false" afterPath="$PROJECT_DIR$/jobs-mcp/server.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -42,16 +51,16 @@
     <option name="hideEmptyMiddlePackages" value="true" />
     <option name="showLibraryContents" value="true" />
   </component>
-  <component name="PropertiesComponent"><![CDATA[{
-  "keyToString": {
-    "ModuleVcsDetector.initialDetectionPerformed": "true",
-    "RunOnceActivity.ShowReadmeOnStart": "true",
-    "RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252": "true",
-    "RunOnceActivity.git.unshallow": "true",
-    "git-widget-placeholder": "main",
-    "last_opened_file_path": "C:/Users/tobio/PycharmProjects/Windrush"
+  <component name="PropertiesComponent">{
+  &quot;keyToString&quot;: {
+    &quot;ModuleVcsDetector.initialDetectionPerformed&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.git.unshallow&quot;: &quot;true&quot;,
+    &quot;git-widget-placeholder&quot;: &quot;main&quot;,
+    &quot;last_opened_file_path&quot;: &quot;C:/Users/tobio/PycharmProjects/Windrush&quot;
   }
-}]]></component>
+}</component>
   <component name="RecentsManager">
     <key name="CopyFile.RECENT_KEYS">
       <recent name="C:\Users\tobio\PycharmProjects\Windrush" />
@@ -200,7 +209,15 @@
       <option name="project" value="LOCAL" />
       <updated>1774174529561</updated>
     </task>
-    <option name="localTasksCounter" value="17" />
+    <task id="LOCAL-00017" summary="refactor agent to enhance skill roadmap generation and improve job application process">
+      <option name="closed" value="true" />
+      <created>1774269230084</created>
+      <option name="number" value="00017" />
+      <option name="presentableId" value="LOCAL-00017" />
+      <option name="project" value="LOCAL" />
+      <updated>1774269230084</updated>
+    </task>
+    <option name="localTasksCounter" value="18" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -242,7 +259,8 @@
     <MESSAGE value="update job title matching logic and implement job scraping functionality" />
     <MESSAGE value="add support for Anthropic API and update model configuration for enhanced agent functionality" />
     <MESSAGE value="refactor agent to integrate Anthropic API and update model configuration for improved performance" />
-    <option name="LAST_COMMIT_MESSAGE" value="refactor agent to integrate Anthropic API and update model configuration for improved performance" />
+    <MESSAGE value="refactor agent to enhance skill roadmap generation and improve job application process" />
+    <option name="LAST_COMMIT_MESSAGE" value="refactor agent to enhance skill roadmap generation and improve job application process" />
   </component>
   <component name="github-copilot-workspace">
     <instructionFileLocations>

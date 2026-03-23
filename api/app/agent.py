@@ -8,7 +8,7 @@ import anthropic
 
 from .cv_parser import extract_text
 from .risk_scorer import lookup_onet, lookup_by_title, ECONOMIC_INDEX
-from .job_proxy import search_jobs, FIXTURE as JOBS_FIXTURE
+from .job_proxy import search_jobs
 from .browser_agent import apply_with_browser
 from .guardrails import (
     sanitise_tool_input,
@@ -38,8 +38,43 @@ CRITICAL: Always pass the actual data objects from previous tool results into su
 
 After generate_cover_letter completes, stop. Do NOT call apply_to_job — the user must explicitly approve first."""
 
-ROADMAP_SYSTEM_PROMPT = """You are Windrush, an AI career transition advisor.
-The user has just submitted a job application. Your only task now is to call generate_skill_roadmap once with the provided skill_risks, cv_profile, and target_job_title. Call it immediately — do not ask questions or add commentary."""
+
+_HARDCODED_EXPOSURE: dict[str, float] = {
+    # Programming languages
+    "python": 0.78, "javascript": 0.71, "typescript": 0.68, "java": 0.69,
+    "c++": 0.62, "c#": 0.65, "go": 0.60, "rust": 0.55, "r": 0.76,
+    "matlab": 0.72, "scala": 0.63, "kotlin": 0.64, "swift": 0.61,
+    # AI / ML
+    "machine learning": 0.82, "deep learning": 0.79, "nlp": 0.84,
+    "natural language processing": 0.84, "computer vision": 0.81,
+    "tensorflow": 0.75, "pytorch": 0.76, "keras": 0.74,
+    "large language models": 0.88, "llm": 0.88, "generative ai": 0.86,
+    "reinforcement learning": 0.77, "neural networks": 0.80,
+    "data science": 0.81, "data analysis": 0.80, "statistics": 0.74,
+    # Web / backend
+    "react": 0.65, "node.js": 0.67, "django": 0.66, "fastapi": 0.64,
+    "rest api": 0.70, "graphql": 0.67, "sql": 0.72, "nosql": 0.68,
+    "postgresql": 0.70, "mongodb": 0.67, "redis": 0.63,
+    # DevOps / infra
+    "docker": 0.58, "kubernetes": 0.52, "aws": 0.61, "azure": 0.60,
+    "gcp": 0.59, "terraform": 0.54, "ci/cd": 0.56, "git": 0.55,
+    "cloud computing": 0.60, "microservices": 0.58,
+    # Lower-exposure / hardware / specialised
+    "fpga": 0.32, "embedded systems": 0.40, "hardware design": 0.35,
+    "robotics": 0.48, "signal processing": 0.44, "compiler design": 0.38,
+    "systems design": 0.38, "distributed systems": 0.42,
+    "cryptography": 0.36, "security": 0.41, "networking": 0.43,
+    # Soft / domain
+    "research": 0.45, "technical leadership": 0.28, "agile": 0.42,
+    "project management": 0.50, "communication": 0.30,
+    # Job titles
+    "software engineer": 0.62, "software developer": 0.65,
+    "data engineer": 0.72, "ml engineer": 0.80, "ai engineer": 0.82,
+    "graduate software engineer": 0.62, "backend engineer": 0.64,
+    "frontend engineer": 0.66, "full stack engineer": 0.65,
+    "data scientist": 0.81, "research engineer": 0.58,
+    "devops engineer": 0.55, "platform engineer": 0.53,
+}
 
 TOOLS = [
     {
@@ -181,7 +216,7 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
                 "education (array of {institution, degree, dates}), "
                 "experience (array of {employer, title, dates, summary} — max 5 most recent)."
             ),
-            messages=[{"role": "user", "content": cv_text[:4000]}],
+            messages=[{"role": "user", "content": cv_text[:8000]}],
         )
         text = next((b.text for b in resp.content if b.type == "text"), "")
         text = text.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
@@ -191,42 +226,6 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
             return {}
 
     elif name == "score_ai_risk":
-        _HARDCODED_EXPOSURE = {
-            # Programming languages
-            "python": 0.78, "javascript": 0.71, "typescript": 0.68, "java": 0.69,
-            "c++": 0.62, "c#": 0.65, "go": 0.60, "rust": 0.55, "r": 0.76,
-            "matlab": 0.72, "scala": 0.63, "kotlin": 0.64, "swift": 0.61,
-            # AI / ML
-            "machine learning": 0.82, "deep learning": 0.79, "nlp": 0.84,
-            "natural language processing": 0.84, "computer vision": 0.81,
-            "tensorflow": 0.75, "pytorch": 0.76, "keras": 0.74,
-            "large language models": 0.88, "llm": 0.88, "generative ai": 0.86,
-            "reinforcement learning": 0.77, "neural networks": 0.80,
-            "data science": 0.81, "data analysis": 0.80, "statistics": 0.74,
-            # Web / backend
-            "react": 0.65, "node.js": 0.67, "django": 0.66, "fastapi": 0.64,
-            "rest api": 0.70, "graphql": 0.67, "sql": 0.72, "nosql": 0.68,
-            "postgresql": 0.70, "mongodb": 0.67, "redis": 0.63,
-            # DevOps / infra
-            "docker": 0.58, "kubernetes": 0.52, "aws": 0.61, "azure": 0.60,
-            "gcp": 0.59, "terraform": 0.54, "ci/cd": 0.56, "git": 0.55,
-            "cloud computing": 0.60, "microservices": 0.58,
-            # Lower-exposure / hardware / specialised
-            "fpga": 0.32, "embedded systems": 0.40, "hardware design": 0.35,
-            "robotics": 0.48, "signal processing": 0.44, "compiler design": 0.38,
-            "systems design": 0.38, "distributed systems": 0.42,
-            "cryptography": 0.36, "security": 0.41, "networking": 0.43,
-            # Soft / domain
-            "research": 0.45, "technical leadership": 0.28, "agile": 0.42,
-            "project management": 0.50, "communication": 0.30,
-            # Job titles
-            "software engineer": 0.62, "software developer": 0.65,
-            "data engineer": 0.72, "ml engineer": 0.80, "ai engineer": 0.82,
-            "graduate software engineer": 0.62, "backend engineer": 0.64,
-            "frontend engineer": 0.66, "full stack engineer": 0.65,
-            "data scientist": 0.81, "research engineer": 0.58,
-            "devops engineer": 0.55, "platform engineer": 0.53,
-        }
         skills = tool_input.get("skills", [])
         results = []
         for skill in skills:
@@ -247,9 +246,9 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
 
     elif name == "search_jobs":
         jobs = await search_jobs(tool_input.get("query", ""), tool_input.get("location", "London"))
-        # Strip descriptions and cap at 5 — model must echo these back in score_job_fit args
+        # Cap at 5; keep description (truncated) so score_job_fit can match skills without fixture lookup
         slim_jobs = [
-            {k: v for k, v in j.items() if k not in ("description", "salary_min", "salary_max")}
+            {k: v for k, v in j.items() if k not in ("salary_min", "salary_max")}
             for j in jobs[:5]
         ]
         return {"jobs": slim_jobs, "count": len(slim_jobs)}
@@ -259,23 +258,20 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
         cv_profile = tool_input.get("cv_profile", {})
         cv_skills = set(s.lower() for s in cv_profile.get("skills", []))
 
-        # Re-inject descriptions from fixture for scoring, then strip them from the result
-        fixture_by_id = {j["job_id"]: j for j in JOBS_FIXTURE}
-
         scored = []
         for job in jobs:
-            full_job = {**fixture_by_id.get(job.get("job_id", ""), {}), **job}
-            exposure = full_job.get("exposure_score", 0.5)
-            desc_lower = full_job.get("description", "").lower()
+            exposure = job.get("exposure_score", 0.5)
+            desc_lower = job.get("description", "").lower()
             skill_matches = sum(1 for s in cv_skills if s in desc_lower)
             fit_score = min(skill_matches / max(len(cv_skills), 1), 1.0)
             composite = (1 - exposure) * 0.5 + fit_score * 0.5
             scored.append({
-                "job_id": full_job.get("job_id"),
-                "title": full_job.get("title"),
-                "company": full_job.get("company"),
-                "location": full_job.get("location"),
-                "url": full_job.get("url"),
+                "job_id": job.get("job_id"),
+                "title": job.get("title"),
+                "company": job.get("company"),
+                "location": job.get("location"),
+                "url": job.get("url"),
+                "description": job.get("description", ""),
                 "exposure_score": exposure,
                 "fit_score": round(fit_score, 2),
                 "composite_score": round(composite, 2),
@@ -288,20 +284,17 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
         job = tool_input.get("job", {})
         cv_profile = tool_input.get("cv_profile", {})
         tone = tool_input.get("tone", "professional")
-        # Re-inject full description from fixture if not present (stripped from score_job_fit result)
-        fixture_by_id = {j["job_id"]: j for j in JOBS_FIXTURE}
-        full_job = {**fixture_by_id.get(job.get("job_id", ""), {}), **job}
         resp = await anthropic_client.messages.create(
             model=MODEL,
-            max_tokens=1024,
+            max_tokens=2048,
             system=f"Write a {tone} cover letter. Be specific — reference the candidate's actual experience and the job's requirements. 3 paragraphs. No placeholders like [Your Address] or [Date] — omit address headers entirely and start directly with 'Dear Hiring Manager,'.",
             messages=[
                 {
                     "role": "user",
                     "content": (
                         f"Candidate: {json.dumps(cv_profile)}\n\n"
-                        f"Job: {full_job.get('title')} at {full_job.get('company')}\n"
-                        f"Description: {full_job.get('description', '')}"
+                        f"Job: {job.get('title')} at {job.get('company')}\n"
+                        f"Description: {job.get('description', '')}"
                     ),
                 },
             ],
@@ -309,8 +302,8 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
         letter = next((b.text for b in resp.content if b.type == "text"), "")
         return {
             "status": "ready",
-            "job_title": full_job.get("title", ""),
-            "company": full_job.get("company", ""),
+            "job_title": job.get("title", ""),
+            "company": job.get("company", ""),
             "candidate_name": cv_profile.get("name", ""),
             "cover_letter": letter,
         }
@@ -403,12 +396,15 @@ async def _chat(messages: list, tools: list):
     """Call Anthropic messages API. Extracts system message from the messages list."""
     system = next((m["content"] for m in messages if m["role"] == "system"), "")
     filtered = [m for m in messages if m["role"] != "system"]
-    return await anthropic_client.messages.create(
-        model=MODEL,
-        max_tokens=4096,
-        system=system,
-        messages=filtered,
-        tools=tools,
+    return await asyncio.wait_for(
+        anthropic_client.messages.create(
+            model=MODEL,
+            max_tokens=4096,
+            system=system,
+            messages=filtered,
+            tools=tools,
+        ),
+        timeout=90.0,
     )
 
 
@@ -423,14 +419,18 @@ async def run_pipeline(cv_text: str, location: str = "London") -> AsyncGenerator
         {"role": "system", "content": SYSTEM_PROMPT},
         {
             "role": "user",
-            "content": f"Please analyse this CV and find suitable jobs in {location}.\n\nCV:\n{cv_text[:4000]}",
+            "content": f"Please analyse this CV and find suitable jobs in {location}.\n\nCV:\n{cv_text[:8000]}",
         },
     ]
 
     yield _sse("start", {"message": "Pipeline started"})
 
     while True:
-        response = await _chat(messages, TOOLS)
+        try:
+            response = await _chat(messages, TOOLS)
+        except asyncio.TimeoutError:
+            yield _sse("done", {"message": "Request timed out — please try again."})
+            return
 
         text_blocks = [b for b in response.content if b.type == "text"]
         tool_uses   = [b for b in response.content if b.type == "tool_use"]

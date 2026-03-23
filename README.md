@@ -17,7 +17,7 @@ Built with Claude (Anthropic), browser-use, Next.js, and FastAPI.
 
 ---
 
-## Architecture
+## Architecture`
 
 Five Docker services:
 

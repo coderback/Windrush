@@ -25,6 +25,7 @@ app.add_middleware(
 _browser_queues: dict[str, asyncio.Queue] = {}   # instruction queues
 _browser_frames: dict[str, asyncio.Queue] = {}   # CDP screencast frame queues
 _cv_files: dict[str, str] = {}                   # cv_session_id → temp file path
+_cv_texts: dict[str, str] = {}                   # cv_session_id → extracted text
 
 
 @app.get("/health")
@@ -37,41 +38,51 @@ async def guardrails_audit():
     return get_audit_log()
 
 
-@app.post("/stream")
-async def pipeline_stream(
-    file: UploadFile = File(...),
-    location: str = Form(default="London"),
-):
+@app.post("/upload")
+async def upload_cv(file: UploadFile = File(...)):
+    """Parse and store a CV PDF; returns a cv_session_id for use with /stream."""
     pdf_bytes = await file.read()
-    cv_text = extract_text(pdf_bytes)
+    try:
+        cv_text = extract_text(pdf_bytes)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
 
-    # Guardrail: reject CV text containing prompt injection before it reaches the LLM
     try:
         check_cv_for_injection(cv_text)
     except GuardrailViolation as e:
-        import time as _time
+        raise HTTPException(status_code=422, detail=f"GUARDRAIL: {e.detail}")
 
-        async def _blocked_stream():
-            yield f"data: {json.dumps({'type': 'guardrail', 'check': e.check, 'detail': e.detail, 'fired': True, 'timestamp': _time.time()})}\n\n"
-            yield f"data: {json.dumps({'type': 'done', 'message': 'Upload rejected by guardrails — possible prompt injection detected'})}\n\n"
-
-        return StreamingResponse(
-            _blocked_stream(),
-            media_type="text/event-stream",
-            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no", "Connection": "keep-alive"},
-        )
-
-    # Save CV to disk so browser agent can upload it during applications
     cv_session_id = uuid.uuid4().hex
     cv_path = pathlib.Path(tempfile.gettempdir()) / f"cv_{cv_session_id}.pdf"
     cv_path.write_bytes(pdf_bytes)
     _cv_files[cv_session_id] = str(cv_path)
+    _cv_texts[cv_session_id] = cv_text
+
+    return {"cv_session_id": cv_session_id}
+
+
+@app.post("/stream")
+async def pipeline_stream(
+    cv_session_id: str = Form(...),
+    location: str = Form(default="London"),
+):
+    cv_text = _cv_texts.get(cv_session_id)
+    if not cv_text:
+        raise HTTPException(status_code=404, detail="CV session not found or expired — please re-upload")
+
+    cv_path_str = _cv_files.get(cv_session_id, "")
 
     async def pipeline_with_cv_session():
         import json, time
-        yield f"data: {json.dumps({'type': 'cv_session', 'cv_session_id': cv_session_id, 'timestamp': time.time()})}\n\n"
-        async for chunk in run_pipeline(cv_text, location):
-            yield chunk
+        try:
+            yield f"data: {json.dumps({'type': 'cv_session', 'cv_session_id': cv_session_id, 'timestamp': time.time()})}\n\n"
+            async for chunk in run_pipeline(cv_text, location):
+                yield chunk
+        finally:
+            if cv_path_str:
+                pathlib.Path(cv_path_str).unlink(missing_ok=True)
+            _cv_files.pop(cv_session_id, None)
+            _cv_texts.pop(cv_session_id, None)
 
     return StreamingResponse(
         pipeline_with_cv_session(),
@@ -95,8 +106,14 @@ async def apply(
     job_password: str = Form(default=""),
     cv_session_id: str = Form(default=""),
 ):
-    profile = json.loads(cv_profile)
-    risks = json.loads(skill_risks)
+    try:
+        profile = json.loads(cv_profile)
+    except json.JSONDecodeError:
+        profile = {}
+    try:
+        risks = json.loads(skill_risks)
+    except json.JSONDecodeError:
+        risks = []
     cv_path = _cv_files.get(cv_session_id, "")
     session_id = str(uuid.uuid4())
 
