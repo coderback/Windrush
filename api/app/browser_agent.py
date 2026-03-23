@@ -282,12 +282,16 @@ async def apply_with_browser(
     browser_profile = BrowserProfile(
         headless=True,
         disable_security=True,
+        enable_default_extensions=False,
         args=[
             "--no-sandbox",
             "--disable-dev-shm-usage",
             "--disable-blink-features=AutomationControlled",
             "--window-size=1280,800",
             "--disable-extensions",
+            # Hardware / performance
+            "--disable-gpu",
+            "--js-flags=--max-old-space-size=512",
         ],
     )
     browser_session = BrowserSession(browser_profile=browser_profile)
@@ -314,7 +318,7 @@ async def apply_with_browser(
 
     llm = ChatAnthropic(
         api_key=os.environ.get("ANTHROPIC_API_KEY", ""),
-        model="claude-haiku-4-5-20251001",
+        model="claude-sonnet-4-6",
     )
 
     agent = Agent(

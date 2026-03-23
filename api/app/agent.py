@@ -31,11 +31,15 @@ Work through this pipeline in order, passing data between tools explicitly:
 2. score_ai_risk(skills=[...all skills and job_titles from step 1...])
 3. search_jobs(query=<primary job title from profile>, location=<location from profile>)
 4. score_job_fit(jobs=[...the jobs array from step 3's result...], cv_profile={...the full profile object from step 1...})
-5. generate_cover_letter(job={...the top ranked job from step 4...}, cv_profile={...the full profile object from step 1...})
+5. generate_skill_roadmap(skill_risks=[...the skill_risks array from step 2...], cv_profile={...the full profile object from step 1...}, target_job_title=<top ranked job title from step 4>)
+6. generate_cover_letter(job={...the top ranked job from step 4...}, cv_profile={...the full profile object from step 1...})
 
 CRITICAL: Always pass the actual data objects from previous tool results into subsequent tool calls. Never call a tool with empty arguments.
 
 After generate_cover_letter completes, stop. Do NOT call apply_to_job — the user must explicitly approve first."""
+
+ROADMAP_SYSTEM_PROMPT = """You are Windrush, an AI career transition advisor.
+The user has just submitted a job application. Your only task now is to call generate_skill_roadmap once with the provided skill_risks, cv_profile, and target_job_title. Call it immediately — do not ask questions or add commentary."""
 
 TOOLS = [
     {
@@ -179,18 +183,64 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
             ),
             messages=[{"role": "user", "content": cv_text[:4000]}],
         )
-        text = next((b.text for b in resp.content if b.type == "text"), "{}")
-        return json.loads(text)
+        text = next((b.text for b in resp.content if b.type == "text"), "")
+        text = text.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+        try:
+            return json.loads(text or "{}")
+        except json.JSONDecodeError:
+            return {}
 
     elif name == "score_ai_risk":
+        _HARDCODED_EXPOSURE = {
+            # Programming languages
+            "python": 0.78, "javascript": 0.71, "typescript": 0.68, "java": 0.69,
+            "c++": 0.62, "c#": 0.65, "go": 0.60, "rust": 0.55, "r": 0.76,
+            "matlab": 0.72, "scala": 0.63, "kotlin": 0.64, "swift": 0.61,
+            # AI / ML
+            "machine learning": 0.82, "deep learning": 0.79, "nlp": 0.84,
+            "natural language processing": 0.84, "computer vision": 0.81,
+            "tensorflow": 0.75, "pytorch": 0.76, "keras": 0.74,
+            "large language models": 0.88, "llm": 0.88, "generative ai": 0.86,
+            "reinforcement learning": 0.77, "neural networks": 0.80,
+            "data science": 0.81, "data analysis": 0.80, "statistics": 0.74,
+            # Web / backend
+            "react": 0.65, "node.js": 0.67, "django": 0.66, "fastapi": 0.64,
+            "rest api": 0.70, "graphql": 0.67, "sql": 0.72, "nosql": 0.68,
+            "postgresql": 0.70, "mongodb": 0.67, "redis": 0.63,
+            # DevOps / infra
+            "docker": 0.58, "kubernetes": 0.52, "aws": 0.61, "azure": 0.60,
+            "gcp": 0.59, "terraform": 0.54, "ci/cd": 0.56, "git": 0.55,
+            "cloud computing": 0.60, "microservices": 0.58,
+            # Lower-exposure / hardware / specialised
+            "fpga": 0.32, "embedded systems": 0.40, "hardware design": 0.35,
+            "robotics": 0.48, "signal processing": 0.44, "compiler design": 0.38,
+            "systems design": 0.38, "distributed systems": 0.42,
+            "cryptography": 0.36, "security": 0.41, "networking": 0.43,
+            # Soft / domain
+            "research": 0.45, "technical leadership": 0.28, "agile": 0.42,
+            "project management": 0.50, "communication": 0.30,
+            # Job titles
+            "software engineer": 0.62, "software developer": 0.65,
+            "data engineer": 0.72, "ml engineer": 0.80, "ai engineer": 0.82,
+            "graduate software engineer": 0.62, "backend engineer": 0.64,
+            "frontend engineer": 0.66, "full stack engineer": 0.65,
+            "data scientist": 0.81, "research engineer": 0.58,
+            "devops engineer": 0.55, "platform engineer": 0.53,
+        }
         skills = tool_input.get("skills", [])
         results = []
         for skill in skills:
-            data = lookup_by_title(skill)
-            exposure = round(data.get("overall_exposure", 0.5), 2)
+            key = skill.lower().strip()
+            if key in _HARDCODED_EXPOSURE:
+                exposure = _HARDCODED_EXPOSURE[key]
+            else:
+                # Fall back to lookup, then default 0.55
+                data = lookup_by_title(skill)
+                raw = data.get("overall_exposure", 0.0)
+                exposure = round(raw, 2) if raw and raw != 0.5 else 0.55
             results.append({
                 "skill": skill,
-                "exposure": exposure,
+                "exposure": round(exposure, 2),
                 "risk": "high" if exposure >= 0.5 else "low",
             })
         return {"skill_risks": results}
@@ -295,7 +345,7 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
 
         resp = await anthropic_client.messages.create(
             model=MODEL,
-            max_tokens=1024,
+            max_tokens=2048,
             system=(
                 "You are a career coach specialising in AI-resilient career development. "
                 "Given a candidate's background, generate a personalised skill development roadmap. "
@@ -334,8 +384,12 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
                 },
             ],
         )
-        text = next((b.text for b in resp.content if b.type == "text"), "{}")
-        data = json.loads(text)
+        text = next((b.text for b in resp.content if b.type == "text"), "")
+        text = text.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+        try:
+            data = json.loads(text or "{}")
+        except json.JSONDecodeError:
+            data = {}
         return {"status": "generated", "items": data.get("items", [])}
 
     elif name == "lookup_economic_index":
@@ -468,82 +522,4 @@ async def run_apply(
             if step.get("done"):
                 break
 
-    # --- Roadmap phase ---
-    messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {
-            "role": "user",
-            "content": (
-                f"The browser has submitted the application for job '{job_id}'. "
-                f"Now call generate_skill_roadmap with: skill_risks (below), "
-                f"cv_profile (below), and target_job_title='{job_id}'.\n\n"
-                f"CV Profile summary: name={cv_profile.get('name','')}, "
-                f"summary={cv_profile.get('summary','')[:120]}, "
-                f"job_titles={cv_profile.get('job_titles',[])}\n\n"
-                f"Skill risks:\n{json.dumps(skill_risks)}"
-            ),
-        },
-    ]
-
-    async def execute_tool_with_context(name: str, tool_input: dict) -> dict:
-        if name == "generate_skill_roadmap":
-            if not tool_input.get("skill_risks"):
-                tool_input = {**tool_input, "skill_risks": skill_risks}
-            if not tool_input.get("cv_profile") and cv_profile:
-                tool_input = {**tool_input, "cv_profile": cv_profile}
-        return await execute_tool(name, tool_input)
-
-    while True:
-        response = await _chat(messages, TOOLS)
-
-        text_blocks = [b for b in response.content if b.type == "text"]
-        tool_uses   = [b for b in response.content if b.type == "tool_use"]
-
-        if text_blocks and text_blocks[0].text.strip():
-            yield _sse("text", {"text": text_blocks[0].text})
-
-        tool_results_content = []
-        roadmap_done = False
-
-        for tool_use in tool_uses:
-            tool_name  = tool_use.name
-            tool_input = tool_use.input  # already a dict
-
-            sse_input, _ = redact_credentials_from_input(tool_name, tool_input)
-            yield _sse("tool_call", {"tool_name": tool_name, "tool_input": sse_input})
-
-            try:
-                safe_input = sanitise_tool_input(tool_name, tool_input)
-            except GuardrailViolation as e:
-                yield _sse("guardrail", {"check": e.check, "detail": e.detail, "tool_name": tool_name, "fired": True})
-                result = {"error": f"Guardrail blocked this tool call: {e.detail}"}
-                yield _sse("tool_result", {"tool_name": tool_name, "result": result})
-                tool_results_content.append({
-                    "type": "tool_result",
-                    "tool_use_id": tool_use.id,
-                    "content": json.dumps(result),
-                })
-                continue
-
-            result = await execute_tool_with_context(tool_name, safe_input)
-
-            sse_result, pii_fired = redact_pii_from_result(tool_name, result)
-            if pii_fired:
-                yield _sse("guardrail", {"check": "pii_redact", "tool_name": tool_name, "fired": True, "detail": "PII removed from display"})
-            yield _sse("tool_result", {"tool_name": tool_name, "result": sse_result})
-
-            tool_results_content.append({
-                "type": "tool_result",
-                "tool_use_id": tool_use.id,
-                "content": json.dumps(result),
-            })
-
-            if tool_name == "generate_skill_roadmap":
-                roadmap_done = True
-
-        if roadmap_done or response.stop_reason == "end_turn" or not tool_uses:
-            yield _sse("done", {"message": "Done"})
-            break
-
-        messages.append({"role": "assistant", "content": response.content})
-        messages.append({"role": "user", "content": tool_results_content})
+    yield _sse("done", {"message": "Done"})
