@@ -8,7 +8,7 @@ from playwright.async_api import Page
 
 try:
     from browser_use import Agent, BrowserSession, BrowserProfile
-    from browser_use.llm.anthropic.chat import ChatAnthropic
+    from langchain_anthropic import ChatAnthropic
 
     BROWSER_USE_AVAILABLE = True
 except ImportError:
@@ -317,8 +317,8 @@ async def apply_with_browser(
         })
 
     llm = ChatAnthropic(
-        api_key=os.environ.get("ANTHROPIC_API_KEY", ""),
         model="claude-sonnet-4-6",
+        anthropic_api_key=os.environ.get("ANTHROPIC_API_KEY", ""),
     )
 
     agent = Agent(

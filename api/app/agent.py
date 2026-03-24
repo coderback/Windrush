@@ -17,9 +17,7 @@ from .guardrails import (
     GuardrailViolation,
 )
 
-anthropic_client = anthropic.AsyncAnthropic(
-    api_key=os.environ.get("ANTHROPIC_API_KEY", ""),
-)
+client = anthropic.AsyncAnthropic(api_key=os.environ.get("ANTHROPIC_API_KEY", ""))
 
 MODEL = "claude-sonnet-4-6"
 
@@ -177,7 +175,7 @@ TOOLS = [
                 },
                 "cv_profile": {
                     "type": "object",
-                    "description": "Structured CV profile from extract_cv_profile — used to tailor roadmap to the candidate's industry and background",
+                    "description": "Structured CV profile from extract_cv_profile",
                 },
                 "target_job_title": {
                     "type": "string",
@@ -201,12 +199,21 @@ TOOLS = [
 ]
 
 
+async def _llm(system: str, user: str, max_tokens: int = 2048) -> str:
+    """Simple single-turn LLM call for internal tool use (CV parsing, cover letter, roadmap)."""
+    resp = await client.messages.create(
+        model=MODEL,
+        max_tokens=max_tokens,
+        system=system,
+        messages=[{"role": "user", "content": user}],
+    )
+    return resp.content[0].text if resp.content else ""
+
+
 async def execute_tool(name: str, tool_input: dict) -> dict:
     if name == "extract_cv_profile":
         cv_text = tool_input.get("cv_text", "")
-        resp = await anthropic_client.messages.create(
-            model=MODEL,
-            max_tokens=2048,
+        text = await _llm(
             system=(
                 "Extract a structured profile from this CV. Return ONLY valid JSON with no markdown fences. "
                 "Include: name, email, phone, address (full postal address if present), "
@@ -216,9 +223,8 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
                 "education (array of {institution, degree, dates}), "
                 "experience (array of {employer, title, dates, summary} — max 5 most recent)."
             ),
-            messages=[{"role": "user", "content": cv_text[:8000]}],
+            user=cv_text[:4000],
         )
-        text = next((b.text for b in resp.content if b.type == "text"), "")
         text = text.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
         try:
             return json.loads(text or "{}")
@@ -233,7 +239,6 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
             if key in _HARDCODED_EXPOSURE:
                 exposure = _HARDCODED_EXPOSURE[key]
             else:
-                # Fall back to lookup, then default 0.55
                 data = lookup_by_title(skill)
                 raw = data.get("overall_exposure", 0.0)
                 exposure = round(raw, 2) if raw and raw != 0.5 else 0.55
@@ -246,7 +251,6 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
 
     elif name == "search_jobs":
         jobs = await search_jobs(tool_input.get("query", ""), tool_input.get("location", "London"))
-        # Cap at 5; keep description (truncated) so score_job_fit can match skills without fixture lookup
         slim_jobs = [
             {k: v for k, v in j.items() if k not in ("salary_min", "salary_max")}
             for j in jobs[:5]
@@ -284,22 +288,15 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
         job = tool_input.get("job", {})
         cv_profile = tool_input.get("cv_profile", {})
         tone = tool_input.get("tone", "professional")
-        resp = await anthropic_client.messages.create(
-            model=MODEL,
-            max_tokens=2048,
+        letter = await _llm(
             system=f"Write a {tone} cover letter. Be specific — reference the candidate's actual experience and the job's requirements. 3 paragraphs. No placeholders like [Your Address] or [Date] — omit address headers entirely and start directly with 'Dear Hiring Manager,'.",
-            messages=[
-                {
-                    "role": "user",
-                    "content": (
-                        f"Candidate: {json.dumps(cv_profile)}\n\n"
-                        f"Job: {job.get('title')} at {job.get('company')}\n"
-                        f"Description: {job.get('description', '')}"
-                    ),
-                },
-            ],
+            user=(
+                f"Candidate: {json.dumps(cv_profile)}\n\n"
+                f"Job: {job.get('title')} at {job.get('company')}\n"
+                f"Description: {job.get('description', '')}"
+            ),
+            max_tokens=1024,
         )
-        letter = next((b.text for b in resp.content if b.type == "text"), "")
         return {
             "status": "ready",
             "job_title": job.get("title", ""),
@@ -336,9 +333,7 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
             f"{e.get('title','')} at {e.get('employer','')}" for e in exp_list[:3]
         )
 
-        resp = await anthropic_client.messages.create(
-            model=MODEL,
-            max_tokens=2048,
+        text = await _llm(
             system=(
                 "You are a career coach specialising in AI-resilient career development. "
                 "Given a candidate's background, generate a personalised skill development roadmap. "
@@ -359,25 +354,20 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
                 "5. Do NOT recommend skills the candidate already lists. "
                 "6. Keep resources real and specific."
             ),
-            messages=[
-                {
-                    "role": "user",
-                    "content": (
-                        f"Candidate: {name_str}\n"
-                        f"Background: {summary}\n"
-                        f"Education: {edu_str}\n"
-                        f"Experience: {exp_str}\n"
-                        f"Current job titles: {', '.join(job_titles)}\n"
-                        f"Target role: {target_job_title or 'not specified'}\n\n"
-                        f"All skills with AI exposure scores: {all_skills_str}\n"
-                        + (f"Confirmed high AI-exposure (score > 65%): {', '.join(s['skill'] for s in confirmed_high)}\n" if confirmed_high else "")
-                        + (f"Confirmed lower AI-exposure (safer foundation): {', '.join(s['skill'] for s in confirmed_low)}\n" if confirmed_low else "")
-                        + "\nGenerate 6 skill development recommendations that deepen this candidate's technical profile and make them more competitive for their target role."
-                    ),
-                },
-            ],
+            user=(
+                f"Candidate: {name_str}\n"
+                f"Background: {summary}\n"
+                f"Education: {edu_str}\n"
+                f"Experience: {exp_str}\n"
+                f"Current job titles: {', '.join(job_titles)}\n"
+                f"Target role: {target_job_title or 'not specified'}\n\n"
+                f"All skills with AI exposure scores: {all_skills_str}\n"
+                + (f"Confirmed high AI-exposure (score > 65%): {', '.join(s['skill'] for s in confirmed_high)}\n" if confirmed_high else "")
+                + (f"Confirmed lower AI-exposure (safer foundation): {', '.join(s['skill'] for s in confirmed_low)}\n" if confirmed_low else "")
+                + "\nGenerate 6 skill development recommendations that deepen this candidate's technical profile and make them more competitive for their target role."
+            ),
+            max_tokens=2048,
         )
-        text = next((b.text for b in resp.content if b.type == "text"), "")
         text = text.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
         try:
             data = json.loads(text or "{}")
@@ -393,15 +383,13 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
 
 
 async def _chat(messages: list, tools: list):
-    """Call Anthropic messages API. Extracts system message from the messages list."""
-    system = next((m["content"] for m in messages if m["role"] == "system"), "")
-    filtered = [m for m in messages if m["role"] != "system"]
+    """Call Claude via Anthropic SDK."""
     return await asyncio.wait_for(
-        anthropic_client.messages.create(
+        client.messages.create(
             model=MODEL,
             max_tokens=4096,
-            system=system,
-            messages=filtered,
+            system=SYSTEM_PROMPT,
+            messages=messages,
             tools=tools,
         ),
         timeout=90.0,
@@ -416,7 +404,6 @@ def _sse(event_type: str, data: dict) -> str:
 async def run_pipeline(cv_text: str, location: str = "London") -> AsyncGenerator[str, None]:
     """Yields SSE-formatted strings for each agent step."""
     messages: list[dict] = [
-        {"role": "system", "content": SYSTEM_PROMPT},
         {
             "role": "user",
             "content": f"Please analyse this CV and find suitable jobs in {location}.\n\nCV:\n{cv_text[:8000]}",
@@ -432,17 +419,17 @@ async def run_pipeline(cv_text: str, location: str = "London") -> AsyncGenerator
             yield _sse("done", {"message": "Request timed out — please try again."})
             return
 
-        text_blocks = [b for b in response.content if b.type == "text"]
-        tool_uses   = [b for b in response.content if b.type == "tool_use"]
+        # Emit any text blocks
+        for block in response.content:
+            if block.type == "text" and block.text.strip():
+                yield _sse("text", {"text": block.text})
 
-        if text_blocks and text_blocks[0].text.strip():
-            yield _sse("text", {"text": text_blocks[0].text})
+        tool_use_blocks = [b for b in response.content if b.type == "tool_use"]
+        tool_result_content: list[dict] = []
 
-        tool_results_content = []
-
-        for tool_use in tool_uses:
-            tool_name  = tool_use.name
-            tool_input = tool_use.input  # already a dict
+        for block in tool_use_blocks:
+            tool_name = block.name
+            tool_input = block.input
 
             sse_input, _ = redact_credentials_from_input(tool_name, tool_input)
             yield _sse("tool_call", {"tool_name": tool_name, "tool_input": sse_input})
@@ -453,9 +440,9 @@ async def run_pipeline(cv_text: str, location: str = "London") -> AsyncGenerator
                 yield _sse("guardrail", {"check": e.check, "detail": e.detail, "tool_name": tool_name, "fired": True})
                 result = {"error": f"Guardrail blocked this tool call: {e.detail}"}
                 yield _sse("tool_result", {"tool_name": tool_name, "result": result})
-                tool_results_content.append({
+                tool_result_content.append({
                     "type": "tool_result",
-                    "tool_use_id": tool_use.id,
+                    "tool_use_id": block.id,
                     "content": json.dumps(result),
                 })
                 continue
@@ -467,10 +454,9 @@ async def run_pipeline(cv_text: str, location: str = "London") -> AsyncGenerator
                 yield _sse("guardrail", {"check": "pii_redact", "tool_name": tool_name, "fired": True, "detail": "PII removed from display"})
             yield _sse("tool_result", {"tool_name": tool_name, "result": sse_result})
 
-            # Unredacted result for LLM context
-            tool_results_content.append({
+            tool_result_content.append({
                 "type": "tool_result",
-                "tool_use_id": tool_use.id,
+                "tool_use_id": block.id,
                 "content": json.dumps(result),
             })
 
@@ -478,13 +464,13 @@ async def run_pipeline(cv_text: str, location: str = "London") -> AsyncGenerator
                 yield _sse("done", {"message": "Pipeline complete"})
                 return
 
-        if response.stop_reason == "end_turn" or not tool_uses:
+        if response.stop_reason == "end_turn" or not tool_use_blocks:
             yield _sse("done", {"message": "Pipeline complete"})
             break
 
-        # Append assistant turn + tool results as a single user message
+        # Append assistant turn, then tool results
         messages.append({"role": "assistant", "content": response.content})
-        messages.append({"role": "user", "content": tool_results_content})
+        messages.append({"role": "user", "content": tool_result_content})
 
 
 async def run_apply(
@@ -500,13 +486,12 @@ async def run_apply(
     job_password: str = "",
     cv_path: str = "",
 ) -> AsyncGenerator[str, None]:
-    """Apply phase: browser automation first, then skill roadmap generation."""
+    """Apply phase: browser automation."""
     cv_profile = cv_profile or {}
     skill_risks = skill_risks or []
 
     yield _sse("start", {"message": "Starting browser application…", "session_id": session_id})
 
-    # --- Browser phase ---
     if job_url and instruction_queue is not None:
         async for step in apply_with_browser(
             job_url, cv_profile, cover_letter, instruction_queue, frame_queue,
