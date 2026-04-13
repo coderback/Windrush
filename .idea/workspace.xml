@@ -4,14 +4,18 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="657acfba-7aae-4604-a67f-31eee75bbb05" name="Changes" comment="refactor upload and streaming processes for CV handling; improve error handling and session management">
-      <change beforePath="$PROJECT_DIR$/.env.example" beforeDir="false" afterPath="$PROJECT_DIR$/.env.example" afterDir="false" />
+    <list default="true" id="657acfba-7aae-4604-a67f-31eee75bbb05" name="Changes" comment="refactor next.config.mjs to remove API rewrites and introduce route proxying">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/api/app/agent.py" beforeDir="false" afterPath="$PROJECT_DIR$/api/app/agent.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/api/app/browser_agent.py" beforeDir="false" afterPath="$PROJECT_DIR$/api/app/browser_agent.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/api/app/job_proxy.py" beforeDir="false" afterPath="$PROJECT_DIR$/api/app/job_proxy.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/api/app/main.py" beforeDir="false" afterPath="$PROJECT_DIR$/api/app/main.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/api/app/models.py" beforeDir="false" afterPath="$PROJECT_DIR$/api/app/models.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/api/requirements.txt" beforeDir="false" afterPath="$PROJECT_DIR$/api/requirements.txt" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/frontend/package-lock.json" beforeDir="false" afterPath="$PROJECT_DIR$/frontend/package-lock.json" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/frontend/package.json" beforeDir="false" afterPath="$PROJECT_DIR$/frontend/package.json" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/docker-compose.yml" beforeDir="false" afterPath="$PROJECT_DIR$/docker-compose.yml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/frontend/src/app/app/page.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/frontend/src/app/app/page.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/frontend/src/components/CoverLetter.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/frontend/src/components/CoverLetter.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/frontend/src/components/JobList.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/frontend/src/components/JobList.tsx" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -53,7 +57,8 @@
     &quot;RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252&quot;: &quot;true&quot;,
     &quot;RunOnceActivity.git.unshallow&quot;: &quot;true&quot;,
     &quot;git-widget-placeholder&quot;: &quot;main&quot;,
-    &quot;last_opened_file_path&quot;: &quot;C:/Users/tobio/PycharmProjects/Windrush&quot;
+    &quot;last_opened_file_path&quot;: &quot;C:/Users/tobio/PycharmProjects/Windrush&quot;,
+    &quot;settings.editor.selected.configurable&quot;: &quot;preferences.pluginManager&quot;
   }
 }</component>
   <component name="RecentsManager">
@@ -220,7 +225,55 @@
       <option name="project" value="LOCAL" />
       <updated>1774304561506</updated>
     </task>
-    <option name="localTasksCounter" value="19" />
+    <task id="LOCAL-00019" summary="refactor agent to streamline Anthropic API integration and enhance CV processing functionality">
+      <option name="closed" value="true" />
+      <created>1774311666223</created>
+      <option name="number" value="00019" />
+      <option name="presentableId" value="LOCAL-00019" />
+      <option name="project" value="LOCAL" />
+      <updated>1774311666223</updated>
+    </task>
+    <task id="LOCAL-00020" summary="refactor next.config.mjs to remove standalone output configuration">
+      <option name="closed" value="true" />
+      <created>1775255745460</created>
+      <option name="number" value="00020" />
+      <option name="presentableId" value="LOCAL-00020" />
+      <option name="project" value="LOCAL" />
+      <updated>1775255745460</updated>
+    </task>
+    <task id="LOCAL-00021" summary="refactor next.config.mjs to conditionally set output configuration based on environment">
+      <option name="closed" value="true" />
+      <created>1775256838281</created>
+      <option name="number" value="00021" />
+      <option name="presentableId" value="LOCAL-00021" />
+      <option name="project" value="LOCAL" />
+      <updated>1775256838281</updated>
+    </task>
+    <task id="LOCAL-00022" summary="refactor next.config.mjs to add API rewrites based on environment variable">
+      <option name="closed" value="true" />
+      <created>1775257285941</created>
+      <option name="number" value="00022" />
+      <option name="presentableId" value="LOCAL-00022" />
+      <option name="project" value="LOCAL" />
+      <updated>1775257285941</updated>
+    </task>
+    <task id="LOCAL-00023" summary="refactor Dockerfile to allow dynamic port configuration for uvicorn">
+      <option name="closed" value="true" />
+      <created>1775259184162</created>
+      <option name="number" value="00023" />
+      <option name="presentableId" value="LOCAL-00023" />
+      <option name="project" value="LOCAL" />
+      <updated>1775259184163</updated>
+    </task>
+    <task id="LOCAL-00024" summary="refactor next.config.mjs to remove API rewrites and introduce route proxying">
+      <option name="closed" value="true" />
+      <created>1775260167476</created>
+      <option name="number" value="00024" />
+      <option name="presentableId" value="LOCAL-00024" />
+      <option name="project" value="LOCAL" />
+      <updated>1775260167476</updated>
+    </task>
+    <option name="localTasksCounter" value="25" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -264,7 +317,13 @@
     <MESSAGE value="refactor agent to integrate Anthropic API and update model configuration for improved performance" />
     <MESSAGE value="refactor agent to enhance skill roadmap generation and improve job application process" />
     <MESSAGE value="refactor upload and streaming processes for CV handling; improve error handling and session management" />
-    <option name="LAST_COMMIT_MESSAGE" value="refactor upload and streaming processes for CV handling; improve error handling and session management" />
+    <MESSAGE value="refactor agent to streamline Anthropic API integration and enhance CV processing functionality" />
+    <MESSAGE value="refactor next.config.mjs to remove standalone output configuration" />
+    <MESSAGE value="refactor next.config.mjs to conditionally set output configuration based on environment" />
+    <MESSAGE value="refactor next.config.mjs to add API rewrites based on environment variable" />
+    <MESSAGE value="refactor Dockerfile to allow dynamic port configuration for uvicorn" />
+    <MESSAGE value="refactor next.config.mjs to remove API rewrites and introduce route proxying" />
+    <option name="LAST_COMMIT_MESSAGE" value="refactor next.config.mjs to remove API rewrites and introduce route proxying" />
   </component>
   <component name="github-copilot-workspace">
     <instructionFileLocations>

@@ -51,6 +51,7 @@ function AppContent() {
   const [appliedConfirmation, setAppliedConfirmation] = useState("");
   const [dragOver, setDragOver] = useState(false);
   const [pendingCoverLetter, setPendingCoverLetter] = useState("");
+  const [archetype, setArchetype] = useState<string | undefined>(undefined);
   const [sessionId, setSessionId] = useState("");
   const [lastGuardrailEvent, setLastGuardrailEvent] = useState<{ fired: boolean; check: string; detail?: string } | null>(null);
   const [cvSessionId, setCvSessionId] = useState("");
@@ -130,6 +131,7 @@ function AppContent() {
 
       if (ev.tool_name === "generate_cover_letter" && result.cover_letter) {
         setPendingCoverLetter(result.cover_letter as string);
+        if (result.archetype) setArchetype(result.archetype as string);
       }
 
       if (ev.tool_name === "generate_skill_roadmap" && result.items) {
@@ -321,7 +323,13 @@ function AppContent() {
           </h1>
           <p className="text-xs text-zinc-500 mt-0.5">AI-powered career transition navigator</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-3">
+          <a
+            href="/tracker"
+            className="text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
+          >
+            My Applications →
+          </a>
           <GuardrailBadge lastGuardrailEvent={lastGuardrailEvent} />
           {isStreaming && (
             <span className="flex items-center gap-1.5 text-xs text-teal-400">
@@ -457,6 +465,7 @@ function AppContent() {
           coverLetter={coverLetter || pendingCoverLetter}
           jobTitle={selectedJob!.title}
           company={selectedJob!.company}
+          archetype={archetype}
           onApprove={handleApprove}
           onSkip={() => { setCoverLetter(""); setPendingCoverLetter(""); setPhase("done"); }}
           applying={isApplying}

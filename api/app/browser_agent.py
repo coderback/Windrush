@@ -6,13 +6,41 @@ from typing import AsyncGenerator
 
 from playwright.async_api import Page
 
+_BACKEND = os.environ.get("LLM_BACKEND", "ollama").lower()
+_OLLAMA_HOST  = os.environ.get("OLLAMA_HOST",  "http://localhost:11434")
+_OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "gemma4:latest")
+
 try:
     from browser_use import Agent, BrowserSession, BrowserProfile
-    from langchain_anthropic import ChatAnthropic
+
+    if _BACKEND == "groq":
+        from langchain_groq import ChatGroq as _BaseChatGroq
+        from typing import ClassVar
+
+        class _BrowserLLM(_BaseChatGroq):
+            """ChatGroq with provider attribute required by browser-use."""
+            provider: ClassVar[str] = "groq"
+
+        def _make_browser_llm():
+            return _BrowserLLM(
+                model="llama-3.3-70b-versatile",
+                groq_api_key=os.environ.get("GROQ_API_KEY", ""),
+            )
+    else:
+        from langchain_ollama import ChatOllama as _ChatOllama
+
+        def _make_browser_llm():
+            return _ChatOllama(
+                model=_OLLAMA_MODEL,
+                base_url=_OLLAMA_HOST,
+            )
 
     BROWSER_USE_AVAILABLE = True
 except ImportError:
     BROWSER_USE_AVAILABLE = False
+
+    def _make_browser_llm():  # noqa: F811
+        return None
 
 
 async def _screenshot_b64(page: Page) -> str:
@@ -316,10 +344,7 @@ async def apply_with_browser(
             "done": False,
         })
 
-    llm = ChatAnthropic(
-        model="claude-sonnet-4-6",
-        anthropic_api_key=os.environ.get("ANTHROPIC_API_KEY", ""),
-    )
+    llm = _make_browser_llm()
 
     agent = Agent(
         task=task,

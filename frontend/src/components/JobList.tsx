@@ -10,6 +10,8 @@ export interface Job {
   fit_score: number;
   exposure_score: number;
   composite_score: number;
+  level_match?: string;
+  skill_gaps?: string[];
 }
 
 interface Props {
@@ -17,6 +19,18 @@ interface Props {
   onSelect: (job: Job) => void;
   selectedId?: string;
 }
+
+const levelDot: Record<string, string> = {
+  strong: "bg-teal-400",
+  ok: "bg-amber-400",
+  reach: "bg-red-400",
+};
+
+const levelLabel: Record<string, string> = {
+  strong: "Good fit",
+  ok: "Stretch",
+  reach: "Reach",
+};
 
 export default function JobList({ jobs, onSelect, selectedId }: Props) {
   if (jobs.length === 0) return null;
@@ -30,6 +44,7 @@ export default function JobList({ jobs, onSelect, selectedId }: Props) {
         {jobs.map((job) => {
           const score = Math.round(job.composite_score * 100);
           const isSelected = job.job_id === selectedId;
+          const level = job.level_match ?? "ok";
           return (
             <button
               key={job.job_id}
@@ -49,21 +64,47 @@ export default function JobList({ jobs, onSelect, selectedId }: Props) {
                     {job.company} · {job.location}
                   </div>
                 </div>
-                <div
-                  className={`shrink-0 text-xs font-bold px-2 py-0.5 rounded ${
-                    score >= 60
-                      ? "bg-teal-500/20 text-teal-400"
-                      : score >= 40
-                      ? "bg-amber-500/20 text-amber-400"
-                      : "bg-zinc-700 text-zinc-400"
-                  }`}
-                >
-                  {score}
+                <div className="flex items-center gap-1.5 shrink-0">
+                  {/* Level indicator dot */}
+                  <span
+                    title={levelLabel[level]}
+                    className={`w-2 h-2 rounded-full ${levelDot[level] ?? "bg-zinc-500"}`}
+                  />
+                  {/* Composite score badge */}
+                  <div
+                    className={`text-xs font-bold px-2 py-0.5 rounded ${
+                      score >= 60
+                        ? "bg-teal-500/20 text-teal-400"
+                        : score >= 40
+                        ? "bg-amber-500/20 text-amber-400"
+                        : "bg-zinc-700 text-zinc-400"
+                    }`}
+                  >
+                    {score}
+                  </div>
                 </div>
               </div>
+
               <p className="text-xs text-zinc-500 mt-1.5 line-clamp-2">
                 {job.description}
               </p>
+
+              {/* Skill gaps — only show when selected */}
+              {isSelected && job.skill_gaps && job.skill_gaps.length > 0 && (
+                <div className="mt-2 pt-2 border-t border-zinc-800">
+                  <span className="text-xs text-zinc-500 mr-1.5">Skill gaps:</span>
+                  <span className="inline-flex flex-wrap gap-1">
+                    {job.skill_gaps.map((gap) => (
+                      <span
+                        key={gap}
+                        className="text-xs px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400 border border-zinc-700"
+                      >
+                        {gap}
+                      </span>
+                    ))}
+                  </span>
+                </div>
+              )}
             </button>
           );
         })}

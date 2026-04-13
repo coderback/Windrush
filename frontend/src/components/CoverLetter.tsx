@@ -4,6 +4,7 @@ interface Props {
   coverLetter: string;
   jobTitle: string;
   company: string;
+  archetype?: string;
   onApprove: () => void;
   onSkip: () => void;
   applying: boolean;
@@ -13,10 +14,23 @@ interface Props {
   onJobPasswordChange: (v: string) => void;
 }
 
+const archetypePill: Record<string, string> = {
+  SoftwareEngineer: "bg-teal-500/20 text-teal-400",
+  DataML: "bg-purple-500/20 text-purple-400",
+  FinanceAnalyst: "bg-amber-500/20 text-amber-400",
+};
+
+const archetypeLabel: Record<string, string> = {
+  SoftwareEngineer: "Software Engineer",
+  DataML: "Data / ML",
+  FinanceAnalyst: "Finance",
+};
+
 export default function CoverLetter({
   coverLetter,
   jobTitle,
   company,
+  archetype,
   onApprove,
   onSkip,
   applying,
@@ -37,6 +51,15 @@ export default function CoverLetter({
           <h2 className="text-lg font-bold text-zinc-100" style={{ fontFamily: "Playfair Display, serif" }}>
             Apply to {jobTitle} at {company}?
           </h2>
+          {archetype && (
+            <span
+              className={`inline-block mt-1 text-xs font-semibold px-2 py-0.5 rounded ${
+                archetypePill[archetype] ?? "bg-zinc-700 text-zinc-400"
+              }`}
+            >
+              {archetypeLabel[archetype] ?? archetype}
+            </span>
+          )}
         </div>
 
         <div className="flex-1 overflow-y-auto p-4">

@@ -18,7 +18,7 @@ services:
     build: ./api
     expose: ["8000"]
     environment:
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - GROQ_API_KEY=${GROQ_API_KEY}
       - ECONOMIC_INDEX_PATH=/data/economic_index.json
       - TASK_PENETRATION_PATH=/data/task_penetration.csv
       - ADZUNA_APP_ID=${ADZUNA_APP_ID}
@@ -26,8 +26,10 @@ services:
       - JOB_EMAIL=${JOB_EMAIL}
       - JOB_PASSWORD=${JOB_PASSWORD}
       - JOBS_MCP_URL=http://civic-guardrails:8002/mcp
+      - APP_DATA_PATH=/appdata
     volumes:
       - economic_data:/data:ro
+      - app_data:/appdata
     depends_on: [jobs-mcp, civic-guardrails]
 
   jobs-mcp:
@@ -58,3 +60,4 @@ volumes:
       o: bind
       device: ./data
   guardrail_logs:
+  app_data:

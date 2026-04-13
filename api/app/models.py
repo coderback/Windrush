@@ -30,6 +30,26 @@ class JobMatch(BaseModel):
     fit_score: float = 0.0
     exposure_score: float = 0.5
     composite_score: float = 0.0
+    level_match: str = "ok"
+    skill_gaps: list[str] = []
+
+
+class ApplicationRecord(BaseModel):
+    id: str
+    job_id: str
+    job_title: str
+    company: str
+    location: str = ""
+    job_url: str = ""
+    status: str = "Evaluated"
+    date_applied: str | None = None
+    composite_score: float | None = None
+    exposure_score: float | None = None
+    fit_score: float | None = None
+    skill_gaps: list[str] = []
+    level_match: str = "ok"
+    notes: str = ""
+    created_at: str
 
 
 class RoadmapItem(BaseModel):

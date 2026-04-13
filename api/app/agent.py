@@ -4,7 +4,7 @@ import os
 import time
 from typing import AsyncGenerator
 
-import anthropic
+from openai import AsyncOpenAI
 
 from .cv_parser import extract_text
 from .risk_scorer import lookup_onet, lookup_by_title, ECONOMIC_INDEX
@@ -17,9 +17,30 @@ from .guardrails import (
     GuardrailViolation,
 )
 
-client = anthropic.AsyncAnthropic(api_key=os.environ.get("ANTHROPIC_API_KEY", ""))
+# ── LLM backend ───────────────────────────────────────────────────────────────
+# Switch between Ollama (local) and Groq (cloud) via LLM_BACKEND env var.
+# LLM_BACKEND=ollama  → local Gemma 4 via Ollama
+# LLM_BACKEND=groq    → Groq cloud (original)
 
-MODEL = "claude-sonnet-4-6"
+_BACKEND = os.environ.get("LLM_BACKEND", "ollama").lower()
+
+if _BACKEND == "groq":
+    client = AsyncOpenAI(
+        api_key=os.environ.get("GROQ_API_KEY", ""),
+        base_url="https://api.groq.com/openai/v1",
+    )
+    AGENT_MODEL = "llama3-groq-70b-8192-tool-use-preview"
+    LLM_MODEL   = "llama-3.3-70b-versatile"
+else:
+    # Ollama — local Gemma 4
+    _OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
+    _OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "gemma4:latest")
+    client = AsyncOpenAI(
+        api_key="ollama",                        # Ollama ignores the key but requires a value
+        base_url=f"{_OLLAMA_HOST}/v1",
+    )
+    AGENT_MODEL = _OLLAMA_MODEL
+    LLM_MODEL   = _OLLAMA_MODEL
 
 SYSTEM_PROMPT = """You are Windrush, an AI career transition advisor helping workers navigate the impact of AI on their careers.
 
@@ -32,9 +53,10 @@ Work through this pipeline in order, passing data between tools explicitly:
 5. generate_skill_roadmap(skill_risks=[...the skill_risks array from step 2...], cv_profile={...the full profile object from step 1...}, target_job_title=<top ranked job title from step 4>)
 6. generate_cover_letter(job={...the top ranked job from step 4...}, cv_profile={...the full profile object from step 1...})
 
-CRITICAL: Always pass the actual data objects from previous tool results into subsequent tool calls. Never call a tool with empty arguments.
-
-After generate_cover_letter completes, stop. Do NOT call apply_to_job — the user must explicitly approve first."""
+CRITICAL RULES:
+- After each tool returns a result, immediately call the next tool in the pipeline. Do NOT write any text, summary, or response to the user between tool calls.
+- Always pass the actual data objects from previous tool results into subsequent tool calls. Never call a tool with empty arguments.
+- After generate_cover_letter completes, stop. Do NOT call apply_to_job — the user must explicitly approve first."""
 
 
 _HARDCODED_EXPOSURE: dict[str, float] = {
@@ -199,15 +221,68 @@ TOOLS = [
 ]
 
 
+GROQ_TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": t["name"],
+            "description": t["description"],
+            "parameters": t["input_schema"],
+        },
+    }
+    for t in TOOLS
+]
+
+
 async def _llm(system: str, user: str, max_tokens: int = 2048) -> str:
     """Simple single-turn LLM call for internal tool use (CV parsing, cover letter, roadmap)."""
-    resp = await client.messages.create(
-        model=MODEL,
+    resp = await client.chat.completions.create(
+        model=LLM_MODEL,
         max_tokens=max_tokens,
-        system=system,
-        messages=[{"role": "user", "content": user}],
+        messages=[
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ],
     )
-    return resp.content[0].text if resp.content else ""
+    return resp.choices[0].message.content or ""
+
+
+_ARCHETYPE_KEYWORDS: dict[str, list[str]] = {
+    "SoftwareEngineer": [
+        "backend", "frontend", "full stack", "infrastructure", "distributed",
+        "microservices", "api", "platform", "devops", "cloud", "kubernetes",
+        "scalability", "reliability", "systems design",
+    ],
+    "DataML": [
+        "machine learning", "deep learning", "model", "pytorch", "tensorflow",
+        "data pipeline", "analytics", "nlp", "natural language", "llm",
+        "neural network", "training", "inference", "dataset", "feature engineering",
+    ],
+    "FinanceAnalyst": [
+        "financial model", "valuation", "m&a", "equity", "quantitative",
+        "trading", "investment", "portfolio", "risk", "derivatives",
+        "fixed income", "hedge fund", "private equity", "due diligence",
+    ],
+}
+
+
+def _detect_archetype(job_title: str, description: str) -> str:
+    text = (job_title + " " + description).lower()
+    scores = {arch: sum(1 for kw in kws if kw in text) for arch, kws in _ARCHETYPE_KEYWORDS.items()}
+    return max(scores, key=lambda k: scores[k])
+
+
+def _extract_differentiation_hook(cv_profile: dict, job_description: str) -> str:
+    """Find a distinctive item from the candidate's experience not mentioned in the JD."""
+    jd_lower = job_description.lower()
+    for exp in cv_profile.get("experience", []):
+        summary = exp.get("summary", "") + " " + exp.get("employer", "")
+        # Look for capitalised proper nouns / specific tech terms not in JD
+        tokens = [w.strip(".,();") for w in summary.split() if len(w) > 3 and w[0].isupper()]
+        for token in tokens:
+            if token.lower() not in jd_lower and len(token) > 4:
+                return f"Notable experience with {token} that directly applies to this role."
+    return ""
 
 
 async def execute_tool(name: str, tool_input: dict) -> dict:
@@ -253,31 +328,71 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
         jobs = await search_jobs(tool_input.get("query", ""), tool_input.get("location", "London"))
         slim_jobs = [
             {k: v for k, v in j.items() if k not in ("salary_min", "salary_max")}
-            for j in jobs[:5]
+            for j in jobs[:10]
         ]
         return {"jobs": slim_jobs, "count": len(slim_jobs)}
 
     elif name == "score_job_fit":
+        import re as _re
         jobs = tool_input.get("jobs", [])
         cv_profile = tool_input.get("cv_profile", {})
         cv_skills = set(s.lower() for s in cv_profile.get("skills", []))
+        cv_years = float(cv_profile.get("experience_years", 0) or 0)
+
+        # Skill vocabulary for gap detection — reuse existing hardcoded keys
+        _skill_vocab = set(_HARDCODED_EXPOSURE.keys())
+
+        def _level_match(title: str, desc: str) -> tuple[str, float]:
+            """Infer required experience and return (match_label, level_bonus)."""
+            required = 0.0
+            # Infer from title seniority words
+            title_l = title.lower()
+            if any(w in title_l for w in ("senior", "sr.")):
+                required = 3.0
+            elif any(w in title_l for w in ("lead", "principal", "staff")):
+                required = 5.0
+            elif any(w in title_l for w in ("graduate", "junior", "jr.", "entry")):
+                required = 0.0
+            # Override with explicit years mention in description
+            matches = _re.findall(r"(\d+)\+?\s*(?:years?|yrs?)", desc, _re.I)
+            if matches:
+                required = max(float(m) for m in matches)
+            if cv_years >= required:
+                return "strong", 1.0
+            elif cv_years >= required - 1:
+                return "ok", 0.6
+            else:
+                return "reach", 0.2
+
+        def _skill_gaps(desc: str) -> list[str]:
+            desc_l = desc.lower()
+            gaps = [
+                skill for skill in _skill_vocab
+                if skill in desc_l and skill not in cv_skills
+            ]
+            return gaps[:6]
 
         scored = []
         for job in jobs:
             exposure = job.get("exposure_score", 0.5)
-            desc_lower = job.get("description", "").lower()
+            desc = job.get("description", "")
+            desc_lower = desc.lower()
             skill_matches = sum(1 for s in cv_skills if s in desc_lower)
             fit_score = min(skill_matches / max(len(cv_skills), 1), 1.0)
-            composite = (1 - exposure) * 0.5 + fit_score * 0.5
+            level, level_bonus = _level_match(job.get("title", ""), desc)
+            gaps = _skill_gaps(desc)
+            composite = (1 - exposure) * 0.35 + fit_score * 0.45 + level_bonus * 0.20
             scored.append({
                 "job_id": job.get("job_id"),
                 "title": job.get("title"),
                 "company": job.get("company"),
                 "location": job.get("location"),
                 "url": job.get("url"),
-                "description": job.get("description", ""),
+                "description": desc,
                 "exposure_score": exposure,
                 "fit_score": round(fit_score, 2),
+                "level_match": level,
+                "skill_gaps": gaps,
                 "composite_score": round(composite, 2),
             })
 
@@ -288,8 +403,22 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
         job = tool_input.get("job", {})
         cv_profile = tool_input.get("cv_profile", {})
         tone = tool_input.get("tone", "professional")
+        archetype = _detect_archetype(job.get("title", ""), job.get("description", ""))
+        hook = _extract_differentiation_hook(cv_profile, job.get("description", ""))
+        archetype_guidance = {
+            "SoftwareEngineer": "Emphasise technical depth, system design decisions, and production reliability.",
+            "DataML": "Emphasise model performance, pipeline scale, evaluation rigour, and research grounding.",
+            "FinanceAnalyst": "Emphasise quantitative precision, domain-specific modelling, and analytical frameworks.",
+        }[archetype]
+        system = (
+            f"Write a {tone} cover letter. Archetype: {archetype}. {archetype_guidance} "
+            "Be specific — reference the candidate's actual experience and the job's requirements. "
+            "3 paragraphs. No placeholders like [Your Address] or [Date] — omit address headers entirely "
+            "and start directly with 'Dear Hiring Manager,'."
+            + (f"\n\nDifferentiation hook to weave in naturally: {hook}" if hook else "")
+        )
         letter = await _llm(
-            system=f"Write a {tone} cover letter. Be specific — reference the candidate's actual experience and the job's requirements. 3 paragraphs. No placeholders like [Your Address] or [Date] — omit address headers entirely and start directly with 'Dear Hiring Manager,'.",
+            system=system,
             user=(
                 f"Candidate: {json.dumps(cv_profile)}\n\n"
                 f"Job: {job.get('title')} at {job.get('company')}\n"
@@ -303,6 +432,7 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
             "company": job.get("company", ""),
             "candidate_name": cv_profile.get("name", ""),
             "cover_letter": letter,
+            "archetype": archetype,
         }
 
     elif name == "apply_to_job":
@@ -383,16 +513,18 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
 
 
 async def _chat(messages: list, tools: list):
-    """Call Claude via Anthropic SDK."""
+    """Call LLM via OpenAI-compatible API (Ollama or Groq)."""
+    all_messages = [{"role": "system", "content": SYSTEM_PROMPT}] + messages
+    # Ollama local inference can be slow on large models — use a longer timeout
+    timeout = 180.0 if _BACKEND == "ollama" else 90.0
     return await asyncio.wait_for(
-        client.messages.create(
-            model=MODEL,
+        client.chat.completions.create(
+            model=AGENT_MODEL,
             max_tokens=4096,
-            system=SYSTEM_PROMPT,
-            messages=messages,
+            messages=all_messages,
             tools=tools,
         ),
-        timeout=90.0,
+        timeout=timeout,
     )
 
 
@@ -406,7 +538,7 @@ async def run_pipeline(cv_text: str, location: str = "London") -> AsyncGenerator
     messages: list[dict] = [
         {
             "role": "user",
-            "content": f"Please analyse this CV and find suitable jobs in {location}.\n\nCV:\n{cv_text[:8000]}",
+            "content": f"Please analyse this CV and find suitable jobs in {location}.\n\nCV:\n{cv_text[:3000]}",
         },
     ]
 
@@ -414,22 +546,36 @@ async def run_pipeline(cv_text: str, location: str = "London") -> AsyncGenerator
 
     while True:
         try:
-            response = await _chat(messages, TOOLS)
+            response = await _chat(messages, GROQ_TOOLS)
         except asyncio.TimeoutError:
             yield _sse("done", {"message": "Request timed out — please try again."})
             return
 
-        # Emit any text blocks
-        for block in response.content:
-            if block.type == "text" and block.text.strip():
-                yield _sse("text", {"text": block.text})
+        message = response.choices[0].message
+        finish_reason = response.choices[0].finish_reason
 
-        tool_use_blocks = [b for b in response.content if b.type == "tool_use"]
-        tool_result_content: list[dict] = []
+        # Emit any text content
+        if message.content and message.content.strip():
+            yield _sse("text", {"text": message.content})
 
-        for block in tool_use_blocks:
-            tool_name = block.name
-            tool_input = block.input
+        tool_calls = message.tool_calls or []
+
+        # Append assistant turn (must include tool_calls if present)
+        assistant_msg: dict = {"role": "assistant", "content": message.content}
+        if tool_calls:
+            assistant_msg["tool_calls"] = [
+                {
+                    "id": tc.id,
+                    "type": "function",
+                    "function": {"name": tc.function.name, "arguments": tc.function.arguments},
+                }
+                for tc in tool_calls
+            ]
+        messages.append(assistant_msg)
+
+        for tc in tool_calls:
+            tool_name = tc.function.name
+            tool_input = json.loads(tc.function.arguments)
 
             sse_input, _ = redact_credentials_from_input(tool_name, tool_input)
             yield _sse("tool_call", {"tool_name": tool_name, "tool_input": sse_input})
@@ -440,11 +586,7 @@ async def run_pipeline(cv_text: str, location: str = "London") -> AsyncGenerator
                 yield _sse("guardrail", {"check": e.check, "detail": e.detail, "tool_name": tool_name, "fired": True})
                 result = {"error": f"Guardrail blocked this tool call: {e.detail}"}
                 yield _sse("tool_result", {"tool_name": tool_name, "result": result})
-                tool_result_content.append({
-                    "type": "tool_result",
-                    "tool_use_id": block.id,
-                    "content": json.dumps(result),
-                })
+                messages.append({"role": "tool", "tool_call_id": tc.id, "content": json.dumps(result)})
                 continue
 
             result = await execute_tool(tool_name, safe_input)
@@ -454,23 +596,15 @@ async def run_pipeline(cv_text: str, location: str = "London") -> AsyncGenerator
                 yield _sse("guardrail", {"check": "pii_redact", "tool_name": tool_name, "fired": True, "detail": "PII removed from display"})
             yield _sse("tool_result", {"tool_name": tool_name, "result": sse_result})
 
-            tool_result_content.append({
-                "type": "tool_result",
-                "tool_use_id": block.id,
-                "content": json.dumps(result),
-            })
+            messages.append({"role": "tool", "tool_call_id": tc.id, "content": json.dumps(result)})
 
             if tool_name == "generate_cover_letter":
                 yield _sse("done", {"message": "Pipeline complete"})
                 return
 
-        if response.stop_reason == "end_turn" or not tool_use_blocks:
+        if finish_reason == "stop" or not tool_calls:
             yield _sse("done", {"message": "Pipeline complete"})
             break
-
-        # Append assistant turn, then tool results
-        messages.append({"role": "assistant", "content": response.content})
-        messages.append({"role": "user", "content": tool_result_content})
 
 
 async def run_apply(

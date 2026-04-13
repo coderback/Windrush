@@ -3,16 +3,26 @@ import json
 import pathlib
 import tempfile
 import uuid
+from contextlib import asynccontextmanager
+from typing import Optional
 
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
 from .cv_parser import extract_text
 from .agent import run_pipeline, run_apply
 from .guardrails import check_cv_for_injection, get_audit_log, GuardrailViolation
+from . import tracker
 
-app = FastAPI(title="Windrush API")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    tracker.init_db()
+    yield
+
+
+app = FastAPI(title="Windrush API", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -73,7 +83,7 @@ async def pipeline_stream(
     cv_path_str = _cv_files.get(cv_session_id, "")
 
     async def pipeline_with_cv_session():
-        import json, time
+        import time
         try:
             yield f"data: {json.dumps({'type': 'cv_session', 'cv_session_id': cv_session_id, 'timestamp': time.time()})}\n\n"
             async for chunk in run_pipeline(cv_text, location):
@@ -105,6 +115,15 @@ async def apply(
     job_email: str = Form(default=""),
     job_password: str = Form(default=""),
     cv_session_id: str = Form(default=""),
+    # Score data for tracker (sent from frontend after pipeline completes)
+    job_title: str = Form(default=""),
+    company: str = Form(default=""),
+    location: str = Form(default=""),
+    composite_score: float = Form(default=0.0),
+    exposure_score: float = Form(default=0.5),
+    fit_score: float = Form(default=0.0),
+    level_match: str = Form(default="ok"),
+    skill_gaps: str = Form(default="[]"),
 ):
     try:
         profile = json.loads(cv_profile)
@@ -114,8 +133,30 @@ async def apply(
         risks = json.loads(skill_risks)
     except json.JSONDecodeError:
         risks = []
+    try:
+        gaps = json.loads(skill_gaps)
+    except json.JSONDecodeError:
+        gaps = []
+
     cv_path = _cv_files.get(cv_session_id, "")
     session_id = str(uuid.uuid4())
+
+    # Add to tracker before starting browser session
+    job_dict = {
+        "job_id": job_id,
+        "title": job_title,
+        "company": company,
+        "location": location,
+        "url": job_url,
+    }
+    score_data = {
+        "composite_score": composite_score,
+        "exposure_score": exposure_score,
+        "fit_score": fit_score,
+        "skill_gaps": gaps,
+        "level_match": level_match,
+    }
+    app_id = tracker.add_application(job_dict, profile, cover_letter, score_data)
 
     q: asyncio.Queue = asyncio.Queue()
     fq: asyncio.Queue = asyncio.Queue(maxsize=8)
@@ -123,15 +164,25 @@ async def apply(
     _browser_frames[session_id] = fq
 
     async def cleanup_gen():
+        applied_successfully = False
         try:
             async for chunk in run_apply(
                 job_id, job_url, cover_letter, profile, risks, session_id, q, fq,
                 job_email=job_email, job_password=job_password, cv_path=cv_path,
             ):
+                # Detect successful completion from done event
+                try:
+                    payload = json.loads(chunk.removeprefix("data: ").strip())
+                    if payload.get("type") == "done":
+                        applied_successfully = True
+                except Exception:
+                    pass
                 yield chunk
         finally:
             _browser_queues.pop(session_id, None)
             _browser_frames.pop(session_id, None)
+            if app_id and applied_successfully:
+                tracker.update_status(app_id, "Applied")
 
     return StreamingResponse(
         cleanup_gen(),
@@ -161,14 +212,13 @@ async def browser_stream(session_id: str):
         while True:
             fq = _browser_frames.get(session_id)
             if fq is None:
-                # Session ended — send close event and stop
                 yield f"data: {json.dumps({'type': 'close'})}\n\n"
                 return
             try:
                 frame = await asyncio.wait_for(fq.get(), timeout=5.0)
                 yield f"data: {json.dumps({'frame': frame})}\n\n"
             except asyncio.TimeoutError:
-                yield ": keepalive\n\n"  # SSE comment — keeps connection alive
+                yield ": keepalive\n\n"
 
     return StreamingResponse(
         gen(),
@@ -179,3 +229,32 @@ async def browser_stream(session_id: str):
             "Connection": "keep-alive",
         },
     )
+
+
+# ── Application Tracker endpoints ─────────────────────────────────────────────
+
+@app.get("/applications")
+async def list_applications(status: Optional[str] = Query(default=None)):
+    return tracker.list_applications(status)
+
+
+@app.post("/applications")
+async def create_application(body: dict):
+    job = body.get("job", {})
+    cv_profile = body.get("cv_profile", {})
+    cover_letter = body.get("cover_letter", "")
+    score_data = body.get("score_data", {})
+    app_id = tracker.add_application(job, cv_profile, cover_letter, score_data)
+    if app_id:
+        return {"id": app_id, "status": "created"}
+    return {"status": "duplicate", "message": "An application for this role already exists."}
+
+
+@app.patch("/applications/{app_id}/status")
+async def update_application_status(app_id: str, body: dict):
+    status = body.get("status", "")
+    notes = body.get("notes")
+    ok = tracker.update_status(app_id, status, notes)
+    if not ok:
+        raise HTTPException(status_code=400, detail=f"Invalid status: {status!r}")
+    return {"id": app_id, "status": status, "updated": True}
