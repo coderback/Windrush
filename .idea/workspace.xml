@@ -4,18 +4,10 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="657acfba-7aae-4604-a67f-31eee75bbb05" name="Changes" comment="refactor next.config.mjs to remove API rewrites and introduce route proxying">
+    <list default="true" id="657acfba-7aae-4604-a67f-31eee75bbb05" name="Changes" comment="refactor agent.py to switch LLM backend between Ollama and Groq based on environment variable">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/api/app/agent.py" beforeDir="false" afterPath="$PROJECT_DIR$/api/app/agent.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/api/app/browser_agent.py" beforeDir="false" afterPath="$PROJECT_DIR$/api/app/browser_agent.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/api/app/job_proxy.py" beforeDir="false" afterPath="$PROJECT_DIR$/api/app/job_proxy.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/api/app/main.py" beforeDir="false" afterPath="$PROJECT_DIR$/api/app/main.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/api/app/models.py" beforeDir="false" afterPath="$PROJECT_DIR$/api/app/models.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/api/requirements.txt" beforeDir="false" afterPath="$PROJECT_DIR$/api/requirements.txt" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/docker-compose.yml" beforeDir="false" afterPath="$PROJECT_DIR$/docker-compose.yml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/frontend/src/app/app/page.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/frontend/src/app/app/page.tsx" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/frontend/src/components/CoverLetter.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/frontend/src/components/CoverLetter.tsx" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/frontend/src/components/JobList.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/frontend/src/components/JobList.tsx" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -273,7 +265,15 @@
       <option name="project" value="LOCAL" />
       <updated>1775260167476</updated>
     </task>
-    <option name="localTasksCounter" value="25" />
+    <task id="LOCAL-00025" summary="refactor agent.py to switch LLM backend between Ollama and Groq based on environment variable">
+      <option name="closed" value="true" />
+      <created>1776040340176</created>
+      <option name="number" value="00025" />
+      <option name="presentableId" value="LOCAL-00025" />
+      <option name="project" value="LOCAL" />
+      <updated>1776040340176</updated>
+    </task>
+    <option name="localTasksCounter" value="26" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -323,7 +323,8 @@
     <MESSAGE value="refactor next.config.mjs to add API rewrites based on environment variable" />
     <MESSAGE value="refactor Dockerfile to allow dynamic port configuration for uvicorn" />
     <MESSAGE value="refactor next.config.mjs to remove API rewrites and introduce route proxying" />
-    <option name="LAST_COMMIT_MESSAGE" value="refactor next.config.mjs to remove API rewrites and introduce route proxying" />
+    <MESSAGE value="refactor agent.py to switch LLM backend between Ollama and Groq based on environment variable" />
+    <option name="LAST_COMMIT_MESSAGE" value="refactor agent.py to switch LLM backend between Ollama and Groq based on environment variable" />
   </component>
   <component name="github-copilot-workspace">
     <instructionFileLocations>

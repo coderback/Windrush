@@ -1,9 +1,12 @@
 import asyncio
 import json
 import os
+import re
 import time
+from html.parser import HTMLParser
 from typing import AsyncGenerator
 
+import httpx
 from openai import AsyncOpenAI
 
 from .cv_parser import extract_text
@@ -13,6 +16,7 @@ from .browser_agent import apply_with_browser
 from .guardrails import (
     sanitise_tool_input,
     redact_pii_from_result,
+    redact_pii_from_input,
     redact_credentials_from_input,
     GuardrailViolation,
 )
@@ -29,8 +33,8 @@ if _BACKEND == "groq":
         api_key=os.environ.get("GROQ_API_KEY", ""),
         base_url="https://api.groq.com/openai/v1",
     )
-    AGENT_MODEL = "llama3-groq-70b-8192-tool-use-preview"
-    LLM_MODEL   = "llama-3.3-70b-versatile"
+    AGENT_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"
+    LLM_MODEL   = "meta-llama/llama-4-scout-17b-16e-instruct"
 else:
     # Ollama — local Gemma 4
     _OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
@@ -44,18 +48,25 @@ else:
 
 SYSTEM_PROMPT = """You are Windrush, an AI career transition advisor helping workers navigate the impact of AI on their careers.
 
+AVAILABLE TOOLS — use these exact names, spelled exactly as shown:
+  extract_cv_profile | score_ai_risk | search_jobs | web_search | score_job_fit | generate_skill_roadmap | generate_cover_letter | apply_to_job
+
 Work through this pipeline in order, passing data between tools explicitly:
 
 1. extract_cv_profile(cv_text) → returns a profile object with name, skills, job_titles, location
 2. score_ai_risk(skills=[...all skills and job_titles from step 1...])
 3. search_jobs(query=<primary job title from profile>, location=<location from profile>)
-4. score_job_fit(jobs=[...the jobs array from step 3's result...], cv_profile={...the full profile object from step 1...})
+   OPTIONAL: call web_search with a targeted site: query to supplement results, e.g.
+   web_search(query='site:jobs.ashbyhq.com "Junior AI Engineer" OR "Graduate Software Engineer"')
+   Merge any additional jobs into the list before passing to score_job_fit.
+4. score_job_fit(jobs=[...combined jobs from search_jobs + any web_search results...], cv_profile={...the full profile object from step 1...})
 5. generate_skill_roadmap(skill_risks=[...the skill_risks array from step 2...], cv_profile={...the full profile object from step 1...}, target_job_title=<top ranked job title from step 4>)
 6. generate_cover_letter(job={...the top ranked job from step 4...}, cv_profile={...the full profile object from step 1...})
 
 CRITICAL RULES:
 - After each tool returns a result, immediately call the next tool in the pipeline. Do NOT write any text, summary, or response to the user between tool calls.
 - Always pass the actual data objects from previous tool results into subsequent tool calls. Never call a tool with empty arguments.
+- If a tool returns an error saying the tool name is unknown, you have misspelled the tool name. Check the AVAILABLE TOOLS list above and call the correct tool immediately.
 - After generate_cover_letter completes, stop. Do NOT call apply_to_job — the user must explicitly approve first."""
 
 
@@ -133,6 +144,29 @@ TOOLS = [
                 "location": {"type": "string", "description": "Location e.g. 'London'"},
             },
             "required": ["query", "location"],
+        },
+    },
+    {
+        "name": "web_search",
+        "description": (
+            "Search the web for job listings or company information. "
+            "Use site: filters to target specific job boards, e.g. "
+            "'site:jobs.ashbyhq.com \"Junior AI Engineer\" OR \"Graduate ML\"'. "
+            "Returns a list of {title, url, snippet} results. "
+            "Call this after search_jobs to supplement with targeted queries."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": (
+                        "Search query. Use site: for job boards, e.g. "
+                        "'site:jobs.ashbyhq.com \"Graduate\" \"AI Engineer\"'"
+                    ),
+                },
+            },
+            "required": ["query"],
         },
     },
     {
@@ -285,6 +319,90 @@ def _extract_differentiation_hook(cv_profile: dict, job_description: str) -> str
     return ""
 
 
+class _DDGLiteParser(HTMLParser):
+    """
+    Parser for DuckDuckGo Lite (https://lite.duckduckgo.com/lite/) HTML results.
+    Results use class='result-link' for titles and class='result-snippet' for snippets.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self._results: list[dict] = []
+        self._current_title: str = ""
+        self._current_url: str = ""
+        self._current_snippet: str = ""
+        self._in_title: bool = False
+        self._in_snippet: bool = False
+
+    def handle_starttag(self, tag, attrs):
+        attrs_d = dict(attrs)
+        cls = attrs_d.get("class", "")
+        if tag == "a" and "result-link" in cls:
+            self._in_title = True
+            self._current_title = ""
+            self._current_url = attrs_d.get("href", "")
+        elif tag == "td" and "result-snippet" in cls:
+            self._in_snippet = True
+            self._current_snippet = ""
+
+    def handle_data(self, data):
+        if self._in_title:
+            self._current_title += data
+        elif self._in_snippet:
+            self._current_snippet += data
+
+    def handle_endtag(self, tag):
+        if tag == "a" and self._in_title:
+            self._in_title = False
+            title = re.sub(r"\s+", " ", self._current_title).strip()
+            if title and self._current_url:
+                self._results.append({
+                    "title": title,
+                    "url": self._current_url,
+                    "snippet": "",
+                })
+            self._current_title = ""
+            self._current_url = ""
+        elif tag == "td" and self._in_snippet:
+            self._in_snippet = False
+            snippet = re.sub(r"\s+", " ", self._current_snippet).strip()
+            if self._results:
+                self._results[-1]["snippet"] = snippet
+            self._current_snippet = ""
+
+
+async def _ddg_search(query: str, max_results: int = 15) -> list[dict]:
+    """
+    Query DuckDuckGo Lite endpoint (no API key required).
+    Uses the lite POST endpoint which is more scraping-friendly than the main HTML endpoint.
+    Returns a list of {title, url, snippet} dicts.
+    """
+    try:
+        async with httpx.AsyncClient(
+            headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            },
+            follow_redirects=True,
+            timeout=12.0,
+        ) as client:
+            resp = await client.post(
+                "https://lite.duckduckgo.com/lite/",
+                data={"q": query, "kl": "uk-en"},
+            )
+            resp.raise_for_status()
+            html = resp.text
+
+        parser = _DDGLiteParser()
+        parser.feed(html)
+        return parser._results[:max_results]
+
+    except Exception as exc:
+        import logging as _logging
+        _logging.getLogger("windrush.agent").warning("web_search failed: %s", exc)
+        return []
+
+
 async def execute_tool(name: str, tool_input: dict) -> dict:
     if name == "extract_cv_profile":
         cv_text = tool_input.get("cv_text", "")
@@ -331,6 +449,29 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
             for j in jobs[:10]
         ]
         return {"jobs": slim_jobs, "count": len(slim_jobs)}
+
+    elif name == "web_search":
+        query = tool_input.get("query", "")
+        results = await _ddg_search(query)
+        # Shape into lightweight job-like dicts the agent can merge with search_jobs output
+        jobs = []
+        for r in results:
+            title_raw = r.get("title", "")
+            # Try to split "Title @ Company" / "Title at Company"
+            m = re.search(r"(.+?)(?:\s*[@|]\s*|\s+at\s+)(.+?)$", title_raw, re.I)
+            title   = m.group(1).strip() if m else title_raw
+            company = m.group(2).strip() if m else "Unknown"
+            if len(title) < 4:
+                continue
+            jobs.append({
+                "job_id": f"ws-{abs(hash(r['url'])) % 10**8}",
+                "title": title,
+                "company": company,
+                "location": "See listing",
+                "description": r.get("snippet", "")[:500],
+                "url": r.get("url", ""),
+            })
+        return {"results": results, "jobs": jobs, "count": len(jobs)}
 
     elif name == "score_job_fit":
         import re as _re
@@ -544,6 +685,10 @@ async def run_pipeline(cv_text: str, location: str = "London") -> AsyncGenerator
 
     yield _sse("start", {"message": "Pipeline started"})
 
+    _cover_letter_done = False
+    _nudge_count = 0          # guard against infinite nudge loops
+    _MAX_NUDGES = 2
+
     while True:
         try:
             response = await _chat(messages, GROQ_TOOLS)
@@ -578,6 +723,7 @@ async def run_pipeline(cv_text: str, location: str = "London") -> AsyncGenerator
             tool_input = json.loads(tc.function.arguments)
 
             sse_input, _ = redact_credentials_from_input(tool_name, tool_input)
+            sse_input, _ = redact_pii_from_input(tool_name, sse_input)
             yield _sse("tool_call", {"tool_name": tool_name, "tool_input": sse_input})
 
             try:
@@ -591,6 +737,20 @@ async def run_pipeline(cv_text: str, location: str = "London") -> AsyncGenerator
 
             result = await execute_tool(tool_name, safe_input)
 
+            # Unknown tool — model hallucinated a name. Inject a directive correction
+            # so it retries with the right name rather than silently stopping.
+            if isinstance(result, dict) and result.get("error", "").startswith("Unknown tool"):
+                correction = (
+                    f"'{tool_name}' is not a valid tool name. "
+                    "Available tools: extract_cv_profile, score_ai_risk, search_jobs, "
+                    "web_search, score_job_fit, generate_skill_roadmap, generate_cover_letter. "
+                    "Call the correct tool now to continue the pipeline."
+                )
+                result["correction"] = correction
+                yield _sse("tool_result", {"tool_name": tool_name, "result": result})
+                messages.append({"role": "tool", "tool_call_id": tc.id, "content": json.dumps(result)})
+                continue
+
             sse_result, pii_fired = redact_pii_from_result(tool_name, result)
             if pii_fired:
                 yield _sse("guardrail", {"check": "pii_redact", "tool_name": tool_name, "fired": True, "detail": "PII removed from display"})
@@ -599,10 +759,24 @@ async def run_pipeline(cv_text: str, location: str = "London") -> AsyncGenerator
             messages.append({"role": "tool", "tool_call_id": tc.id, "content": json.dumps(result)})
 
             if tool_name == "generate_cover_letter":
+                _cover_letter_done = True
                 yield _sse("done", {"message": "Pipeline complete"})
                 return
 
         if finish_reason == "stop" or not tool_calls:
+            if not _cover_letter_done and _nudge_count < _MAX_NUDGES:
+                # Model stopped before completing the pipeline — nudge it to continue
+                _nudge_count += 1
+                nudge = (
+                    "Continue the pipeline. You must still call the remaining tools in order: "
+                    "score_job_fit (pass the jobs array and cv_profile), "
+                    "generate_skill_roadmap (pass skill_risks and cv_profile), "
+                    "generate_cover_letter (pass the top job and cv_profile). "
+                    "Call the next tool now."
+                )
+                messages.append({"role": "user", "content": nudge})
+                yield _sse("text", {"text": f"[Resuming pipeline — step {_nudge_count}]"})
+                continue
             yield _sse("done", {"message": "Pipeline complete"})
             break
 

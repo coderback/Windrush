@@ -131,7 +131,7 @@ def sanitise_tool_input(tool_name: str, tool_input: dict) -> dict:
     """
     cleaned = dict(tool_input)
 
-    if tool_name == "search_jobs":
+    if tool_name in ("search_jobs", "web_search"):
         query = cleaned.get("query", "")
         for pattern in SEARCH_INJECTION_PATTERNS:
             if pattern.search(query):
@@ -198,6 +198,21 @@ def redact_pii_from_result(tool_name: str, result: Any) -> tuple[Any, bool]:
     _record(GuardrailEvent(
         time.time(), tool_name, "pii_redact", fired,
         detail="PII found and redacted" if fired else "",
+    ))
+    return redacted, fired
+
+
+def redact_pii_from_input(tool_name: str, tool_input: dict) -> tuple[dict, bool]:
+    """
+    Walk tool_input recursively and apply PII redaction patterns to string values.
+    Returns (redacted_input, did_fire). Safe for SSE streaming only — never pass
+    the redacted copy to execute_tool().
+    """
+    redacted = _redact_value(tool_input)
+    fired = redacted != tool_input
+    _record(GuardrailEvent(
+        time.time(), tool_name, "pii_redact_input", fired,
+        detail="PII redacted from tool input display" if fired else "",
     ))
     return redacted, fired
 
