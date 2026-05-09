@@ -9,6 +9,7 @@ import CoverLetter from "@/components/CoverLetter";
 import SkillRoadmap, { RoadmapItem } from "@/components/SkillRoadmap";
 import BrowserView from "@/components/BrowserView";
 import GuardrailBadge from "@/components/GuardrailBadge";
+import { authFetch } from "../api";
 
 interface CVProfile {
   name?: string;
@@ -175,7 +176,7 @@ function AppContent() {
 
     let response: Response;
     try {
-      response = await fetch("/api/stream", { method: "POST", body: form });
+      response = await authFetch("/api/stream", { method: "POST", body: form });
     } catch (err) {
       pushEvent({ type: "text", timestamp: Date.now() / 1000, text: `Connection error: ${err}` });
       setPhase("idle");
@@ -213,11 +214,16 @@ function AppContent() {
     setPendingCoverLetter((cl) => { if (cl) setCoverLetter(cl); return cl; });
   };
 
-  // On mount: auto-start pipeline if cv param is present
+  // On mount: check token and auto-start pipeline if cv param is present
   useEffect(() => {
+    const token = localStorage.getItem("windrush_token");
+    if (!token) {
+      router.push("/login");
+      return;
+    }
     if (cvParam) startPipeline(cvParam);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [cvParam, router]);
 
   // In-app file upload (for re-runs without going back to landing)
   const handleFileInput = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -227,7 +233,7 @@ function AppContent() {
     try {
       const form = new FormData();
       form.append("file", file);
-      const res = await fetch("/api/upload", { method: "POST", body: form });
+      const res = await authFetch("/api/upload", { method: "POST", body: form });
       if (!res.ok) throw new Error("Upload failed");
       const { cv_session_id } = await res.json() as { cv_session_id: string };
       await startPipeline(cv_session_id);
@@ -246,7 +252,7 @@ function AppContent() {
     try {
       const form = new FormData();
       form.append("file", file);
-      const res = await fetch("/api/upload", { method: "POST", body: form });
+      const res = await authFetch("/api/upload", { method: "POST", body: form });
       if (!res.ok) throw new Error("Upload failed");
       const { cv_session_id } = await res.json() as { cv_session_id: string };
       await startPipeline(cv_session_id);
@@ -273,7 +279,7 @@ function AppContent() {
     form.append("cv_session_id", cvSessionId);
 
     try {
-      const response = await fetch("/api/apply", { method: "POST", body: form });
+      const response = await authFetch("/api/apply", { method: "POST", body: form });
       if (!response.body) {
         pushEvent({ type: "text", timestamp: Date.now() / 1000, text: "Apply returned no response body." });
         setPhase("done");
@@ -330,6 +336,15 @@ function AppContent() {
           >
             My Applications →
           </a>
+          <button
+            onClick={() => {
+              localStorage.removeItem("windrush_token");
+              router.push("/login");
+            }}
+            className="text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
+          >
+            Logout
+          </button>
           <GuardrailBadge lastGuardrailEvent={lastGuardrailEvent} />
           {isStreaming && (
             <span className="flex items-center gap-1.5 text-xs text-teal-400">
