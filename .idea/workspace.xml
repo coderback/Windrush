@@ -4,13 +4,10 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="657acfba-7aae-4604-a67f-31eee75bbb05" name="Changes" comment="refactor agent.py to switch LLM backend between Ollama and Groq based on environment variable">
+    <list default="true" id="657acfba-7aae-4604-a67f-31eee75bbb05" name="Changes" comment="feat: implement AppShell and Sidebar components for improved layout and navigation">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/api/app/main.py" beforeDir="false" afterPath="$PROJECT_DIR$/api/app/main.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/api/requirements.txt" beforeDir="false" afterPath="$PROJECT_DIR$/api/requirements.txt" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/frontend/src/app/app/page.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/frontend/src/app/app/page.tsx" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/frontend/src/app/page.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/frontend/src/app/page.tsx" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/frontend/src/components/BrowserView.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/frontend/src/components/BrowserView.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/frontend/src/app/profile/page.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/frontend/src/app/profile/page.tsx" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -42,6 +39,10 @@
     &quot;accountId&quot;: &quot;22fe3df4-35ef-47fa-93d9-55b6fb864ab8&quot;
   }
 }</component>
+  <component name="KubernetesApiPersistence"><![CDATA[{}]]></component>
+  <component name="KubernetesApiProvider"><![CDATA[{
+  "isMigrated": true
+}]]></component>
   <component name="ProjectColorInfo">{
   &quot;associatedIndex&quot;: 3
 }</component>
@@ -56,7 +57,7 @@
     "RunOnceActivity.ShowReadmeOnStart": "true",
     "RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252": "true",
     "RunOnceActivity.git.unshallow": "true",
-    "git-widget-placeholder": "UserInfo",
+    "git-widget-placeholder": "system-redesign",
     "last_opened_file_path": "C:/Users/tobio/PycharmProjects/Windrush",
     "node.js.detected.package.eslint": "true",
     "node.js.detected.package.tslint": "true",
@@ -64,6 +65,7 @@
     "node.js.selected.package.tslint": "(autodetect)",
     "nodejs_package_manager_path": "npm",
     "settings.editor.selected.configurable": "preferences.pluginManager",
+    "ts.external.directory.path": "C:\\Users\\tobio\\PycharmProjects\\Windrush\\frontend\\node_modules\\typescript\\lib",
     "vue.rearranger.settings.migration": "true"
   }
 }]]></component>
@@ -289,7 +291,23 @@
       <option name="project" value="LOCAL" />
       <updated>1776040340176</updated>
     </task>
-    <option name="localTasksCounter" value="26" />
+    <task id="LOCAL-00026" summary="feat: add tailored CV generation and onboarding status tracking">
+      <option name="closed" value="true" />
+      <created>1778375598112</created>
+      <option name="number" value="00026" />
+      <option name="presentableId" value="LOCAL-00026" />
+      <option name="project" value="LOCAL" />
+      <updated>1778375598112</updated>
+    </task>
+    <task id="LOCAL-00027" summary="feat: implement AppShell and Sidebar components for improved layout and navigation">
+      <option name="closed" value="true" />
+      <created>1778376618349</created>
+      <option name="number" value="00027" />
+      <option name="presentableId" value="LOCAL-00027" />
+      <option name="project" value="LOCAL" />
+      <updated>1778376618349</updated>
+    </task>
+    <option name="localTasksCounter" value="28" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -306,7 +324,7 @@
                   <entry key="branch">
                     <value>
                       <list>
-                        <option value="main" />
+                        <option value="system-redesign" />
                       </list>
                     </value>
                   </entry>
@@ -319,7 +337,6 @@
     </option>
   </component>
   <component name="VcsManagerConfiguration">
-    <MESSAGE value="initialize project configuration files" />
     <MESSAGE value="add initial implementation of Windrush career transition advisor with job search and CV analysis features" />
     <MESSAGE value="add initial configuration and components for Windrush career transition advisor" />
     <MESSAGE value="add Docker configuration, environment setup, and economic index data generation" />
@@ -343,7 +360,9 @@
     <MESSAGE value="refactor Dockerfile to allow dynamic port configuration for uvicorn" />
     <MESSAGE value="refactor next.config.mjs to remove API rewrites and introduce route proxying" />
     <MESSAGE value="refactor agent.py to switch LLM backend between Ollama and Groq based on environment variable" />
-    <option name="LAST_COMMIT_MESSAGE" value="refactor agent.py to switch LLM backend between Ollama and Groq based on environment variable" />
+    <MESSAGE value="feat: add tailored CV generation and onboarding status tracking" />
+    <MESSAGE value="feat: implement AppShell and Sidebar components for improved layout and navigation" />
+    <option name="LAST_COMMIT_MESSAGE" value="feat: implement AppShell and Sidebar components for improved layout and navigation" />
   </component>
   <component name="github-copilot-workspace">
     <instructionFileLocations>

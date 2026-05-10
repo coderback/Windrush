@@ -80,6 +80,8 @@ interface Persona {
     require_sponsorship: boolean;
     security_clearance: string;
     has_government_ties: boolean;
+    job_email: string;
+    job_password: string;
   };
   diversity: {
     gender: string;
@@ -126,17 +128,18 @@ interface Persona {
 }
 
 const SECTIONS = [
-  "Core Info", 
-  "Social & Links", 
-  "Skills", 
+  "Core Info",
+  "Application Credentials",
+  "Social & Links",
+  "Skills",
   "Certifications",
-  "Education", 
-  "Experience", 
-  "Projects", 
-  "Story Bank", 
-  "Screening Vault", 
-  "Diversity & Compliance", 
-  "Preferences", 
+  "Education",
+  "Experience",
+  "Projects",
+  "Story Bank",
+  "Screening Vault",
+  "Diversity & Compliance",
+  "Preferences",
   "Directives"
 ];
 
@@ -279,6 +282,39 @@ export default function ProfilePage() {
                 <div className="space-y-2">
                   <label className="text-xs text-zinc-500 uppercase">Security Clearance</label>
                   <input placeholder="None, SC, DV, etc." className="w-full bg-zinc-950 border border-zinc-800 rounded p-2 text-sm focus:border-teal-500 outline-none" value={persona.core_info.security_clearance} onChange={(e) => handleChange("core_info", "security_clearance", e.target.value)} />
+                </div>
+              </div>
+            </div>
+          )}
+
+          {activeSection === "Application Credentials" && (
+            <div className="space-y-6">
+              <h2 className="text-lg font-bold border-b border-zinc-800 pb-2">Application Credentials</h2>
+              <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-lg">
+                <p className="text-xs text-amber-400">
+                  Stored in your profile and used to auto-fill login forms during browser-based apply. Never shared externally.
+                </p>
+              </div>
+              <div className="grid grid-cols-1 gap-4 max-w-md">
+                <div className="space-y-2">
+                  <label className="text-xs text-zinc-500 uppercase">Job-board email</label>
+                  <input
+                    type="email"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded p-2 text-sm focus:border-teal-500 outline-none"
+                    value={persona.core_info.job_email ?? ""}
+                    onChange={(e) => handleChange("core_info", "job_email", e.target.value)}
+                    placeholder="you@example.com"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs text-zinc-500 uppercase">Master password</label>
+                  <input
+                    type="password"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded p-2 text-sm focus:border-teal-500 outline-none"
+                    value={persona.core_info.job_password ?? ""}
+                    onChange={(e) => handleChange("core_info", "job_password", e.target.value)}
+                    placeholder="••••••••"
+                  />
                 </div>
               </div>
             </div>
