@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import AppShell from "@/components/AppShell";
 
 export const metadata: Metadata = {
   title: "Windrush — AI Career Navigator",
@@ -20,7 +21,7 @@ export default function RootLayout({
         />
       </head>
       <body className="antialiased bg-[#0a0a0a] text-zinc-100 font-mono">
-        {children}
+        <AppShell>{children}</AppShell>
       </body>
     </html>
   );

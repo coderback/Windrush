@@ -12,8 +12,9 @@ from fastapi.responses import StreamingResponse
 from fastapi.security import OAuth2PasswordRequestForm
 
 from .cv_parser import extract_text
-from .agent import run_pipeline, run_apply
+from .agent import run_pipeline, run_apply, execute_tool
 from .guardrails import check_cv_for_injection, get_audit_log, GuardrailViolation
+from .job_proxy import search_jobs
 from . import tracker
 from . import auth
 from .models import Persona
@@ -263,7 +264,7 @@ async def apply(
     job_email: str = Form(default=""),
     job_password: str = Form(default=""),
     cv_session_id: str = Form(default=""),
-    # Score data for tracker (sent from frontend after pipeline completes)
+    tailored_cv: str = Form(default=""),
     job_title: str = Form(default=""),
     company: str = Form(default=""),
     location: str = Form(default=""),
@@ -287,10 +288,15 @@ async def apply(
     except json.JSONDecodeError:
         gaps = []
 
+    # Fall back to persona credentials if not provided in form
+    persona = tracker.get_user_persona(current_user.id)
+    core = persona.get("core_info", {})
+    effective_email = job_email or core.get("job_email", "")
+    effective_password = job_password or core.get("job_password", "")
+
     cv_path = _cv_files.get(cv_session_id, "")
     session_id = str(uuid.uuid4())
 
-    # Add to tracker before starting browser session
     job_dict = {
         "job_id": job_id,
         "title": job_title,
@@ -305,7 +311,9 @@ async def apply(
         "skill_gaps": gaps,
         "level_match": level_match,
     }
-    app_id = tracker.add_application(current_user.id, job_dict, profile, cover_letter, score_data)
+    app_id = tracker.add_application(
+        current_user.id, job_dict, profile, cover_letter, score_data, tailored_cv=tailored_cv
+    )
 
     q: asyncio.Queue = asyncio.Queue()
     fq: asyncio.Queue = asyncio.Queue(maxsize=8)
@@ -313,24 +321,23 @@ async def apply(
     _browser_frames[session_id] = fq
 
     async def cleanup_gen():
-        applied_successfully = False
+        user_confirmed = False
         try:
             async for chunk in run_apply(
                 current_user.id, job_id, job_url, cover_letter, risks, session_id, q, fq,
-                job_email=job_email, job_password=job_password, cv_path=cv_path,
+                job_email=effective_email, job_password=effective_password, cv_path=cv_path,
             ):
-                # Detect successful completion from done event
                 try:
                     payload = json.loads(chunk.removeprefix("data: ").strip())
                     if payload.get("type") == "done":
-                        applied_successfully = True
+                        user_confirmed = True
                 except Exception:
                     pass
                 yield chunk
         finally:
             _browser_queues.pop(session_id, None)
             _browser_frames.pop(session_id, None)
-            if app_id and applied_successfully:
+            if app_id and user_confirmed:
                 tracker.update_status(app_id, "Applied")
 
     return StreamingResponse(
@@ -419,9 +426,164 @@ async def update_application_status(
 ):
     status = body.get("status", "")
     notes = body.get("notes")
-    # In a multi-user system, we should verify the app_id belongs to current_user.id
-    # but for now update_status is global. Let's fix tracker later if needed.
     ok = tracker.update_status(app_id, status, notes)
     if not ok:
         raise HTTPException(status_code=400, detail=f"Invalid status: {status!r}")
     return {"id": app_id, "status": status, "updated": True}
+
+
+# ── Onboarding ────────────────────────────────────────────────────────────────
+
+@app.get("/onboarding/status")
+async def onboarding_status(current_user: Annotated[auth.User, Depends(auth.get_current_user)]):
+    return {"complete": tracker.get_onboarding_status(current_user.id)}
+
+
+@app.post("/onboarding/complete")
+async def onboarding_complete(current_user: Annotated[auth.User, Depends(auth.get_current_user)]):
+    tracker.set_onboarding_complete(current_user.id)
+    return {"complete": True}
+
+
+# ── Job Feed ──────────────────────────────────────────────────────────────────
+
+@app.get("/jobs")
+async def get_jobs(
+    query: str = Query(default=""),
+    location: str = Query(default="London"),
+    current_user: Annotated[auth.User, Depends(auth.get_current_user)] = None,
+):
+    """Return job listings for the job feed, defaulting to persona preferences."""
+    if not query:
+        persona = tracker.get_user_persona(current_user.id)
+        prefs = persona.get("preferences", {})
+        titles = prefs.get("target_titles", [])
+        query = titles[0] if titles else "Software Engineer"
+        locs = prefs.get("preferred_locations", [])
+        if not location or location == "London":
+            location = locs[0] if locs else "London"
+    jobs = await search_jobs(query, location)
+    return {"jobs": jobs, "query": query, "location": location}
+
+
+# ── Per-job agent endpoints (SSE) ─────────────────────────────────────────────
+
+def _sse_json(event_type: str, data: dict) -> str:
+    import time
+    payload = {"type": event_type, "timestamp": time.time(), **data}
+    return f"data: {json.dumps(payload)}\n\n"
+
+
+@app.post("/jobs/analyze")
+async def analyze_job(
+    body: dict,
+    current_user: Annotated[auth.User, Depends(auth.get_current_user)],
+):
+    """SSE: score fit + AI risk for a single job against the user's persona."""
+    job = body.get("job", {})
+    persona = tracker.get_user_persona(current_user.id)
+
+    async def gen():
+        yield _sse_json("start", {"message": "Analysing job…"})
+
+        # Score AI risk for persona skills
+        all_skills: list[str] = []
+        for cat in persona.get("skills", []):
+            all_skills.extend(cat.get("skills", []))
+        for exp in persona.get("history", []):
+            title = exp.get("title", "")
+            if title:
+                all_skills.append(title)
+        if all_skills:
+            risk_result = await execute_tool("score_ai_risk", {"skills": list(set(all_skills))})
+            yield _sse_json("skill_risks", risk_result)
+
+        # Score job fit
+        fit_result = await execute_tool("score_job_fit", {"jobs": [job], "persona": persona})
+        yield _sse_json("job_fit", fit_result)
+        yield _sse_json("done", {"message": "Analysis complete"})
+
+    return StreamingResponse(gen(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+@app.post("/jobs/cover-letter")
+async def generate_cover_letter_endpoint(
+    body: dict,
+    current_user: Annotated[auth.User, Depends(auth.get_current_user)],
+):
+    """SSE: generate a tailored cover letter for a job."""
+    job = body.get("job", {})
+    tone = body.get("tone", "professional")
+    persona = tracker.get_user_persona(current_user.id)
+
+    async def gen():
+        yield _sse_json("start", {"message": "Writing cover letter…"})
+        result = await execute_tool("generate_cover_letter", {"job": job, "persona": persona, "tone": tone})
+        yield _sse_json("cover_letter", result)
+        yield _sse_json("done", {"message": "Cover letter ready"})
+
+    return StreamingResponse(gen(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+@app.post("/jobs/tailored-cv")
+async def generate_tailored_cv_endpoint(
+    body: dict,
+    current_user: Annotated[auth.User, Depends(auth.get_current_user)],
+):
+    """SSE: generate a tailored CV (Markdown) for a specific job."""
+    job = body.get("job", {})
+    persona = tracker.get_user_persona(current_user.id)
+
+    async def gen():
+        yield _sse_json("start", {"message": "Tailoring your CV…"})
+        result = await execute_tool("generate_tailored_cv", {"job": job, "persona": persona})
+        yield _sse_json("tailored_cv", result)
+        yield _sse_json("done", {"message": "CV ready"})
+
+    return StreamingResponse(gen(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+# ── Careers ───────────────────────────────────────────────────────────────────
+
+@app.post("/score-skills")
+async def score_skills(
+    current_user: Annotated[auth.User, Depends(auth.get_current_user)],
+):
+    """Non-streaming: score AI risk for all skills in the user's persona."""
+    persona = tracker.get_user_persona(current_user.id)
+    all_skills: list[str] = []
+    for cat in persona.get("skills", []):
+        all_skills.extend(cat.get("skills", []))
+    for exp in persona.get("history", []):
+        title = exp.get("title", "")
+        if title:
+            all_skills.append(title)
+    if not all_skills:
+        return {"skill_risks": []}
+    result = await execute_tool("score_ai_risk", {"skills": list(set(all_skills))})
+    return result
+
+
+@app.post("/careers/roadmap")
+async def careers_roadmap(
+    current_user: Annotated[auth.User, Depends(auth.get_current_user)],
+):
+    """SSE: generate a skill development roadmap from the user's persona."""
+    persona = tracker.get_user_persona(current_user.id)
+    all_skills: list[str] = []
+    for cat in persona.get("skills", []):
+        all_skills.extend(cat.get("skills", []))
+
+    async def gen():
+        yield _sse_json("start", {"message": "Building your skill roadmap…"})
+        risk_result = await execute_tool("score_ai_risk", {"skills": list(set(all_skills)) or ["software engineering"]})
+        skill_risks = risk_result.get("skill_risks", [])
+        result = await execute_tool("generate_skill_roadmap", {"skill_risks": skill_risks, "persona": persona})
+        yield _sse_json("roadmap", result)
+        yield _sse_json("done", {"message": "Roadmap ready"})
+
+    return StreamingResponse(gen(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
