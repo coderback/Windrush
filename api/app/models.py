@@ -108,6 +108,8 @@ class CoreInfo(BaseModel):
     require_sponsorship: bool = False
     security_clearance: str = ""
     has_government_ties: bool = False
+    job_email: str = ""
+    job_password: str = ""
 
 class JobPreferences(BaseModel):
     target_titles: List[str] = []

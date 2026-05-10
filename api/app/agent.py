@@ -252,6 +252,18 @@ TOOLS = [
             "required": ["onet_code"],
         },
     },
+    {
+        "name": "generate_tailored_cv",
+        "description": "Generate a tailored CV (Markdown) for a specific job, emphasising the most relevant experience and skills from the user persona.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "job": {"type": "object", "description": "Target job object with title, company, description"},
+                "persona": {"type": "object", "description": "Structured User Persona"},
+            },
+            "required": ["job", "persona"],
+        },
+    },
 ]
 
 
@@ -689,6 +701,64 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
     elif name == "lookup_economic_index":
         onet_code = tool_input.get("onet_code", "")
         return lookup_onet(onet_code)
+
+    elif name == "generate_tailored_cv":
+        job = tool_input.get("job", {})
+        persona = tool_input.get("persona", {})
+
+        core = persona.get("core_info", {})
+        full_name = f"{core.get('first_name', '')} {core.get('last_name', '')}".strip()
+        contact_parts = filter(None, [
+            core.get("email"), core.get("phone"),
+            core.get("city"), core.get("linkedin"), core.get("github"),
+        ])
+        contact_line = " | ".join(contact_parts)
+
+        skills_str = ""
+        for cat in persona.get("skills", []):
+            skills_str += f"**{cat.get('category','Skills')}:** {', '.join(cat.get('skills',[]))}\n"
+
+        history_str = ""
+        for exp in persona.get("history", [])[:5]:
+            end = "Present" if exp.get("is_current") else exp.get("end_date", "")
+            history_str += (
+                f"**{exp.get('title','')}** — {exp.get('employer','')} "
+                f"({exp.get('start_date','')} – {end})\n"
+                f"{exp.get('summary','')}\n"
+                f"{exp.get('metrics','')}\n\n"
+            )
+
+        edu_str = ""
+        for edu in persona.get("education", []):
+            edu_str += f"**{edu.get('degree','')}** — {edu.get('institution','')} ({edu.get('grade','')})\n"
+
+        proj_str = ""
+        for proj in persona.get("projects", [])[:3]:
+            proj_str += f"**{proj.get('name','')}**: {proj.get('problem_solved','')} → {proj.get('outcomes','')}\n"
+
+        cv_text = await _llm(
+            system=(
+                "You are a professional CV writer. Produce a tailored, ATS-optimised CV in clean Markdown. "
+                "Reorder and emphasise experience, skills, and projects that are most relevant to the target job. "
+                "Mirror keywords from the job description naturally. "
+                "Use this structure: Contact header, Professional Summary (3 sentences), Skills (grouped), "
+                "Experience (reverse-chronological, bullets using STAR), Education, Projects. "
+                "Do NOT add fictional information — only use what is provided. "
+                "Do NOT include placeholders. Output only the Markdown, no preamble."
+            ),
+            user=(
+                f"# Target Job\n{job.get('title','')} at {job.get('company','')}\n"
+                f"Job Description:\n{job.get('description','')[:2000]}\n\n"
+                f"# Candidate\nName: {full_name}\nContact: {contact_line}\n\n"
+                f"## Skills\n{skills_str}\n"
+                f"## Experience\n{history_str}\n"
+                f"## Education\n{edu_str}\n"
+                f"## Projects\n{proj_str}\n"
+                f"Summary from persona: {persona.get('summary','')}"
+            ),
+            max_tokens=2048,
+        )
+        return {"cv_text": cv_text.strip()}
 
     return {"error": f"Unknown tool: {name}"}
 

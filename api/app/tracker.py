@@ -14,16 +14,17 @@ logger = logging.getLogger("windrush.tracker")
 _DB_PATH: str = ""
 
 VALID_STATUSES = {
-    "Evaluated", "Applied", "Responded", "Interview", "Offer", "Rejected", "Discarded"
+    "Pending Review", "Evaluated", "Applied", "Responded", "Interview", "Offer", "Rejected", "Discarded"
 }
 
 _CREATE_USERS_TABLE = """
 CREATE TABLE IF NOT EXISTS users (
-    id              TEXT PRIMARY KEY,
-    email           TEXT UNIQUE NOT NULL,
-    password_hash   TEXT NOT NULL,
-    persona         TEXT DEFAULT '{}',
-    created_at      TEXT NOT NULL
+    id                  TEXT PRIMARY KEY,
+    email               TEXT UNIQUE NOT NULL,
+    password_hash       TEXT NOT NULL,
+    persona             TEXT DEFAULT '{}',
+    onboarding_complete INTEGER DEFAULT 0,
+    created_at          TEXT NOT NULL
 );
 """
 
@@ -40,6 +41,7 @@ CREATE TABLE IF NOT EXISTS applications (
     date_applied    TEXT,
     cv_profile      TEXT,
     cover_letter    TEXT,
+    tailored_cv     TEXT,
     composite_score REAL,
     exposure_score  REAL,
     fit_score       REAL,
@@ -69,11 +71,16 @@ def init_db(db_path: str = "") -> None:
         con.execute(_CREATE_USERS_TABLE)
         con.execute(_CREATE_TABLE)
         con.execute(_CREATE_INDEX)
-        # Migration: add persona column if it doesn't exist
-        try:
-            con.execute("ALTER TABLE users ADD COLUMN persona TEXT DEFAULT '{}'")
-        except sqlite3.OperationalError:
-            pass # column already exists
+        # Migrations — safe to run on existing DBs
+        for stmt in [
+            "ALTER TABLE users ADD COLUMN persona TEXT DEFAULT '{}'",
+            "ALTER TABLE users ADD COLUMN onboarding_complete INTEGER DEFAULT 0",
+            "ALTER TABLE applications ADD COLUMN tailored_cv TEXT",
+        ]:
+            try:
+                con.execute(stmt)
+            except sqlite3.OperationalError:
+                pass
         con.commit()
         con.close()
         logger.info("Tracker DB initialised at %s", _DB_PATH)
@@ -137,12 +144,27 @@ def update_user_persona(user_id: str, persona: dict) -> bool:
         return False
 
 
+def get_onboarding_status(user_id: str) -> bool:
+    con = sqlite3.connect(_DB_PATH)
+    row = con.execute("SELECT onboarding_complete FROM users WHERE id=?", (user_id,)).fetchone()
+    con.close()
+    return bool(row and row[0])
+
+
+def set_onboarding_complete(user_id: str) -> None:
+    con = sqlite3.connect(_DB_PATH)
+    con.execute("UPDATE users SET onboarding_complete=1 WHERE id=?", (user_id,))
+    con.commit()
+    con.close()
+
+
 def add_application(
     user_id: str,
     job: dict,
     cv_profile: dict,
     cover_letter: str,
     score_data: dict,
+    tailored_cv: str = "",
 ) -> str | None:
     """
     Insert a new application row for a specific user.
@@ -156,10 +178,10 @@ def add_application(
         con.execute(
             """INSERT INTO applications
                (id, user_id, job_id, job_title, company, location, job_url,
-                status, cv_profile, cover_letter,
+                status, cv_profile, cover_letter, tailored_cv,
                 composite_score, exposure_score, fit_score,
                 skill_gaps, level_match, created_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 app_id,
                 user_id,
@@ -168,9 +190,10 @@ def add_application(
                 job.get("company", ""),
                 job.get("location", ""),
                 job.get("url", ""),
-                "Evaluated",
+                "Pending Review",
                 json.dumps(cv_profile),
                 cover_letter,
+                tailored_cv,
                 score_data.get("composite_score"),
                 score_data.get("exposure_score"),
                 score_data.get("fit_score"),
