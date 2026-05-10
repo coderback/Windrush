@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState, useEffect } from "react";
+import { authFetch } from "@/app/api";
 
 interface Props {
   action: string;
@@ -64,7 +65,7 @@ export default function BrowserView({
     const instruction = typeof payload === "string" ? payload : JSON.stringify(payload);
     setSending(true);
     try {
-      await fetch(`/api/browser-input/${sessionId}`, {
+      await authFetch(`/api/browser-input/${sessionId}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ instruction }),
