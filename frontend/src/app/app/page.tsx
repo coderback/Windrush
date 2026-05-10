@@ -72,12 +72,24 @@ function AppContent() {
 
     if (ev.type === "tool_call" && ev.tool_input) {
       const input = ev.tool_input as Record<string, unknown>;
+      const profileData = (input.persona || input.cv_profile) as any;
       if (
         (ev.tool_name === "score_job_fit" || ev.tool_name === "generate_cover_letter") &&
-        input.cv_profile &&
-        typeof input.cv_profile === "object"
+        profileData &&
+        typeof profileData === "object"
       ) {
-        setCvProfile(input.cv_profile as CVProfile);
+        // Map granular persona fields to the simpler CVProfile interface used for display
+        if (profileData.core_info) {
+          setCvProfile({
+            name: `${profileData.core_info.first_name || ""} ${profileData.core_info.last_name || ""}`.trim(),
+            email: profileData.core_info.email,
+            location: profileData.core_info.city,
+            skills: profileData.skills?.flatMap((c: any) => c.skills || []) || [],
+          });
+        }
+ else {
+          setCvProfile(profileData as CVProfile);
+        }
       }
     }
 
@@ -335,6 +347,12 @@ function AppContent() {
             className="text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
           >
             My Applications →
+          </a>
+          <a
+            href="/profile"
+            className="text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
+          >
+            Persona Profile
           </a>
           <button
             onClick={() => {

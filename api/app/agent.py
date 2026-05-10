@@ -9,6 +9,7 @@ from typing import AsyncGenerator
 import httpx
 from openai import AsyncOpenAI
 
+from . import tracker
 from .cv_parser import extract_text
 from .risk_scorer import lookup_onet, lookup_by_title, ECONOMIC_INDEX
 from .job_proxy import search_jobs
@@ -53,20 +54,19 @@ AVAILABLE TOOLS — use these exact names, spelled exactly as shown:
 
 Work through this pipeline in order, passing data between tools explicitly:
 
-1. extract_cv_profile(cv_text) → returns a profile object with name, skills, job_titles, location
-2. score_ai_risk(skills=[...all skills and job_titles from step 1...])
-3. search_jobs(query=<primary job title from profile>, location=<location from profile>)
-   OPTIONAL: call web_search with a targeted site: query to supplement results, e.g.
-   web_search(query='site:jobs.ashbyhq.com "Junior AI Engineer" OR "Graduate Software Engineer"')
+1. extract_cv_profile(cv_text) → returns a basic profile object (name, skills, job_titles, location). 
+   NOTE: For logged-in users, you will be provided with a comprehensive 'persona' object. Use that 'persona' in all subsequent steps.
+2. score_ai_risk(skills=[...all skills and job_titles from the profile or persona...])
+3. search_jobs(query=<primary job title>, location=<location>)
+   OPTIONAL: call web_search with a targeted site: query to supplement results.
    Merge any additional jobs into the list before passing to score_job_fit.
-4. score_job_fit(jobs=[...combined jobs from search_jobs + any web_search results...], cv_profile={...the full profile object from step 1...})
-5. generate_skill_roadmap(skill_risks=[...the skill_risks array from step 2...], cv_profile={...the full profile object from step 1...}, target_job_title=<top ranked job title from step 4>)
-6. generate_cover_letter(job={...the top ranked job from step 4...}, cv_profile={...the full profile object from step 1...})
+4. score_job_fit(jobs=[...], persona={...the comprehensive persona object...})
+5. generate_skill_roadmap(skill_risks=[...], persona={...}, target_job_title=<top job title>)
+6. generate_cover_letter(job={...}, persona={...})
 
 CRITICAL RULES:
 - After each tool returns a result, immediately call the next tool in the pipeline. Do NOT write any text, summary, or response to the user between tool calls.
 - Always pass the actual data objects from previous tool results into subsequent tool calls. Never call a tool with empty arguments.
-- If a tool returns an error saying the tool name is unknown, you have misspelled the tool name. Check the AVAILABLE TOOLS list above and call the correct tool immediately.
 - After generate_cover_letter completes, stop. Do NOT call apply_to_job — the user must explicitly approve first."""
 
 
@@ -171,7 +171,7 @@ TOOLS = [
     },
     {
         "name": "score_job_fit",
-        "description": "Score and rank a list of jobs against a CV profile. Returns jobs sorted by composite score.",
+        "description": "Score and rank a list of jobs against a user persona. Returns jobs sorted by composite score.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -180,29 +180,29 @@ TOOLS = [
                     "items": {"type": "object"},
                     "description": "List of job objects from search_jobs",
                 },
-                "cv_profile": {
+                "persona": {
                     "type": "object",
-                    "description": "Structured CV profile from extract_cv_profile",
+                    "description": "Structured User Persona",
                 },
             },
-            "required": ["jobs", "cv_profile"],
+            "required": ["jobs", "persona"],
         },
     },
     {
         "name": "generate_cover_letter",
-        "description": "Generate a personalised cover letter for a specific job, grounded in the CV profile.",
+        "description": "Generate a personalised cover letter for a specific job, grounded in the user persona.",
         "input_schema": {
             "type": "object",
             "properties": {
                 "job": {"type": "object", "description": "Target job object"},
-                "cv_profile": {"type": "object", "description": "Structured CV profile"},
+                "persona": {"type": "object", "description": "Structured User Persona"},
                 "tone": {
                     "type": "string",
                     "enum": ["professional", "enthusiastic", "concise"],
                     "description": "Tone of the cover letter",
                 },
             },
-            "required": ["job", "cv_profile"],
+            "required": ["job", "persona"],
         },
     },
     {
@@ -213,9 +213,9 @@ TOOLS = [
             "properties": {
                 "job_id": {"type": "string"},
                 "cover_letter": {"type": "string"},
-                "cv_profile": {"type": "object"},
+                "persona": {"type": "object"},
             },
-            "required": ["job_id", "cover_letter", "cv_profile"],
+            "required": ["job_id", "cover_letter", "persona"],
         },
     },
     {
@@ -229,16 +229,16 @@ TOOLS = [
                     "items": {"type": "object"},
                     "description": "List of scored skill risks from score_ai_risk",
                 },
-                "cv_profile": {
+                "persona": {
                     "type": "object",
-                    "description": "Structured CV profile from extract_cv_profile",
+                    "description": "Structured User Persona",
                 },
                 "target_job_title": {
                     "type": "string",
                     "description": "Title of the job the candidate is targeting",
                 },
             },
-            "required": ["skill_risks"],
+            "required": ["skill_risks", "persona"],
         },
     },
     {
@@ -411,8 +411,8 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
                 "Extract a structured profile from this CV. Return ONLY valid JSON with no markdown fences. "
                 "Include: name, email, phone, address (full postal address if present), "
                 "location (city/region), linkedin (URL or username), github (URL or username), "
-                "skills (array, max 12 most relevant), job_titles (array, max 3), "
-                "experience_years (number), summary (1 sentence only), "
+                "skills (array of {category: string, skills: array of strings}, e.g. [{category: 'Languages', skills: ['Python']}]), "
+                "job_titles (array, max 3), experience_years (number), summary (1 sentence only), "
                 "education (array of {institution, degree, dates}), "
                 "experience (array of {employer, title, dates, summary} — max 5 most recent)."
             ),
@@ -476,10 +476,26 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
     elif name == "score_job_fit":
         import re as _re
         jobs = tool_input.get("jobs", [])
-        cv_profile = tool_input.get("cv_profile", {})
-        cv_skills = set(s.lower() for s in cv_profile.get("skills", []))
-        cv_years = float(cv_profile.get("experience_years", 0) or 0)
+        persona = tool_input.get("persona", {})
+        
+        # Correctly extract skills from categorized structure
+        cv_skills = set()
+        skills_input = persona.get("skills", [])
+        for item in skills_input:
+            if isinstance(item, dict):
+                for s in item.get("skills", []):
+                    cv_skills.add(s.lower())
+            elif isinstance(item, str):
+                cv_skills.add(item.lower())
 
+        # Infer years from history
+        cv_years = 0.0
+        # If persona is the new structure
+        if "core_info" in persona:
+             # Basic inference or use a stored field if we add it
+             # For now, let's just use the skills and history
+             pass
+        
         # Skill vocabulary for gap detection — reuse existing hardcoded keys
         _skill_vocab = set(_HARDCODED_EXPOSURE.keys())
 
@@ -542,36 +558,55 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
 
     elif name == "generate_cover_letter":
         job = tool_input.get("job", {})
-        cv_profile = tool_input.get("cv_profile", {})
+        persona = tool_input.get("persona", {})
         tone = tool_input.get("tone", "professional")
         archetype = _detect_archetype(job.get("title", ""), job.get("description", ""))
-        hook = _extract_differentiation_hook(cv_profile, job.get("description", ""))
+        
+        # Use history from persona for differentiation hook
+        history = persona.get("history", [])
+        hook = ""
+        jd_lower = job.get("description", "").lower()
+        for exp in history:
+            summary = exp.get("summary", "") + " " + exp.get("employer", "")
+            tokens = [w.strip(".,();") for w in summary.split() if len(w) > 3 and w[0].isupper()]
+            for token in tokens:
+                if token.lower() not in jd_lower and len(token) > 4:
+                    hook = f"Notable experience with {token} that directly applies to this role."
+                    break
+            if hook: break
+
         archetype_guidance = {
             "SoftwareEngineer": "Emphasise technical depth, system design decisions, and production reliability.",
             "DataML": "Emphasise model performance, pipeline scale, evaluation rigour, and research grounding.",
             "FinanceAnalyst": "Emphasise quantitative precision, domain-specific modelling, and analytical frameworks.",
         }[archetype]
+        
+        directives = persona.get("custom_directives", "")
         system = (
             f"Write a {tone} cover letter. Archetype: {archetype}. {archetype_guidance} "
             "Be specific — reference the candidate's actual experience and the job's requirements. "
+            "If citing a specific project or achievement from the persona's 'story_bank' or history, structure the paragraph using the STAR method (Situation, Task, Action, Result) to make it impactful. "
             "3 paragraphs. No placeholders like [Your Address] or [Date] — omit address headers entirely "
             "and start directly with 'Dear Hiring Manager,'."
+            + (f"\n\nDirectives from user: {directives}" if directives else "")
             + (f"\n\nDifferentiation hook to weave in naturally: {hook}" if hook else "")
         )
         letter = await _llm(
             system=system,
             user=(
-                f"Candidate: {json.dumps(cv_profile)}\n\n"
+                f"Candidate Persona: {json.dumps(persona)}\n\n"
                 f"Job: {job.get('title')} at {job.get('company')}\n"
                 f"Description: {job.get('description', '')}"
             ),
             max_tokens=1024,
         )
+        core = persona.get("core_info", {})
+        full_name = f"{core.get('first_name', '')} {core.get('last_name', '')}".strip()
         return {
             "status": "ready",
             "job_title": job.get("title", ""),
             "company": job.get("company", ""),
-            "candidate_name": cv_profile.get("name", ""),
+            "candidate_name": full_name,
             "cover_letter": letter,
             "archetype": archetype,
         }
@@ -585,7 +620,7 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
 
     elif name == "generate_skill_roadmap":
         skill_risks = tool_input.get("skill_risks", [])
-        cv_profile = tool_input.get("cv_profile", {})
+        persona = tool_input.get("persona", {})
         target_job_title = tool_input.get("target_job_title", "")
 
         confirmed_high = [s for s in skill_risks if s.get("exposure", 0) > 0.65]
@@ -594,15 +629,20 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
             f"{s['skill']} ({int(s.get('exposure',0)*100)}%)" for s in skill_risks
         )
 
-        name_str = cv_profile.get("name", "the candidate")
-        summary = cv_profile.get("summary", "")
-        job_titles = cv_profile.get("job_titles", [])
-        edu = cv_profile.get("education", [{}])[0] if cv_profile.get("education") else {}
-        edu_str = f"{edu.get('degree','')} at {edu.get('institution','')}" if edu else ""
-        exp_list = cv_profile.get("experience", [])
+        core = persona.get("core_info", {})
+        name_str = f"{core.get('first_name', '')} {core.get('last_name', '')}".strip() or "the candidate"
+        summary = persona.get("summary", "")
+        exp_list = persona.get("history", [])
         exp_str = "; ".join(
             f"{e.get('title','')} at {e.get('employer','')}" for e in exp_list[:3]
         )
+        
+        edu_list = persona.get("education", [])
+        edu_str = "; ".join(
+            f"{e.get('degree','')} at {e.get('institution','')}" for e in edu_list[:2]
+        )
+        
+        job_titles = list(set(e.get("title", "") for e in exp_list if e.get("title")))
 
         text = await _llm(
             system=(
@@ -674,16 +714,23 @@ def _sse(event_type: str, data: dict) -> str:
     return f"data: {json.dumps(payload)}\n\n"
 
 
-async def run_pipeline(cv_text: str, location: str = "London") -> AsyncGenerator[str, None]:
+async def run_pipeline(user_id: str, cv_text: str, location: str = "London") -> AsyncGenerator[str, None]:
     """Yields SSE-formatted strings for each agent step."""
+    persona_data = tracker.get_user_persona(user_id)
+    persona_str = json.dumps(persona_data, indent=2)
+
     messages: list[dict] = [
         {
             "role": "user",
-            "content": f"Please analyse this CV and find suitable jobs in {location}.\n\nCV:\n{cv_text[:3000]}",
+            "content": (
+                f"Please analyse this CV and find suitable jobs in {location}.\n\n"
+                f"I have a comprehensive persona already stored for this user:\n{persona_str}\n\n"
+                f"CV Text for reference (if it has new info):\n{cv_text[:3000]}"
+            ),
         },
     ]
 
-    yield _sse("start", {"message": "Pipeline started"})
+    yield _sse("start", {"message": "Pipeline started with your Persistent Persona"})
 
     _cover_letter_done = False
     _nudge_count = 0          # guard against infinite nudge loops
@@ -782,10 +829,10 @@ async def run_pipeline(cv_text: str, location: str = "London") -> AsyncGenerator
 
 
 async def run_apply(
+    user_id: str,
     job_id: str,
     job_url: str = "",
     cover_letter: str = "",
-    cv_profile: dict | None = None,
     skill_risks: list | None = None,
     session_id: str = "",
     instruction_queue: asyncio.Queue | None = None,
@@ -795,14 +842,14 @@ async def run_apply(
     cv_path: str = "",
 ) -> AsyncGenerator[str, None]:
     """Apply phase: browser automation."""
-    cv_profile = cv_profile or {}
+    persona = tracker.get_user_persona(user_id)
     skill_risks = skill_risks or []
 
-    yield _sse("start", {"message": "Starting browser application…", "session_id": session_id})
+    yield _sse("start", {"message": "Starting browser application with your Persona…", "session_id": session_id})
 
     if job_url and instruction_queue is not None:
         async for step in apply_with_browser(
-            job_url, cv_profile, cover_letter, instruction_queue, frame_queue,
+            job_url, persona, cover_letter, instruction_queue, frame_queue,
             job_email=job_email, job_password=job_password, cv_path=cv_path,
         ):
             event_type = "browser_blocked" if step.get("blocked") else "browser_action"

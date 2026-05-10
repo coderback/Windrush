@@ -6,7 +6,8 @@ httpx
 pydantic>=2.0
 scikit-learn>=1.4
 numpy>=1.26
-passlib[bcrypt]
+bcrypt
+passlib
 python-jose[cryptography]
 playwright>=1.45
 browser-use>=0.1

@@ -220,7 +220,7 @@ async def _interactive_session(page: Page, instruction_queue: asyncio.Queue, con
             }
 
 
-def _build_task(job_url: str, cv_profile: dict, cover_letter: str,
+def _build_task(job_url: str, persona: dict, cover_letter: str,
                 job_email: str, job_password: str, cv_path: str) -> str:
     lines = []
     if job_email:
@@ -228,34 +228,86 @@ def _build_task(job_url: str, cv_profile: dict, cover_letter: str,
     if cv_path:
         lines.append(f"If asked to upload a CV/resume, upload the file at: {cv_path}")
 
+    core = persona.get("core_info", {})
+    prefs = persona.get("preferences", {})
+    
     profile_lines = []
-    if cv_profile.get("name"):
-        profile_lines.append(f"Full name: {cv_profile['name']}")
-    if cv_profile.get("email") or job_email:
-        profile_lines.append(f"Email: {cv_profile.get('email') or job_email}")
-    if cv_profile.get("phone"):
-        profile_lines.append(f"Phone: {cv_profile['phone']}")
-    if cv_profile.get("address"):
-        profile_lines.append(f"Address: {cv_profile['address']}")
-    if cv_profile.get("linkedin"):
-        profile_lines.append(f"LinkedIn: {cv_profile['linkedin']}")
-    if cv_profile.get("github"):
-        profile_lines.append(f"GitHub: {cv_profile['github']}")
-    if cv_profile.get("experience_years"):
-        profile_lines.append(f"Years of experience: {cv_profile['experience_years']}")
+    full_name = f"{core.get('first_name', '')} {core.get('last_name', '')}".strip()
+    if full_name: profile_lines.append(f"Full name: {full_name}")
+    if core.get("preferred_name"): profile_lines.append(f"Preferred name: {core['preferred_name']}")
+    if core.get("dob"): profile_lines.append(f"Date of Birth: {core['dob']}")
+    if core.get("email") or job_email: profile_lines.append(f"Email: {core.get('email') or job_email}")
+    if core.get("phone"): profile_lines.append(f"Phone: {core['phone']}")
+    
+    address = ", ".join(filter(None, [
+        core.get("address_line_1"), core.get("city"), core.get("postcode"), core.get("country")
+    ]))
+    if address: profile_lines.append(f"Address: {address}")
+    
+    if core.get("linkedin"): profile_lines.append(f"LinkedIn: {core['linkedin']}")
+    if core.get("github"): profile_lines.append(f"GitHub: {core['github']}")
+    if core.get("twitter"): profile_lines.append(f"Twitter/X: {core['twitter']}")
+    if core.get("portfolio"): profile_lines.append(f"Portfolio/Website: {core['portfolio']}")
+    if core.get("visa_status"): profile_lines.append(f"Visa Status: {core['visa_status']}")
+    if core.get("visa_type"): profile_lines.append(f"Visa Type: {core['visa_type']}")
+    if core.get("security_clearance"): profile_lines.append(f"Security Clearance: {core['security_clearance']}")
 
-    # All education entries — applications often ask about each degree separately
-    for edu in cv_profile.get("education", []):
+    # Certifications
+    for cert in persona.get("certifications", []):
         profile_lines.append(
-            f"Education: {edu.get('degree', '')} at {edu.get('institution', '')} ({edu.get('dates', '')})"
+            f"Certification: {cert.get('name', '')} from {cert.get('issuing_organization', '')}. "
+            f"Credential ID: {cert.get('credential_id', '')}. URL: {cert.get('credential_url', '')}"
         )
-    # Up to 3 experience entries — needed to fill work history sections
-    for exp in cv_profile.get("experience", [])[:3]:
+
+    # Categorized Skills
+    skills_lines = []
+    for cat in persona.get("skills", []):
+        skills_lines.append(f"{cat.get('category', 'Uncategorized')}: {', '.join(cat.get('skills', []))}")
+    if skills_lines:
+        profile_lines.append("Skills - " + " | ".join(skills_lines))
+
+    # All education entries
+    for edu in persona.get("education", []):
+        status = "Ongoing" if edu.get("is_currently_enrolled") else edu.get("end_date", "Present")
+        profile_lines.append(
+            f"Education: {edu.get('degree', '')} at {edu.get('institution', '')} "
+            f"({edu.get('start_date', '')} to {status}). Grade: {edu.get('grade', '')}"
+        )
+    # Experience
+    for exp in persona.get("history", [])[:5]:
+        status = "Present" if exp.get("is_current") else exp.get("end_date", "")
         profile_lines.append(
             f"Experience: {exp.get('title', '')} at {exp.get('employer', '')} "
-            f"({exp.get('dates', '')})"
+            f"({exp.get('start_date', '')} to {status}). "
+            f"Achievements: {', '.join(exp.get('achievements', []))}. Metrics: {exp.get('metrics', '')}"
+        )
+    
+    # Projects
+    for proj in persona.get("projects", []):
+        status = "Ongoing" if proj.get("is_ongoing") else "Completed"
+        profile_lines.append(
+            f"Project: {proj.get('name', '')} ({status}). Problem: {proj.get('problem_solved', '')}. "
+            f"Outcomes: {proj.get('outcomes', '')}. URL: {proj.get('url', '')}"
         )
 
+    # Story Bank for behavioral questions
+    stories_block = ""
+    if persona.get("story_bank"):
+        stories_block = "\n\nUse these stories to answer behavioral questions. ALWAYS use the STAR method (Situation, Task, Action, Result) in your answers:\n"
+        for story in persona["story_bank"]:
+            stories_block += f"- {story['title']}: {story['scenario']} -> {story['action']} -> {story['result']}\n"
+
+    # Screening Vault
+    screening = persona.get("screening", {})
+    screening_block = ""
+    if any(screening.values()):
+        screening_block = "\n\nUse these pre-written answers for screening questions:\n"
+        for k, v in screening.items():
+            if v: screening_block += f"- {k.replace('_', ' ').title()}: {v}\n"
+
+    # Diversity & Inclusion
+    diversity = persona.get("diversity", {})
+    
     creds_block = "\n".join(lines)
     profile_block = "\n".join(profile_lines)
     task = f"Apply for the job at: {job_url}"
@@ -263,18 +315,52 @@ def _build_task(job_url: str, cv_profile: dict, cover_letter: str,
         task += f"\n\n{creds_block}"
     if profile_block:
         task += f"\n\nApplicant details:\n{profile_block}"
+    if screening_block:
+        task += screening_block
+    if stories_block:
+        task += stories_block
+
+    rtw_uk = "Yes" if core.get("right_to_work_uk", True) else "No"
+    sponsorship = "Yes" if core.get("require_sponsorship", False) else "No"
+    salary = screening.get("salary_canonical") or f"{prefs.get('min_salary', 'Negotiable')}"
+    hourly = f"{prefs.get('expected_hourly_rate', 'Negotiable')}"
+    remote = prefs.get("remote_preference", "remote")
+    relocate = "Yes" if prefs.get("relocation_willingness", False) else "No"
+    pref_locs = ", ".join(prefs.get("preferred_locations", []))
+    in_person = "Yes" if prefs.get("can_work_in_person", True) else "No"
+    immediate = "Yes" if prefs.get("can_start_immediately", False) else "No"
+    transport = "Yes" if prefs.get("has_reliable_transportation", True) else "No"
+    accommodations = "Yes" if prefs.get("needs_accommodations", False) else "No"
+    gov_ties = "Yes" if core.get("has_government_ties", False) else "No"
+
+    # Diversity defaults
+    gender = diversity.get("gender") or "Prefer not to say"
+    disability = diversity.get("disability_status") or "No"
+    ethnicity = diversity.get("ethnicity") or "Prefer not to say"
 
     task += (
-        "\n\nFor dropdown / multiple-choice questions use these answers:"
-        "\n- Right to work / work authorisation in the UK: Yes"
-        "\n- Require visa sponsorship: No"
-        "\n- Gender: Prefer not to say"
-        "\n- Ethnicity / diversity questions: Prefer not to say"
-        "\n- Disability: No"
-        "\n- Salary expectations: leave blank or select 'Negotiable' if forced"
-        "\n- How did you hear about us: Website / Internet search"
-        "\n- Are you currently employed: Yes if experience list is non-empty, else No"
+        f"\n\nFor dropdown / multiple-choice questions use these answers:"
+        f"\n- Right to work / work authorisation in the UK: {rtw_uk}"
+        f"\n- Require visa sponsorship: {sponsorship}"
+        f"\n- Gender: {gender}"
+        f"\n- Ethnicity / diversity questions: {ethnicity}"
+        f"\n- Disability: {disability}"
+        f"\n- Salary expectations (Annual): {salary}"
+        f"\n- Salary expectations (Hourly): {hourly}"
+        f"\n- Remote/Hybrid preference: {remote}"
+        f"\n- Willing to relocate: {relocate}"
+        f"\n- Preferred work locations: {pref_locs}"
+        f"\n- Can work in-person: {in_person}"
+        f"\n- Can start immediately: {immediate}"
+        f"\n- Has reliable transportation: {transport}"
+        f"\n- Needs accommodations: {accommodations}"
+        f"\n- Has government ties: {gov_ties}"
+        f"\n- How did you hear about us: Website / Internet search"
+        f"\n- Are you currently employed: Yes if experience list is non-empty, else No"
     )
+
+    if persona.get("custom_directives"):
+        task += f"\n\nCustom Directives to follow: {persona['custom_directives']}"
 
     task += f"\n\nFull cover letter to paste into any cover letter field:\n{cover_letter}"
     task += "\n\nComplete and submit the application. Fill every required field. If a field is optional and you don't have the answer, leave it blank."

@@ -1,5 +1,9 @@
 export async function authFetch(url: string, options: RequestInit = {}) {
-  const token = localStorage.getItem("windrush_token");
+  let token = null;
+  if (typeof window !== "undefined") {
+    token = localStorage.getItem("windrush_token");
+  }
+  
   const headers = new Headers(options.headers || {});
 
   if (token) {
@@ -11,7 +15,7 @@ export async function authFetch(url: string, options: RequestInit = {}) {
     headers,
   });
 
-  if (response.status === 401) {
+  if (response.status === 401 && typeof window !== "undefined") {
     localStorage.removeItem("windrush_token");
     window.location.href = "/login";
   }

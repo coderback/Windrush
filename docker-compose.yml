@@ -13,6 +13,7 @@ services:
     expose: ["3000"]
     environment:
       - NEXT_PUBLIC_API_URL=/api
+      - HOSTNAME=0.0.0.0
 
   api:
     build: ./api

@@ -4,9 +4,9 @@ import pathlib
 import tempfile
 import uuid
 from contextlib import asynccontextmanager
-from typing import Optional
+from typing import Optional, Annotated
 
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Query, Depends
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Query, Depends, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from fastapi.security import OAuth2PasswordRequestForm
@@ -126,24 +126,86 @@ async def upload_cv(
     existing_persona_data = tracker.get_user_persona(current_user.id)
     persona = Persona(**existing_persona_data)
     
-    # Simple merge logic: update fields if they are empty in persona but present in cv_data
-    if cv_data.get("name") and not persona.core_info.name:
-        persona.core_info.name = cv_data["name"]
+    # Granular merge logic
+    if cv_data.get("name"):
+        parts = cv_data["name"].split()
+        if len(parts) >= 2:
+            if not persona.core_info.first_name: persona.core_info.first_name = parts[0]
+            if not persona.core_info.last_name: persona.core_info.last_name = " ".join(parts[1:])
+        elif not persona.core_info.first_name:
+            persona.core_info.first_name = cv_data["name"]
+
     if cv_data.get("email") and not persona.core_info.email:
         persona.core_info.email = cv_data["email"]
     if cv_data.get("phone") and not persona.core_info.phone:
         persona.core_info.phone = cv_data["phone"]
-    if cv_data.get("location") and not persona.core_info.location:
-        persona.core_info.location = cv_data["location"]
     
-    persona.skills = list(set(persona.skills + cv_data.get("skills", [])))
+    # Location/Address mapping
+    if cv_data.get("address") and not persona.core_info.address_line_1:
+        persona.core_info.address_line_1 = cv_data["address"]
+    if cv_data.get("location") and not persona.core_info.city:
+        persona.core_info.city = cv_data["location"]
+
+    # Skill Categorization Logic (Merging categorized skills)
+    # cv_data['skills'] is now expected to be List[dict] with {category, skills}
+    extracted_categories = cv_data.get("skills", [])
+    if extracted_categories and isinstance(extracted_categories[0], dict):
+        # Already categorized by the LLM
+        for ext_cat in extracted_categories:
+            cat_name = ext_cat.get("category", "Uncategorized")
+            new_skills = ext_cat.get("skills", [])
+            # Find matching category in persona
+            found = False
+            for p_cat in persona.skills:
+                if p_cat.category.lower() == cat_name.lower():
+                    p_cat.skills = list(set(p_cat.skills + new_skills))
+                    found = True
+                    break
+            if not found:
+                from .models import SkillCategory
+                persona.skills.append(SkillCategory(category=cat_name, skills=new_skills))
+    else:
+        # Fallback for old/flat list if any
+        flat_skills = cv_data.get("skills", [])
+        if flat_skills:
+            from .models import SkillCategory
+            found = False
+            for p_cat in persona.skills:
+                if p_cat.category == "Uncategorized":
+                    p_cat.skills = list(set(p_cat.skills + flat_skills))
+                    found = True
+                    break
+            if not found:
+                persona.skills.append(SkillCategory(category="Uncategorized", skills=flat_skills))
+
     persona.summary = cv_data.get("summary") or persona.summary
 
     # Update history and education if empty
+    from .models import WorkExperience, Education
     if not persona.history and cv_data.get("experience"):
-        persona.history = cv_data["experience"]
+        new_history = []
+        for exp in cv_data["experience"]:
+            # Map old 'summary' to achievements/summary as needed
+            new_history.append(WorkExperience(
+                employer=exp.get("employer", ""),
+                title=exp.get("title", ""),
+                start_date=exp.get("dates", "").split("-")[0].strip() if "-" in exp.get("dates", "") else "",
+                end_date=exp.get("dates", "").split("-")[1].strip() if "-" in exp.get("dates", "") else "",
+                is_current="present" in exp.get("dates", "").lower(),
+                summary=exp.get("summary", ""),
+            ))
+        persona.history = new_history
+
     if not persona.education and cv_data.get("education"):
-        persona.education = cv_data["education"]
+        new_edu = []
+        for edu in cv_data["education"]:
+            new_edu.append(Education(
+                institution=edu.get("institution", ""),
+                degree=edu.get("degree", ""),
+                start_date="", end_date="", grade="",
+                is_currently_enrolled=False
+            ))
+        persona.education = new_edu
 
     tracker.update_user_persona(current_user.id, persona.model_dump())
 
