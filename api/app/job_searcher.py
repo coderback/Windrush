@@ -267,6 +267,9 @@ _GREENHOUSE_COMPANIES: list[tuple[str, str]] = [
     ("wayve",            "Wayve"),
     ("cleo",             "Cleo"),
     ("factorial",        "Factorial"),
+    # added from discovery
+    ("twilio",           "Twilio"),
+    ("dialpad",          "Dialpad"),
 ]
 
 _ASHBY_COMPANIES: list[tuple[str, str]] = [
@@ -291,6 +294,10 @@ _ASHBY_COMPANIES: list[tuple[str, str]] = [
     ("abound",      "Abound"),
     ("babylon",     "Babylon Health"),
     ("travelperk",  "TravelPerk"),
+    # added from discovery
+    ("openai",      "OpenAI"),
+    ("talkdesk",    "Talkdesk"),
+    ("faculty",     "Faculty AI"),
 ]
 
 _LEVER_COMPANIES: list[tuple[str, str]] = [
@@ -459,6 +466,10 @@ _SEARCH_QUERIES: list[str] = [
     'site:totaljobs.com "Graduate" "Software Engineer" OR "AI" OR "Machine Learning" OR "DevOps" Python London OR hybrid',
     # Wellfound — Startup Junior AI
     'site:wellfound.com "Junior" OR "Graduate" "AI Engineer" OR "Software Engineer" OR "ML Engineer" OR "Full Stack"',
+    # Workday — Enterprise Software Engineers (Graduate/Junior)
+    'site:myworkdayjobs.com "Graduate Software Engineer" OR "Junior Software Engineer" OR "Associate Software Engineer" Python OR Java',
+    # Workday — Enterprise AI & Data
+    'site:myworkdayjobs.com "Graduate" OR "Junior" "Data Scientist" OR "Machine Learning" OR "AI Engineer"',
 ]
 
 _BRAVE_BASE = "https://api.search.brave.com/res/v1/web/search"

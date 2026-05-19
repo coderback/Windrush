@@ -18,6 +18,7 @@ from .job_proxy import search_jobs
 from . import tracker
 from . import auth
 from . import pdf_generator
+from . import jobs_db
 from .models import Persona
 
 
@@ -26,6 +27,7 @@ async def lifespan(app: FastAPI):
     import os
     data_dir = os.environ.get("APP_DATA_PATH", "/tmp")
     tracker.init_db()
+    jobs_db.init_db()
     pdf_generator.init_pdf_dir(data_dir)
     yield
 
@@ -461,20 +463,77 @@ async def onboarding_complete(current_user: Annotated[auth.User, Depends(auth.ge
 @app.get("/jobs")
 async def get_jobs(
     query: str = Query(default=""),
-    location: str = Query(default="London"),
+    location: str = Query(default=""),
+    level: str = Query(default=""),
+    category: str = Query(default=""),
+    remote: bool = Query(default=False),
+    page: int = Query(default=1, ge=1),
+    limit: int = Query(default=20, ge=1, le=100),
     current_user: Annotated[auth.User, Depends(auth.get_current_user)] = None,
 ):
-    """Return job listings for the job feed, defaulting to persona preferences."""
-    if not query:
+    """Return job listings for the job feed with pagination and filtering."""
+    # If no query, derive defaults from user persona
+    effective_query = query
+    effective_location = location
+    if not effective_query:
         persona = tracker.get_user_persona(current_user.id)
         prefs = persona.get("preferences", {})
         titles = prefs.get("target_titles", [])
-        query = titles[0] if titles else "Software Engineer"
+        effective_query = titles[0] if titles else ""
         locs = prefs.get("preferred_locations", [])
-        if not location or location == "London":
-            location = locs[0] if locs else "London"
-    jobs = await search_jobs(query, location)
-    return {"jobs": jobs, "query": query, "location": location}
+        if not effective_location:
+            effective_location = locs[0] if locs else ""
+
+    offset = (page - 1) * limit
+
+    # Query the local jobs database first
+    jobs = jobs_db.get_jobs(
+        query=effective_query,
+        location=effective_location,
+        level=level,
+        category=category,
+        remote=remote,
+        limit=limit,
+        offset=offset,
+    )
+
+    # Fallback: only trigger live scraping when the DB is completely empty
+    # (i.e. first boot). If the DB has jobs but this query returned 0, that's
+    # just a filter miss — don't hammer external APIs for every empty search.
+    if not jobs and page == 1 and jobs_db.job_count() == 0:
+        live_jobs = await search_jobs(effective_query or "software engineer", effective_location or "London")
+        # Persist them for future queries
+        for j in live_jobs:
+            j["source"] = j.get("source", "live")
+            j["level"] = _infer_level(j.get("title", ""))
+        jobs_db.add_jobs(live_jobs)
+        jobs = jobs_db.get_jobs(
+            query=effective_query,
+            location=effective_location,
+            level=level,
+            category=category,
+            remote=remote,
+            limit=limit,
+            offset=offset,
+        )
+
+    return {
+        "jobs": jobs,
+        "query": effective_query,
+        "location": effective_location,
+        "page": page,
+        "limit": limit,
+        "has_more": len(jobs) == limit,
+    }
+
+
+def _infer_level(title: str) -> str:
+    t = title.lower()
+    if any(w in t for w in ["junior", "graduate", "entry", "associate", "intern"]):
+        return "junior"
+    elif any(w in t for w in ["senior", "lead", "principal", "staff", "manager", "head", "director"]):
+        return "senior"
+    return "mid"
 
 
 # ── Per-job agent endpoints (SSE) ─────────────────────────────────────────────
