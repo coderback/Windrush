@@ -17,12 +17,16 @@ from .guardrails import check_cv_for_injection, get_audit_log, GuardrailViolatio
 from .job_proxy import search_jobs
 from . import tracker
 from . import auth
+from . import pdf_generator
 from .models import Persona
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    import os
+    data_dir = os.environ.get("APP_DATA_PATH", "/tmp")
     tracker.init_db()
+    pdf_generator.init_pdf_dir(data_dir)
     yield
 
 
@@ -258,13 +262,14 @@ async def pipeline_stream(
 async def apply(
     job_id: str = Form(...),
     job_url: str = Form(default=""),
-    cover_letter: str = Form(...),
+    cover_letter: str = Form(default=""),
     cv_profile: str = Form(default="{}"),
     skill_risks: str = Form(default="[]"),
     job_email: str = Form(default=""),
     job_password: str = Form(default=""),
     cv_session_id: str = Form(default=""),
     tailored_cv: str = Form(default=""),
+    cv_doc_id: str = Form(default=""),
     job_title: str = Form(default=""),
     company: str = Form(default=""),
     location: str = Form(default=""),
@@ -294,7 +299,13 @@ async def apply(
     effective_email = job_email or core.get("job_email", "")
     effective_password = job_password or core.get("job_password", "")
 
-    cv_path = _cv_files.get(cv_session_id, "")
+    # Tailored CV PDF takes precedence over original upload if the user chose it
+    if cv_doc_id:
+        tailored_path = pdf_generator.get_pdf_path(cv_doc_id)
+        import os as _os2
+        cv_path = tailored_path if _os2.path.exists(tailored_path) else _cv_files.get(cv_session_id, "")
+    else:
+        cv_path = _cv_files.get(cv_session_id, "")
     session_id = str(uuid.uuid4())
 
     job_dict = {
@@ -568,7 +579,7 @@ async def score_skills(
 
 
 @app.post("/careers/roadmap")
-async def careers_roadmap(
+async def careers_roadmap(  # noqa: E302
     current_user: Annotated[auth.User, Depends(auth.get_current_user)],
 ):
     """SSE: generate a skill development roadmap from the user's persona."""
@@ -587,3 +598,42 @@ async def careers_roadmap(
 
     return StreamingResponse(gen(), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+# ── Document / PDF export ─────────────────────────────────────────────────────
+
+@app.post("/documents/pdf")
+async def create_pdf(
+    body: dict,
+    current_user: Annotated[auth.User, Depends(auth.get_current_user)],
+):
+    """Generate a PDF from CV or cover-letter Markdown text."""
+    doc_type = body.get("type", "cv")
+    text = body.get("text", "")
+    metadata = body.get("metadata", {})
+    if not text:
+        raise HTTPException(status_code=400, detail="text is required")
+    try:
+        doc_id = pdf_generator.generate_pdf(doc_type, text, metadata)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+    return {"doc_id": doc_id, "download_url": f"/api/documents/{doc_id}/download"}
+
+
+from fastapi.responses import FileResponse  # noqa: E402
+
+
+@app.get("/documents/{doc_id}/download")
+async def download_pdf(
+    doc_id: str,
+    current_user: Annotated[auth.User, Depends(auth.get_current_user)],
+):
+    import re
+    import os as _os
+    if not re.fullmatch(r"[a-f0-9]{32}", doc_id):
+        raise HTTPException(status_code=400, detail="Invalid doc_id")
+    path = pdf_generator.get_pdf_path(doc_id)
+    if not _os.path.exists(path):
+        raise HTTPException(status_code=404, detail="Document not found")
+    return FileResponse(path, media_type="application/pdf",
+                        headers={"Content-Disposition": f'attachment; filename="windrush_{doc_id[:8]}.pdf"'})

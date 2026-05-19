@@ -16,3 +16,5 @@ langchain-ollama>=0.2 # Ollama LangChain integration (browser agent)
 # Keep groq + langchain-groq if switching back via LLM_BACKEND=groq
 groq>=0.9
 langchain-groq>=0.2
+fpdf2>=2.7.9
+markdown>=3.5

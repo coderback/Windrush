@@ -70,17 +70,22 @@ def init_db(db_path: str = "") -> None:
         con.execute("PRAGMA journal_mode=WAL")
         con.execute(_CREATE_USERS_TABLE)
         con.execute(_CREATE_TABLE)
-        con.execute(_CREATE_INDEX)
         # Migrations — safe to run on existing DBs
         for stmt in [
             "ALTER TABLE users ADD COLUMN persona TEXT DEFAULT '{}'",
             "ALTER TABLE users ADD COLUMN onboarding_complete INTEGER DEFAULT 0",
             "ALTER TABLE applications ADD COLUMN tailored_cv TEXT",
+            "ALTER TABLE applications ADD COLUMN user_id TEXT",
         ]:
             try:
                 con.execute(stmt)
             except sqlite3.OperationalError:
                 pass
+        # Create index after migrations so user_id column is guaranteed to exist
+        try:
+            con.execute(_CREATE_INDEX)
+        except sqlite3.OperationalError:
+            pass
         con.commit()
         con.close()
         logger.info("Tracker DB initialised at %s", _DB_PATH)

@@ -70,9 +70,8 @@ export default function CareersPage() {
           if (!line.startsWith("data: ")) continue;
           try {
             const ev = JSON.parse(line.slice(6)) as Record<string, unknown>;
-            if (ev.type === "tool_result" && ev.tool_name === "generate_skill_roadmap") {
-              const r = ev.result as Record<string, unknown>;
-              if (r.items) setRoadmap(r.items as RoadmapItem[]);
+            if (ev.type === "roadmap" && ev.items) {
+              setRoadmap(ev.items as RoadmapItem[]);
             }
           } catch {}
         }

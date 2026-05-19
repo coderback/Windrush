@@ -14,12 +14,100 @@ try:
     from browser_use import Agent, BrowserSession, BrowserProfile
 
     if _BACKEND == "groq":
+        import json as _json
+        import re as _re
+        import typing as _typing
         from langchain_groq import ChatGroq as _BaseChatGroq
-        from typing import ClassVar
+        from langchain_core.messages import (
+            SystemMessage as _SystemMessage,
+            HumanMessage as _HumanMessage,
+            AIMessage as _AIMessage,
+        )
 
-        class _BrowserLLM(_BaseChatGroq):
-            """ChatGroq with provider attribute required by browser-use."""
-            provider: ClassVar[str] = "groq"
+        def _to_lc_messages(messages):
+            """Convert browser_use message types to standard LangChain messages."""
+            result = []
+            for msg in messages:
+                cls_name = type(msg).__name__
+                content = getattr(msg, "content", "")
+                if cls_name == "SystemMessage":
+                    result.append(_SystemMessage(content=content))
+                elif cls_name == "HumanMessage":
+                    result.append(_HumanMessage(content=content))
+                elif cls_name == "AIMessage":
+                    result.append(_AIMessage(content=content))
+                else:
+                    role = getattr(msg, "role", "user")
+                    if role == "system":
+                        result.append(_SystemMessage(content=content))
+                    elif role == "assistant":
+                        result.append(_AIMessage(content=content))
+                    else:
+                        result.append(_HumanMessage(content=content))
+            return result
+
+        def _parse_with_defaults(model_class, text: str):
+            """
+            Extract JSON from LLM text and fill in defaults for any missing fields
+            before constructing the pydantic model.  Handles the case where the
+            model omits required string fields (evaluation_previous_goal, etc.).
+            """
+            m = _re.search(r'\{.*\}', text, _re.DOTALL)
+            data = _json.loads(m.group()) if m else {}
+
+            for name, fi in model_class.model_fields.items():
+                if name in data:
+                    continue
+                ann = fi.annotation
+                origin = getattr(ann, '__origin__', None)
+                if origin is list or ann is list:
+                    data[name] = []
+                elif ann is str or ann == type(""):
+                    data[name] = ""
+                elif ann is int:
+                    data[name] = 0
+                elif ann is bool:
+                    data[name] = False
+                else:
+                    data[name] = None
+
+            return model_class.model_validate(data)
+
+        class _BrowserLLM:
+            """
+            Plain adapter around ChatGroq for browser-use 0.11.x.
+
+            browser-use calls:
+              response = await llm.ainvoke(messages, output_format=AgentOutput)
+              parsed   = response.completion
+
+            We use Groq's json_object mode (no tool-call schema validation) and
+            fill in sensible defaults for any fields the model omits.
+            """
+
+            provider = "groq"
+
+            def __init__(self, model: str, groq_api_key: str):
+                self.model = model
+                self._inner = _BaseChatGroq(model=model, groq_api_key=groq_api_key)
+
+            async def ainvoke(self, messages, output_format=None, **kwargs):
+                kwargs.pop("session_id", None)
+                lc_messages = _to_lc_messages(messages)
+
+                if output_format is not None:
+                    # json_object mode: Groq validates JSON syntax only, not schema.
+                    # The model already knows the expected structure from the system prompt.
+                    llm = self._inner.bind(response_format={"type": "json_object"})
+                    response = await llm.ainvoke(lc_messages)
+                    content = getattr(response, "content", str(response))
+                    completion = _parse_with_defaults(output_format, content)
+                    return type("_Resp", (), {"completion": completion})()
+
+                return await self._inner.ainvoke(lc_messages, **kwargs)
+
+            def __getattr__(self, name: str):
+                return getattr(self._inner, name)
 
         def _make_browser_llm():
             return _BrowserLLM(

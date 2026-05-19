@@ -447,10 +447,12 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
                 data = lookup_by_title(skill)
                 raw = data.get("overall_exposure", 0.0)
                 exposure = round(raw, 2) if raw and raw != 0.5 else 0.55
+            pct = round(exposure * 100)
+            risk_label = "High" if exposure >= 0.65 else ("Medium" if exposure >= 0.35 else "Low")
             results.append({
                 "skill": skill,
-                "exposure": round(exposure, 2),
-                "risk": "high" if exposure >= 0.5 else "low",
+                "exposure_score": pct,
+                "risk_label": risk_label,
             })
         return {"skill_risks": results}
 
@@ -546,7 +548,8 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
             exposure = job.get("exposure_score", 0.5)
             desc = job.get("description", "")
             desc_lower = desc.lower()
-            skill_matches = sum(1 for s in cv_skills if s in desc_lower)
+            matched = [s for s in cv_skills if s in desc_lower]
+            skill_matches = len(matched)
             fit_score = min(skill_matches / max(len(cv_skills), 1), 1.0)
             level, level_bonus = _level_match(job.get("title", ""), desc)
             gaps = _skill_gaps(desc)
@@ -559,9 +562,10 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
                 "url": job.get("url"),
                 "description": desc,
                 "exposure_score": exposure,
-                "fit_score": round(fit_score, 2),
+                "fit_score": round(fit_score * 100),
                 "level_match": level,
                 "skill_gaps": gaps,
+                "matched_skills": sorted(matched)[:10],
                 "composite_score": round(composite, 2),
             })
 
@@ -635,10 +639,10 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
         persona = tool_input.get("persona", {})
         target_job_title = tool_input.get("target_job_title", "")
 
-        confirmed_high = [s for s in skill_risks if s.get("exposure", 0) > 0.65]
-        confirmed_low  = [s for s in skill_risks if 0 < s.get("exposure", 0) <= 0.35]
+        confirmed_high = [s for s in skill_risks if s.get("exposure_score", s.get("exposure", 0) * 100) > 65]
+        confirmed_low  = [s for s in skill_risks if 0 < s.get("exposure_score", s.get("exposure", 0) * 100) <= 35]
         all_skills_str = ", ".join(
-            f"{s['skill']} ({int(s.get('exposure',0)*100)}%)" for s in skill_risks
+            f"{s['skill']} ({s.get('exposure_score', round(s.get('exposure', 0) * 100))}%)" for s in skill_risks
         )
 
         core = persona.get("core_info", {})
