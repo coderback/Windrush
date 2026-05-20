@@ -305,6 +305,15 @@ _GREENHOUSE_COMPANIES: list[tuple[str, str]] = [
     ("point72",          "Point72"),
     ("mwinternshipprogram", "Marshall Wace"),
     ("xtxmarketstechnologies", "XTX Markets"),
+    # added from slug validation
+    ("deepmind",          "DeepMind"),
+    ("stripe",            "Stripe"),
+    ("databricks",        "Databricks"),
+    ("jumptrading",       "Jump Trading"),
+    ("virtu",             "Virtu Financial"),
+    ("datadog",           "Datadog"),
+    ("elastic",           "Elastic"),
+    ("mongodb",           "MongoDB"),
 ]
 
 _ASHBY_COMPANIES: list[tuple[str, str]] = [
@@ -347,6 +356,10 @@ _ASHBY_COMPANIES: list[tuple[str, str]] = [
     ("deliveroo",   "Deliveroo"),
     ("treefera",    "Treefera"),
     ("trainline",   "Trainline"),
+    # added from slug validation
+    ("perplexity",  "Perplexity AI"),
+    ("modal",       "Modal"),
+    ("cursor",      "Cursor"),
 ]
 
 _LEVER_COMPANIES: list[tuple[str, str]] = [
@@ -376,6 +389,27 @@ _WORKABLE_COMPANIES: list[tuple[str, str]] = [
     ("arondite",     "Arondite"),
     ("cogna",        "Cogna"),
     ("caxton",       "Caxton Associates"),
+    # added from slug validation
+    ("two-sigma",   "Two Sigma"),
+]
+
+_SMARTRECRUITERS_COMPANIES: list[tuple[str, str]] = [
+    # Confirmed working via API test (May 2026)
+    ("PAConsulting",     "PA Consulting"),
+    ("Visa",             "Visa"),
+    ("TTP1",             "TTP"),
+    ("Vitol",            "Vitol"),
+    ("LegalAndGeneral",  "Legal & General"),
+    # Additional candidates (200 OK, 0 jobs now but valid boards)
+    ("ni",               "Turner & Townsend"),
+    ("oneclick-ui",      "EDF Energy"),
+    ("GoldmanSachs",     "Goldman Sachs"),
+    ("HSBC",             "HSBC"),
+    ("Barclays",         "Barclays"),
+    ("JPMorgan",         "JPMorgan"),
+    ("Macquarie",        "Macquarie"),
+    ("Nomura",           "Nomura"),
+    ("CitadelSecurities","Citadel Securities"),
 ]
 
 async def _fetch_greenhouse(slug: str, company: str, keywords: list[str]) -> list[dict]:
@@ -504,6 +538,61 @@ async def _fetch_workable(slug: str, company: str, keywords: list[str]) -> list[
     except Exception:
         return []
 
+
+async def _fetch_smartrecruiters(slug: str, company: str, keywords: list[str]) -> list[dict]:
+    """Fetch from SmartRecruiters public postings API (no auth required).
+    Paginates up to 200 jobs per company; filters locally by keyword.
+    API docs: https://dev.smartrecruiters.com/customer-api/live-docs/job-board-api/
+    """
+    try:
+        jobs: list[dict] = []
+        limit = 100
+        offset = 0
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            while offset < 200:  # cap at 200 to avoid hammering
+                url = (
+                    f"https://api.smartrecruiters.com/v1/companies/{slug}/postings"
+                    f"?limit={limit}&offset={offset}"
+                )
+                resp = await client.get(url)
+                if resp.status_code != 200:
+                    break
+                data = resp.json()
+                content = data.get("content", [])
+                if not content:
+                    break
+                for item in content:
+                    title = item.get("name", "")
+                    if not _title_matches_query(title, keywords):
+                        continue
+                    loc_data = item.get("location") or {}
+                    city = loc_data.get("city", "")
+                    country = loc_data.get("country", "")
+                    remote = loc_data.get("remote", False)
+                    loc = city or ("Remote" if remote else country or "")
+                    job_ref = item.get("ref", "")
+                    # Build apply URL from the ref (API URL → public URL)
+                    job_uuid = item.get("uuid", item.get("id", ""))
+                    apply_url = f"https://jobs.smartrecruiters.com/{slug}/{job_uuid}" if job_uuid else job_ref
+                    jobs.append({
+                        "job_id": f"sr-{item.get('uuid', item.get('id', ''))}",
+                        "title": title,
+                        "company": company,
+                        "location": loc or "See listing",
+                        "description": "",
+                        "url": apply_url,
+                        "salary_min": None,
+                        "salary_max": None,
+                        "source": "smartrecruiters",
+                        "exposure_score": round(occupation_exposure(title), 3),
+                    })
+                if len(content) < limit:
+                    break  # last page
+                offset += limit
+        return jobs
+    except Exception:
+        return []
+
 async def _search_level2_ats_apis(queries: list[str]) -> list[dict]:
     """
     Concurrently fetch from Greenhouse, Ashby, Lever, and Workable public APIs.
@@ -519,9 +608,10 @@ async def _search_level2_ats_apis(queries: list[str]) -> list[dict]:
 
     tasks = (
         [_fetch_greenhouse(slug, name, keywords) for slug, name in _GREENHOUSE_COMPANIES]
-        + [_fetch_ashby(slug, name, keywords)    for slug, name in _ASHBY_COMPANIES]
-        + [_fetch_lever(slug, name, keywords)    for slug, name in _LEVER_COMPANIES]
-        + [_fetch_workable(slug, name, keywords) for slug, name in _WORKABLE_COMPANIES]
+        + [_fetch_ashby(slug, name, keywords)         for slug, name in _ASHBY_COMPANIES]
+        + [_fetch_lever(slug, name, keywords)         for slug, name in _LEVER_COMPANIES]
+        + [_fetch_workable(slug, name, keywords)      for slug, name in _WORKABLE_COMPANIES]
+        + [_fetch_smartrecruiters(slug, name, keywords) for slug, name in _SMARTRECRUITERS_COMPANIES]
     )
 
     results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -530,8 +620,13 @@ async def _search_level2_ats_apis(queries: list[str]) -> list[dict]:
         if isinstance(r, list):
             jobs.extend(r)
 
+    total_companies = (
+        len(_GREENHOUSE_COMPANIES) + len(_ASHBY_COMPANIES)
+        + len(_LEVER_COMPANIES) + len(_WORKABLE_COMPANIES)
+        + len(_SMARTRECRUITERS_COMPANIES)
+    )
     logger.info("Level 2 (ATS APIs): %d jobs matched against %d keywords across %d companies",
-                len(jobs), len(keywords), len(tasks))
+                len(jobs), len(keywords), total_companies)
     return jobs
 
 
@@ -543,38 +638,109 @@ async def _search_level2_ats_apis(queries: list[str]) -> list[dict]:
 # Gracefully skips if key is unset.
 
 _SEARCH_QUERIES: list[str] = [
-    # Ashby — Graduate AI & ML
-    'site:jobs.ashbyhq.com "Graduate" OR "Junior" "AI Engineer" OR "ML Engineer" OR "Machine Learning" OR "Software Engineer"',
-    # Greenhouse — Graduate AI & ML
-    'site:job-boards.greenhouse.io OR site:boards.greenhouse.io "Graduate" OR "Junior" "AI Engineer" OR "ML Engineer" OR "Machine Learning" OR "Python"',
-    # Lever — Graduate AI & ML
-    'site:jobs.lever.co "Graduate" OR "Junior" "AI Engineer" OR "ML Engineer" OR "Software Engineer" Python',
-    # Ashby — Graduate Software Engineer
-    'site:jobs.ashbyhq.com "Graduate Software Engineer" OR "Junior Software Engineer" OR "Associate Engineer" Python OR JavaScript',
-    # Greenhouse — Graduate Software Engineer
-    'site:job-boards.greenhouse.io "Graduate Software Engineer" OR "Junior Software Engineer" OR "Associate Software Engineer"',
-    # Lever — Graduate Software Engineer
-    'site:jobs.lever.co "Graduate Software Engineer" OR "Junior Software Engineer" OR "Entry Level Engineer"',
-    # Ashby — Junior Full Stack
-    'site:jobs.ashbyhq.com "Junior" OR "Graduate" "Full Stack" OR "Full-Stack" OR "Backend Engineer" OR "Python Developer"',
-    # Greenhouse — Junior Full Stack
-    'site:job-boards.greenhouse.io "Junior" OR "Graduate" "Full Stack" OR "Full-Stack" OR "Backend" React OR Django OR FastAPI',
-    # Ashby — Junior DevOps & Cloud
-    'site:jobs.ashbyhq.com "Junior" OR "Graduate" "DevOps" OR "Cloud Engineer" OR "Platform Engineer" OR "SRE" Kubernetes OR Docker',
-    # Greenhouse — Junior DevOps & Cloud
-    'site:job-boards.greenhouse.io "Junior" OR "Graduate" "DevOps Engineer" OR "Cloud Engineer" OR "Platform Engineer" OR "Site Reliability"',
-    # Lever — Junior DevOps & Cloud
-    'site:jobs.lever.co "Junior" OR "Graduate" "DevOps" OR "Cloud Engineer" OR "Infrastructure Engineer" Docker OR Kubernetes',
-    # Reed — UK Graduate Tech
-    'site:reed.co.uk "Graduate" "AI Engineer" OR "Machine Learning" OR "Software Engineer" OR "DevOps" Python London OR remote',
-    # Totaljobs — UK Graduate Tech
-    'site:totaljobs.com "Graduate" "Software Engineer" OR "AI" OR "Machine Learning" OR "DevOps" Python London OR hybrid',
-    # Wellfound — Startup Junior AI
-    'site:wellfound.com "Junior" OR "Graduate" "AI Engineer" OR "Software Engineer" OR "ML Engineer" OR "Full Stack"',
-    # Workday — Enterprise Software Engineers (Graduate/Junior)
-    'site:myworkdayjobs.com "Graduate Software Engineer" OR "Junior Software Engineer" OR "Associate Software Engineer" Python OR Java',
-    # Workday — Enterprise AI & Data
-    'site:myworkdayjobs.com "Graduate" OR "Junior" "Data Scientist" OR "Machine Learning" OR "AI Engineer"',
+    # ── Workday: Finance & Banking ──────────────────────────────────────────────
+    # Targets: Barclays, Lloyds, NatWest, Citi, MUFG, TD Securities, Barclays
+    (
+        'site:barclays.wd3.myworkdayjobs.com OR site:lbg.wd3.myworkdayjobs.com'
+        ' OR site:rbs.wd3.myworkdayjobs.com OR site:citi.wd5.myworkdayjobs.com'
+        ' OR site:mufgub.wd3.myworkdayjobs.com OR site:td.wd3.myworkdayjobs.com'
+        ' "Graduate" OR "Junior" OR "Associate" "Technology" OR "Software" OR "Data" OR "Engineer"'
+    ),
+    # Targets: Capital One, Blackstone, PIMCO, Houlihan Lokey, Julius Baer, M&G, PGIM
+    (
+        'site:capitalone.wd12.myworkdayjobs.com OR site:blackstone.wd1.myworkdayjobs.com'
+        ' OR site:pimco.wd1.myworkdayjobs.com OR site:hl.wd1.myworkdayjobs.com'
+        ' OR site:juliusbaer.wd3.myworkdayjobs.com OR site:mgpru.wd3.myworkdayjobs.com'
+        ' OR site:pru.wd5.myworkdayjobs.com'
+        ' "Graduate" OR "Junior" OR "Analyst" "Technology" OR "Software" OR "Data" OR "Quantitative"'
+    ),
+    # Targets: LSEG, Aberdeen, Baillie Gifford, FCA, Frontier Economics, NASDAQ, Dow Jones
+    (
+        'site:lseg.wd3.myworkdayjobs.com OR site:abrdn.wd3.myworkdayjobs.com'
+        ' OR site:bailliegifford.wd3.myworkdayjobs.com OR site:fca.wd3.myworkdayjobs.com'
+        ' OR site:frontiereconomics.wd3.myworkdayjobs.com OR site:nasdaq.wd1.myworkdayjobs.com'
+        ' OR site:dowjones.wd1.myworkdayjobs.com'
+        ' "Graduate" OR "Junior" OR "Associate" "Software" OR "Technology" OR "Data" OR "Engineer"'
+    ),
+    # ── Workday: Tech & Engineering ─────────────────────────────────────────────
+    # Targets: Nvidia, Autodesk, Salesforce, Snyk, CrowdStrike, AVEVA, FactSet, Cadence, KLA
+    (
+        'site:nvidia.wd5.myworkdayjobs.com OR site:autodesk.wd1.myworkdayjobs.com'
+        ' OR site:salesforce.wd12.myworkdayjobs.com OR site:snyk.wd103.myworkdayjobs.com'
+        ' OR site:crowdstrike.wd5.myworkdayjobs.com OR site:aveva.wd3.myworkdayjobs.com'
+        ' OR site:factset.wd108.myworkdayjobs.com OR site:cadence.wd1.myworkdayjobs.com'
+        ' OR site:kla.wd1.myworkdayjobs.com'
+        ' "Graduate" OR "Junior" OR "New Grad" "Software Engineer" OR "Data" OR "ML" OR "Platform"'
+    ),
+    # Targets: Rolls-Royce, Airbus, MBDA, Shell, Thales, Motorola Solutions, BAE/KBR, Centrica
+    (
+        'site:rollsroyce.wd3.myworkdayjobs.com OR site:ag.wd3.myworkdayjobs.com'
+        ' OR site:mbda.wd3.myworkdayjobs.com OR site:shell.wd3.myworkdayjobs.com'
+        ' OR site:thales.wd3.myworkdayjobs.com OR site:motorolasolutions.wd5.myworkdayjobs.com'
+        ' OR site:kbr.wd5.myworkdayjobs.com OR site:centrica.wd3.myworkdayjobs.com'
+        ' "Graduate" OR "Junior" "Software" OR "Data" OR "Systems Engineer" OR "Technology"'
+    ),
+    # Targets: Expedia, RELX, ING, Liberty Global, Quilter, Tencent, Hiscox, G-Research
+    (
+        'site:expedia.wd108.myworkdayjobs.com OR site:relx.wd3.myworkdayjobs.com'
+        ' OR site:ing.wd3.myworkdayjobs.com OR site:libertyglobal.wd3.myworkdayjobs.com'
+        ' OR site:quilter.wd3.myworkdayjobs.com OR site:tencent.wd1.myworkdayjobs.com'
+        ' OR site:hiscox.wd3.myworkdayjobs.com OR site:gresearch.wd103.myworkdayjobs.com'
+        ' "Graduate" OR "Junior" OR "New Grad" "Software" OR "Engineer" OR "Data" OR "Quant"'
+    ),
+    # ── Custom Career Pages: Major UK Tech & Finance ─────────────────────────────
+    # ARM, Mastercard, PwC Technology, BAE Systems digital
+    (
+        'site:careers.arm.com OR site:careers.mastercard.com OR site:jobs.pwc.co.uk'
+        ' OR site:jobsearch.baesystems.com'
+        ' "Graduate" OR "Junior" OR "Early Careers" "Software" OR "Technology" OR "Engineer" OR "Data"'
+    ),
+    # Capgemini, TikTok/ByteDance, Arup, KKR Technology
+    (
+        'site:www.capgemini.com/gb-en/careers OR site:lifeattiktok.com'
+        ' OR site:careers.arup.com OR site:www.kkr.com/careers'
+        ' "Graduate" OR "Junior" "Software Engineer" OR "Technology" OR "Data Analyst"'
+    ),
+    # Wise (custom portal), Bending Spoons, G-Research careers, Jane Street
+    (
+        'site:wise.jobs OR site:jobs.bendingspoons.com'
+        ' OR site:www.janestreet.com/join-jane-street'
+        ' "Graduate" OR "Junior" OR "New Grad" "Software" OR "Engineer" OR "Quant" OR "Developer"'
+    ),
+    # ── TALlink (tal.net): BlackRock, Jefferies ──────────────────────────────────
+    (
+        'site:blackrock.tal.net OR site:jefferies.tal.net'
+        ' "Graduate" OR "Junior" OR "Analyst" "Technology" OR "Software" OR "Data" OR "Engineering"'
+        ' 2025 OR 2026'
+    ),
+    # ── iCIMS & Taleo: Enterprise Portals ───────────────────────────────────────
+    (
+        'site:icims.com OR site:taleo.net'
+        ' "Graduate" OR "Junior" "Software Engineer" OR "Technology Analyst" OR "Data Scientist"'
+        ' London'
+    ),
+    # ── UK Graduate Job Boards ──────────────────────────────────────────────────
+    # Gradcracker: strong UK engineering grad listings
+    (
+        'site:gradcracker.com "Software" OR "AI" OR "Data" OR "Cloud" OR "DevOps"'
+        ' "Graduate" OR "Intern" London OR UK 2025 OR 2026'
+    ),
+    # Target Jobs: broad UK grad tech
+    (
+        'site:targetjobs.co.uk "Graduate" "Software Engineer" OR "Technology" OR "Data Scientist"'
+        ' OR "Machine Learning" OR "Cloud" London OR hybrid'
+    ),
+    # Reed & Totaljobs: UK job boards for non-ATS listings
+    (
+        'site:reed.co.uk OR site:totaljobs.com'
+        ' "Graduate" "Software Engineer" OR "AI Engineer" OR "Data Scientist" OR "Cloud Engineer"'
+        ' London 2025 OR 2026'
+    ),
+    # Wellfound: startups not on standard ATS
+    (
+        'site:wellfound.com "Junior" OR "Graduate" OR "Entry Level"'
+        ' "Software Engineer" OR "AI Engineer" OR "ML Engineer" OR "Full Stack" OR "Backend"'
+    ),
 ]
 
 _BRAVE_BASE = "https://api.search.brave.com/res/v1/web/search"
