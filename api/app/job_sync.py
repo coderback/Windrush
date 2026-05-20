@@ -19,6 +19,9 @@ def infer_level(title: str) -> str:
 async def sync_jobs():
     jobs_db.init_db()
     
+    # Record the time the sync started for the heartbeat purge
+    sync_start = jobs_db._now()
+    
     queries = [
         "software engineer", 
         "data scientist", 
@@ -61,6 +64,9 @@ async def sync_jobs():
     
     added = jobs_db.add_jobs(deduped)
     logger.info(f"Sync complete. Added {added} new jobs.")
+    
+    # Purge any dynamic jobs that were not refreshed in this run
+    jobs_db.purge_expired_jobs(sync_start)
 
 if __name__ == "__main__":
     asyncio.run(sync_jobs())

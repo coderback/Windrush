@@ -289,6 +289,22 @@ _GREENHOUSE_COMPANIES: list[tuple[str, str]] = [
     ("towerpeak",        "Tower Peak Partners"),
     ("xantium",          "Xantium"),
     ("xpcampus",         "ExodusPoint"),
+    # added from summer-internships.json
+    ("quadraturecapital", "Quadrature"),
+    ("cloudflare",       "Cloudflare"),
+    ("figma",            "Figma"),
+    ("mangroup",         "Man Group"),
+    ("tripadvisor",      "Viator"),
+    ("schonfeld",        "Schonfeld"),
+    ("perplexityai",     "Perplexity"),
+    ("emergingtalent",   "Maven Securities"),
+    ("moloco",           "Moloco"),
+    ("aquaticcapitalmanagement", "Aquatic Capital Management"),
+    ("copperco",         "Copper.co"),
+    ("embed",            "GSA Capital"),
+    ("point72",          "Point72"),
+    ("mwinternshipprogram", "Marshall Wace"),
+    ("xtxmarketstechnologies", "XTX Markets"),
 ]
 
 _ASHBY_COMPANIES: list[tuple[str, str]] = [
@@ -320,6 +336,17 @@ _ASHBY_COMPANIES: list[tuple[str, str]] = [
     # added from grad-programmes.json
     ("hawkeyeinnovations", "Hawk-Eye Innovations"),
     ("spaice-tech", "SPAICE"),
+    # added from summer-internships.json
+    ("thought-machine", "Thought Machine"),
+    ("red-gate",    "Redgate"),
+    ("uipath",      "UiPath"),
+    ("runna",       "Runna"),
+    ("ariesglobal", "Aries Global"),
+    ("unlikelyai",  "UnlikelyAI"),
+    ("Talos-Trading", "Talos"),
+    ("deliveroo",   "Deliveroo"),
+    ("treefera",    "Treefera"),
+    ("trainline",   "Trainline"),
 ]
 
 _LEVER_COMPANIES: list[tuple[str, str]] = [
@@ -332,6 +359,10 @@ _LEVER_COMPANIES: list[tuple[str, str]] = [
     # added from grad-programmes.json
     ("frontier",    "Frontier Developments"),
     ("ion",         "ION"),
+    # added from summer-internships.json
+    ("cirrus",      "Cirrus Logic"),
+    ("spotify",     "Spotify"),
+    ("gearset",     "Gearset"),
 ]
 
 _WORKABLE_COMPANIES: list[tuple[str, str]] = [
@@ -340,6 +371,11 @@ _WORKABLE_COMPANIES: list[tuple[str, str]] = [
     ("capula-investment-management-ltd", "Capula Investment Management"),
     ("longshot-systems-ltd", "Longshot Systems"),
     ("insight-investment", "Insight Investment"),
+    # added from summer-internships.json
+    ("phasecraft-1", "Phasecraft"),
+    ("arondite",     "Arondite"),
+    ("cogna",        "Cogna"),
+    ("caxton",       "Caxton Associates"),
 ]
 
 async def _fetch_greenhouse(slug: str, company: str, keywords: list[str]) -> list[dict]:

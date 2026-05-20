@@ -26,7 +26,9 @@ CREATE TABLE IF NOT EXISTS jobs (
     exposure_score  REAL,
     level           TEXT,
     source          TEXT,
-    created_at      TEXT NOT NULL
+    created_at      TEXT NOT NULL,
+    updated_at      TEXT,
+    expires_at      TEXT
 );
 """
 
@@ -46,6 +48,14 @@ def init_db(db_path: str = "") -> None:
         con.execute("PRAGMA journal_mode=WAL")
         con.execute(_CREATE_JOBS_TABLE)
         con.execute(_CREATE_INDEX)
+        try:
+            con.execute("ALTER TABLE jobs ADD COLUMN updated_at TEXT")
+        except sqlite3.OperationalError:
+            pass
+        try:
+            con.execute("ALTER TABLE jobs ADD COLUMN expires_at TEXT")
+        except sqlite3.OperationalError:
+            pass
         con.commit()
         con.close()
         logger.info("Jobs DB initialised at %s", _DB_PATH)
@@ -63,12 +73,13 @@ def add_jobs(jobs: list[dict]) -> int:
     
     con = sqlite3.connect(_DB_PATH)
     for job in jobs:
+        now_str = _now()
         try:
             con.execute(
                 """INSERT INTO jobs
                    (id, job_id, title, company, location, description, url,
-                    salary_min, salary_max, exposure_score, level, source, created_at)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    salary_min, salary_max, exposure_score, level, source, created_at, updated_at, expires_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     uuid.uuid4().hex,
                     str(job.get("job_id", "")),
@@ -82,19 +93,35 @@ def add_jobs(jobs: list[dict]) -> int:
                     job.get("exposure_score"),
                     job.get("level", "mid"),
                     job.get("source", "unknown"),
-                    _now(),
+                    now_str,
+                    now_str,
+                    job.get("expires_at"),
                 ),
             )
             added += 1
         except sqlite3.IntegrityError:
-            # Duplicate based on unique index (company, title, location)
-            pass
+            # Duplicate based on unique index, just update the heartbeat
+            con.execute(
+                "UPDATE jobs SET updated_at = ? WHERE lower(company)=lower(?) AND lower(title)=lower(?) AND lower(location)=lower(?)",
+                (now_str, job.get("company", ""), job.get("title", ""), job.get("location", ""))
+            )
         except Exception as exc:
             logger.error("Failed to insert job %s: %s", job.get("title"), exc)
     
     con.commit()
     con.close()
     return added
+
+def purge_expired_jobs(sync_start: str) -> None:
+    if not _DB_PATH: return
+    con = sqlite3.connect(_DB_PATH)
+    # Purge dynamically synced jobs that haven't been updated in this sync run
+    cur = con.execute("DELETE FROM jobs WHERE source IN ('ats', 'adzuna', 'workable') AND (updated_at < ? OR updated_at IS NULL)", (sync_start,))
+    deleted = cur.rowcount
+    con.commit()
+    con.close()
+    if deleted > 0:
+        logger.info("Purged %d expired jobs that were removed from their source ATS.", deleted)
 
 def get_jobs(
     query: str = "",
@@ -114,6 +141,10 @@ def get_jobs(
     sql = "SELECT * FROM jobs WHERE 1=1"
     params = []
     
+    # Hide statically expired jobs
+    sql += " AND (expires_at IS NULL OR expires_at > ?)"
+    params.append(_now())
+
     if query:
         # Simple LIKE match on title or description
         sql += " AND (lower(title) LIKE ? OR lower(company) LIKE ?)"
