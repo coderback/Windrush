@@ -19,9 +19,10 @@ interface Application {
   created_at: string;
 }
 
-const STATUSES = ["Evaluated", "Applied", "Responded", "Interview", "Offer", "Rejected", "Discarded"];
+const STATUSES = ["Saved", "Evaluated", "Applied", "Responded", "Interview", "Offer", "Rejected", "Discarded"];
 
 const statusStyle: Record<string, string> = {
+  Saved:      "bg-purple-500/20 text-purple-400",
   Evaluated:  "bg-zinc-700 text-zinc-300",
   Applied:    "bg-blue-500/20 text-blue-400",
   Responded:  "bg-amber-500/20 text-amber-400",
@@ -75,7 +76,7 @@ export default function ApplicationTracker() {
           <h1 className="mt-3 text-2xl font-bold" style={{ fontFamily: "Playfair Display, serif" }}>
             Application Tracker
           </h1>
-          <p className="text-sm text-zinc-500 mt-1">{apps.length} application{apps.length !== 1 ? "s" : ""}</p>
+          <p className="text-sm text-zinc-500 mt-1">{apps.length} record{apps.length !== 1 ? "s" : ""}</p>
         </div>
 
         {/* Status filter */}
@@ -99,7 +100,7 @@ export default function ApplicationTracker() {
         {loading ? (
           <p className="text-zinc-500 text-sm">Loading…</p>
         ) : apps.length === 0 ? (
-          <p className="text-zinc-500 text-sm">No applications yet. Start applying from the main app.</p>
+          <p className="text-zinc-500 text-sm">No records found. Start exploring and saving jobs from the feed.</p>
         ) : (
           <div className="overflow-x-auto rounded border border-zinc-800">
             <table className="w-full text-sm">
@@ -135,7 +136,7 @@ export default function ApplicationTracker() {
                       )}
                     </td>
                     <td className="px-4 py-3 text-zinc-400">
-                      {app.composite_score != null
+                      {app.composite_score != null && app.composite_score > 0
                         ? `${Math.round(app.composite_score * 100)}`
                         : "—"}
                     </td>

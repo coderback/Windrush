@@ -1,6 +1,8 @@
 "use client";
 
 import { useRouter } from "next/navigation";
+import { useState } from "react";
+import { authFetch } from "@/app/api";
 
 export interface Job {
   id?: string;
@@ -20,6 +22,7 @@ export interface Job {
   level?: string;
   posted_at?: string;
   created_at?: string;
+  tracker_status?: string;
 }
 
 function formatSalary(min?: number | null, max?: number | null): string | null {
@@ -58,6 +61,9 @@ function timeAgo(dateStr?: string): string | null {
 
 export default function JobCard({ job }: { job: Job }) {
   const router = useRouter();
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(job.tracker_status === "Saved");
+
   const jobId = job.id ?? job.job_id ?? encodeURIComponent(`${job.company}-${job.title}`);
   const salary = job.salary ?? formatSalary(job.salary_min, job.salary_max);
   const badge = levelBadge(job.level);
@@ -72,17 +78,41 @@ export default function JobCard({ job }: { job: Job }) {
     router.push(`/jobs/${encodeURIComponent(jobId)}`);
   };
 
+  const handleSave = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (saved || saving) return;
+    setSaving(true);
+    try {
+      const res = await authFetch("/api/jobs/save", {
+        method: "POST",
+        body: JSON.stringify({ job }),
+      });
+      if (res.ok) setSaved(true);
+    } catch (err) {
+      console.error("Failed to save job:", err);
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
     <div
-      className="group bg-zinc-900/50 border border-zinc-800 hover:border-teal-600/40 rounded-xl p-5 transition-all duration-200 cursor-pointer hover:shadow-lg hover:shadow-teal-900/10"
+      className="group bg-zinc-900/50 border border-zinc-800 hover:border-teal-600/40 rounded-xl p-5 transition-all duration-200 cursor-pointer hover:shadow-lg hover:shadow-teal-900/10 relative"
       onClick={handleClick}
     >
       <div className="flex items-start justify-between gap-3 mb-3">
         <div className="min-w-0 flex-1">
-          <h3 className="text-sm font-semibold text-zinc-100 group-hover:text-teal-300 transition-colors truncate">
-            {job.title}
-          </h3>
-          <p className="text-xs text-zinc-500 mt-0.5">{job.company}</p>
+          <div className="flex items-center gap-2 mb-1">
+            <h3 className="text-sm font-semibold text-zinc-100 group-hover:text-teal-300 transition-colors truncate">
+              {job.title}
+            </h3>
+            {job.tracker_status === "Saved" && (
+              <span className="text-[9px] px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-400 border border-purple-500/30 font-bold uppercase tracking-tight shrink-0">
+                Already Bookmarked
+              </span>
+            )}
+          </div>
+          <p className="text-xs text-zinc-500">{job.company}</p>
         </div>
         <div className="flex flex-col items-end gap-1.5 shrink-0">
           {badge && (
@@ -123,8 +153,19 @@ export default function JobCard({ job }: { job: Job }) {
         <p className="text-xs text-zinc-500 line-clamp-2 mb-4">{job.description}</p>
       )}
 
-      <div className="flex items-center justify-end text-[10px] uppercase tracking-widest font-bold">
-        <span className="text-teal-500 group-hover:underline">View & Apply →</span>
+      <div className="flex items-center justify-between mt-auto">
+        <button
+          onClick={handleSave}
+          disabled={saved || saving}
+          className={`text-[10px] uppercase tracking-widest font-bold transition-colors ${
+            saved ? 'text-zinc-500 cursor-default' : 'text-zinc-400 hover:text-teal-400'
+          }`}
+        >
+          {saving ? "Saving..." : saved ? "✓ Saved" : "Save for Later"}
+        </button>
+        <div className="text-[10px] uppercase tracking-widest font-bold">
+          <span className="text-teal-500 group-hover:underline">View & Apply →</span>
+        </div>
       </div>
     </div>
   );

@@ -540,10 +540,34 @@ async def get_jobs(
     
     persona_vector = await semantic.get_embedding(persona_text)
 
+    # ── Clean Feed Logic ──
+    # Fetch user's active pipeline statuses to filter/badge the feed
+    status_map = tracker.get_user_application_statuses(current_user.id)
+    # Statuses that trigger hiding from the feed
+    HIDE_STATUSES = {"Applied", "Responded", "Interview", "Offer", "Rejected", "Discarded"}
+
+    def process_clean_feed(raw_jobs: list[dict]) -> list[dict]:
+        clean = []
+        for job in raw_jobs:
+            key = (job.get("company", "").lower(), job.get("title", "").lower())
+            status = status_map.get(key)
+            
+            if status in HIDE_STATUSES:
+                continue
+            
+            if status == "Saved":
+                job["tracker_status"] = "Saved"
+            elif status:
+                # Catch-all for other statuses (e.g. Evaluated, Pending Review)
+                job["tracker_status"] = status
+                
+            clean.append(job)
+        return clean
+
     offset = (page - 1) * limit
 
     # Query the local jobs database first
-    jobs = jobs_db.get_jobs(
+    raw_jobs = jobs_db.get_jobs(
         query=effective_query,
         location=effective_location,
         level=level,
@@ -554,12 +578,11 @@ async def get_jobs(
         limit=limit,
         offset=offset,
     )
+    jobs = process_clean_feed(raw_jobs)
 
     # Proactive Infinite Discovery: If we don't have enough local matches for this 
     # specific location/query, trigger a live discovery across external APIs.
-    # We trigger this if we have fewer than 10 results on the first page, 
-    # or if we are at the end of our local results.
-    if (not jobs or len(jobs) < 10) and page == 1:
+    if (not jobs or len(jobs) < 5):
         # Use only the first title or the specific user query for live search
         live_query = query if query else (titles[0] if persona_data.get("preferences", {}).get("target_titles") else "software engineer")
         
@@ -573,8 +596,8 @@ async def get_jobs(
                     j["level"] = _infer_level(j.get("title", ""))
                 jobs_db.add_jobs(live_jobs)
                 
-                # Re-query the database to get the newly added jobs ranked with the old ones
-                jobs = jobs_db.get_jobs(
+                # Re-query and re-filter
+                refreshed_raw = jobs_db.get_jobs(
                     query=effective_query,
                     location=effective_location,
                     level=level,
@@ -585,6 +608,7 @@ async def get_jobs(
                     limit=limit,
                     offset=offset,
                 )
+                jobs = process_clean_feed(refreshed_raw)
 
     return {
         "jobs": jobs,

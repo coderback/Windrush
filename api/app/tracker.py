@@ -223,6 +223,21 @@ def add_application(
         return None
 
 
+def get_user_application_statuses(user_id: str) -> dict[tuple[str, str], str]:
+    """Returns a dict mapping (lower_company, lower_title) -> status."""
+    try:
+        con = sqlite3.connect(_DB_PATH)
+        rows = con.execute(
+            "SELECT lower(company), lower(job_title), status FROM applications WHERE user_id=?", 
+            (user_id,)
+        ).fetchall()
+        con.close()
+        return {(row[0], row[1]): row[2] for row in rows}
+    except Exception as exc:
+        logger.error("get_user_application_statuses failed: %s", exc)
+        return {}
+
+
 def list_applications(user_id: str, status: str | None = None) -> list[dict]:
     try:
         con = sqlite3.connect(_DB_PATH)
