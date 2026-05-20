@@ -504,12 +504,16 @@ async def _fetch_workable(slug: str, company: str, keywords: list[str]) -> list[
     except Exception:
         return []
 
-async def _search_level2_ats_apis(query: str) -> list[dict]:
+async def _search_level2_ats_apis(queries: list[str]) -> list[dict]:
     """
-    Concurrently fetch from Greenhouse, Ashby, and Lever public APIs.
-    Filters each company's listings by query keyword relevance.
+    Concurrently fetch from Greenhouse, Ashby, Lever, and Workable public APIs.
+    Filters each company's listings by query keyword relevance in a single pass.
     """
-    keywords = _query_keywords(query)
+    all_keywords = []
+    for q in queries:
+        all_keywords.extend(_query_keywords(q))
+        
+    keywords = list(set(all_keywords))
     if not keywords:
         return []
 
@@ -526,8 +530,8 @@ async def _search_level2_ats_apis(query: str) -> list[dict]:
         if isinstance(r, list):
             jobs.extend(r)
 
-    logger.info("Level 2 (ATS APIs): %d jobs matched %r across %d companies",
-                len(jobs), query, len(tasks))
+    logger.info("Level 2 (ATS APIs): %d jobs matched against %d keywords across %d companies",
+                len(jobs), len(keywords), len(tasks))
     return jobs
 
 

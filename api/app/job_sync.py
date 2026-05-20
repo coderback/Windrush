@@ -25,31 +25,44 @@ async def sync_jobs():
     queries = [
         "software engineer", 
         "data scientist", 
-        "machine learning engineer", 
+        "machine learning engineer",
+        "ai engineer",
+        "quantitative developer",
         "devops engineer",
         "frontend engineer",
-        "backend engineer"
+        "backend engineer",
+        "full stack engineer",
+        "ios developer",
+        "android developer",
+        "data engineer",
+        "security engineer",
+        "qa engineer",
+        "technology analyst",
+        "cloud engineer"
     ]
     
     all_jobs = []
     
+    logger.info("Syncing Level 2 ATS APIs (Single Pass Extraction)")
+    l2 = await job_searcher._search_level2_ats_apis(queries)
+    for job in l2:
+        job["source"] = "ats"
+    all_jobs.extend(l2)
+    
     for query in queries:
-        logger.info(f"Syncing jobs for query: {query}")
+        logger.info(f"Syncing Level 4 aggregators for query: {query}")
         
-        l2 = await job_searcher._search_level2_ats_apis(query)
         l4 = await job_searcher._search_level4_adzuna(query, "London")
         l4_sf = await job_searcher._search_level4_adzuna(query, "San Francisco")
         
         l4_workable = await job_searcher._search_level4_workable(query, "London, United Kingdom")
         
-        for job in l2:
-            job["source"] = "ats"
         for job in l4 + l4_sf:
             job["source"] = "adzuna"
         for job in l4_workable:
             job["source"] = "workable"
             
-        all_jobs.extend(l2 + l4 + l4_sf + l4_workable)
+        all_jobs.extend(l4 + l4_sf + l4_workable)
 
     logger.info("Syncing jobs from web search (Level 3)")
     l3 = await job_searcher._search_level3_websearch()
