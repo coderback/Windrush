@@ -14,7 +14,7 @@ logger = logging.getLogger("windrush.tracker")
 _DB_PATH: str = ""
 
 VALID_STATUSES = {
-    "Pending Review", "Evaluated", "Applied", "Responded", "Interview", "Offer", "Rejected", "Discarded"
+    "Saved", "Pending Review", "Evaluated", "Applied", "Responded", "Interview", "Offer", "Rejected", "Discarded"
 }
 
 _CREATE_USERS_TABLE = """
@@ -170,12 +170,16 @@ def add_application(
     cover_letter: str,
     score_data: dict,
     tailored_cv: str = "",
+    status: str = "Pending Review",
 ) -> str | None:
     """
     Insert a new application row for a specific user.
     Returns the new id, or None if this (company, job_title) already exists for this user.
     score_data: {composite_score, exposure_score, fit_score, skill_gaps, level_match}
     """
+    if status not in VALID_STATUSES:
+        status = "Pending Review"
+
     app_id = uuid.uuid4().hex
     try:
         con = sqlite3.connect(_DB_PATH)
@@ -195,7 +199,7 @@ def add_application(
                 job.get("company", ""),
                 job.get("location", ""),
                 job.get("url", ""),
-                "Pending Review",
+                status,
                 json.dumps(cv_profile),
                 cover_letter,
                 tailored_cv,

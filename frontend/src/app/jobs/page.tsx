@@ -12,8 +12,7 @@ const LEVEL_OPTIONS = [
 ];
 
 const ROLE_TAGS = {
-  levels: ["junior", "graduate", "senior"],
-  roles: ["software", "ml", "ai", "data", "backend", "frontend", "fullstack", "devops", "security", "analyst"],
+  roles: ["software", "ml", "ai", "data", "backend", "frontend", "fullstack", "devops", "security", "analyst", "engineer", "developer"],
   domains: ["fintech", "startup", "sponsorship", "remote"]
 };
 
@@ -25,21 +24,19 @@ export default function JobsPage() {
   const [hasMore, setHasMore] = useState(true);
   const [page, setPage] = useState(1);
 
-  // Input state (what the user is typing)
+  // Input state
   const [queryInput, setQueryInput] = useState("");
   const [locationInput, setLocationInput] = useState("");
   const [showSuggestions, setShowSuggestions] = useState(false);
 
-  // Hybrid state (tokens + location)
+  // Search state
+  const [committedQuery, setCommittedQuery] = useState("");
   const [committedLocation, setCommittedLocation] = useState("");
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
 
-  // Filter state (discrete selections)
+  // Filter state
   const [level, setLevel] = useState("");
   const [remote, setRemote] = useState(false);
-
-  // Track whether user has actively searched
-  const [activeSearch, setActiveSearch] = useState(false);
 
   const observerRef = useRef<HTMLDivElement | null>(null);
 
@@ -54,7 +51,7 @@ export default function JobsPage() {
 
       try {
         const params = new URLSearchParams();
-        // If we have tags, we send them. If not, the backend uses the persona.
+        if (committedQuery) params.set("query", committedQuery);
         if (selectedTags.length > 0) params.set("tags", selectedTags.join(","));
         if (committedLocation) params.set("location", committedLocation);
         if (level) params.set("level", level);
@@ -80,7 +77,7 @@ export default function JobsPage() {
         setLoadingMore(false);
       }
     },
-    [selectedTags, committedLocation, level, remote]
+    [committedQuery, selectedTags, committedLocation, level, remote]
   );
 
   // Fetch when committed search params or filters change
@@ -113,12 +110,12 @@ export default function JobsPage() {
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
-    if (queryInput.trim()) {
-      addTag(queryInput.trim().toLowerCase());
+    const val = queryInput.trim().toLowerCase();
+    if (val) {
+      addTag(val);
       setQueryInput("");
     }
     setCommittedLocation(locationInput);
-    setActiveSearch(true);
     setPage(1);
   };
 
@@ -136,14 +133,14 @@ export default function JobsPage() {
     setQueryInput("");
     setLocationInput("");
     setCommittedLocation("");
+    setCommittedQuery("");
     setLevel("");
     setRemote(false);
     setSelectedTags([]);
-    setActiveSearch(false);
     setPage(1);
   };
 
-  const allAvailableTags = [...ROLE_TAGS.levels, ...ROLE_TAGS.roles, ...ROLE_TAGS.domains];
+  const allAvailableTags = [...ROLE_TAGS.roles, ...ROLE_TAGS.domains];
 
   return (
     <div className="p-8 max-w-5xl mx-auto">
@@ -156,7 +153,7 @@ export default function JobsPage() {
           Job Feed
         </h1>
         <p className="text-zinc-500 text-sm mt-1">
-          {activeSearch || selectedTags.length > 0
+          {committedQuery || selectedTags.length > 0 || committedLocation || level
             ? "Precision search results"
             : "AI-ranked opportunities for your profile"}
         </p>
@@ -168,7 +165,6 @@ export default function JobsPage() {
           <div className="flex-1 flex flex-wrap items-center gap-2 bg-zinc-900 border border-zinc-800 rounded-lg px-3 min-h-[44px] focus-within:border-teal-500 transition-colors">
             {selectedTags.map(tag => (
               <span key={tag} className={`flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded border uppercase tracking-wider ${
-                ROLE_TAGS.levels.includes(tag) ? 'bg-blue-500/10 border-blue-500/30 text-blue-400' :
                 ROLE_TAGS.roles.includes(tag) ? 'bg-teal-500/10 border-teal-500/30 text-teal-400' :
                 'bg-purple-500/10 border-purple-500/30 text-purple-400'
               }`}>
@@ -181,7 +177,7 @@ export default function JobsPage() {
               onFocus={() => setShowSuggestions(true)}
               onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
               onChange={(e) => setQueryInput(e.target.value)}
-              placeholder={selectedTags.length === 0 ? "Add roles (e.g. Junior, Software, ML)..." : ""}
+              placeholder={selectedTags.length === 0 ? "Add roles (e.g. Software, ML, AI)..." : ""}
               className="flex-1 min-w-[120px] bg-transparent border-none outline-none py-2 text-sm text-zinc-100 placeholder:text-zinc-600"
             />
           </div>
@@ -217,6 +213,22 @@ export default function JobsPage() {
 
       {/* Filters row */}
       <div className="flex flex-wrap items-center gap-3 mb-6">
+        {/* Level filter */}
+        <select
+          value={level}
+          onChange={(e) => {
+            setLevel(e.target.value);
+            setPage(1);
+          }}
+          className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs text-zinc-300 focus:outline-none focus:border-teal-500 transition-colors cursor-pointer"
+        >
+          {LEVEL_OPTIONS.map((opt) => (
+            <option key={opt.value} value={opt.value}>
+              {opt.label}
+            </option>
+          ))}
+        </select>
+
         {/* Remote toggle */}
         <button
           onClick={() => {
@@ -249,7 +261,7 @@ export default function JobsPage() {
         )}
 
         {/* Clear filters (only show when active) */}
-        {(activeSearch || selectedTags.length > 0 || level || remote) && (
+        {(committedQuery || selectedTags.length > 0 || level || remote || committedLocation) && (
           <button
             onClick={clearSearch}
             className="text-xs px-3 py-1.5 rounded-lg border border-zinc-800 text-zinc-500 hover:text-zinc-300 hover:border-zinc-600 transition-colors ml-auto"

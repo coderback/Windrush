@@ -89,30 +89,27 @@ def _normalize_company(name: str) -> str:
     return " ".join(n.split())
 
 def _extract_tags(job: dict) -> str:
-    """Extract categorical tags (Level, Role, Domain) from job title and description."""
+    """Extract categorical tags (Role, Domain) from job title and description."""
     tags = set()
     title = job.get("title", "").lower()
     desc = job.get("description", "").lower()
     text = f"{title} {desc}"
     
-    # 1. Seniority Levels
-    if any(w in title for w in ["junior", "jr", "entry", "associate"]): tags.add("junior")
-    if any(w in title for w in ["graduate", "grad", "intern", "trainee"]): tags.add("graduate")
-    if any(w in title for w in ["senior", "sr", "lead", "principal", "staff", "architect"]): tags.add("senior")
-    
-    # 2. Functional Roles
-    if "software" in title or "developer" in title or "engineer" in title: tags.add("software")
-    if "machine learning" in title or " ml" in title: tags.add("ml")
+    # Functional Roles
+    if "software" in title: tags.add("software")
+    if "engineer" in title: tags.add("engineer")
+    if "developer" in title: tags.add("developer")
+    if "machine learning" in title or " ml" in title or "ml " in title: tags.add("ml")
     if "data" in title: tags.add("data")
-    if "ai " in title or "artificial intelligence" in title or "generative" in title: tags.add("ai")
+    if any(w in title for w in ["ai ", " ai", "artificial intelligence", "generative"]): tags.add("ai")
     if "backend" in title or "back end" in title: tags.add("backend")
     if "frontend" in title or "front end" in title or "react" in title: tags.add("frontend")
     if "fullstack" in title or "full stack" in title: tags.add("fullstack")
-    if "devops" in title or "infrastructure" in title or "sre" in title or "cloud" in title: tags.add("devops")
+    if any(w in title for w in ["devops", "infrastructure", "sre", "cloud"]): tags.add("devops")
     if "security" in title or "cyber" in title: tags.add("security")
     if "analyst" in title: tags.add("analyst")
     
-    # 3. Domains & Traits
+    # Domains & Traits
     if any(w in text for w in ["fintech", "finance", "trading", "quant", "banking"]): tags.add("fintech")
     if any(w in text for w in ["startup", "start-up", "series a", "series b"]): tags.add("startup")
     if any(w in text for w in ["visa", "sponsorship", "relocation"]): tags.add("sponsorship")
@@ -123,9 +120,7 @@ def _extract_tags(job: dict) -> str:
 from . import semantic
 
 def add_jobs(jobs: list[dict]) -> tuple[int, int]:
-    """Insert a list of jobs into the DB, ignoring duplicates.
-    Returns (added_count, updated_count).
-    """
+    """Insert a list of jobs into the DB, ignoring duplicates."""
     added = 0
     updated = 0
     if not _DB_PATH:
@@ -173,8 +168,6 @@ def add_jobs(jobs: list[dict]) -> tuple[int, int]:
             )
             added += 1
         except sqlite3.IntegrityError:
-            # Duplicate based on unique index, just update the heartbeat and tags
-            # Also update the vector if it was missing
             con.execute(
                 """UPDATE jobs SET updated_at = ?, tags = ?, 
                    semantic_vector = COALESCE(semantic_vector, ?) 
@@ -192,7 +185,6 @@ def add_jobs(jobs: list[dict]) -> tuple[int, int]:
 def purge_expired_jobs(sync_start: str) -> None:
     if not _DB_PATH: return
     con = sqlite3.connect(_DB_PATH)
-    # Purge dynamically synced jobs that haven't been updated in this sync run
     cur = con.execute("DELETE FROM jobs WHERE source IN ('ats', 'adzuna', 'workable') AND (updated_at < ? OR updated_at IS NULL)", (sync_start,))
     deleted = cur.rowcount
     con.commit()
@@ -217,95 +209,83 @@ def get_jobs(
     con = sqlite3.connect(_DB_PATH)
     con.row_factory = sqlite3.Row
     
+    # Categorise tags for Collection (OR) logic within Role group
+    # Level is now handled by the separate dropdown, not by tags.
+    s_roles = {"software", "ml", "ai", "data", "backend", "frontend", "fullstack", "devops", "security", "analyst", "engineer", "developer"}
+    
+    active_roles = []
+    active_others = []
+    
+    if tags:
+        for t in tags:
+            t_low = t.lower()
+            if t_low in s_roles: active_roles.append(t_low)
+            else: active_others.append(t_low)
+
     sql = "SELECT * FROM jobs WHERE 1=1"
     params = []
-    
-    # Hide statically expired jobs
     sql += " AND (expires_at IS NULL OR expires_at > ?)"
     params.append(_now())
 
-    # Only use LIKE if no semantic search is being performed or if specific keywords are provided
-    if query and not persona_vector:
-        sql += " AND (lower(title) LIKE ? OR lower(company) LIKE ?)"
-        q = f"%{query.lower()}%"
-        params.extend([q, q])
-        
-    if tags:
-        for tag in tags:
-            sql += " AND lower(tags) LIKE ?"
-            params.append(f"%\"{tag.lower()}\"%")
+    # LEVEL and LOCATION remain strict "Hard Filters" (Deal-breakers)
+    if level:
+        sql += " AND lower(level) = ?"
+        params.append(level.lower())
     
     if location:
         loc_lower = location.lower().strip()
         if "london" in loc_lower and "uk" in loc_lower:
             sql += " AND lower(location) NOT LIKE '%ontario%' AND lower(location) NOT LIKE '%new london%'"
-            
+        
         if loc_lower == "remote" or remote:
             sql += " AND (lower(location) LIKE '%remote%' OR lower(location) LIKE '%anywhere%' OR lower(location) LIKE '%telecommute%')"
         else:
             loc_clause = ""
             if loc_lower in ["uk", "united kingdom", "gb", "great britain"]:
                 loc_clause = "(lower(location) LIKE '%uk%' OR lower(location) LIKE '%united kingdom%' OR lower(location) LIKE '%england%' OR lower(location) LIKE '%london%' OR lower(location) LIKE '%bristol%' OR lower(location) LIKE '%manchester%' OR lower(location) LIKE '%birmingham%' OR lower(location) LIKE '%leeds%' OR lower(location) LIKE '%scotland%' OR lower(location) LIKE '%edinburgh%' OR lower(location) LIKE '%glasgow%' OR lower(location) LIKE '%wales%' OR lower(location) LIKE '%cardiff%' OR lower(location) LIKE '%northern ireland%' OR lower(location) LIKE '%belfast%')"
-            elif loc_lower in ["england"]:
-                loc_clause = "(lower(location) LIKE '%england%' OR lower(location) LIKE '%london%' OR lower(location) LIKE '%bristol%' OR lower(location) LIKE '%manchester%' OR lower(location) LIKE '%birmingham%' OR lower(location) LIKE '%leeds%' OR lower(location) LIKE '%liverpool%' OR lower(location) LIKE '%newcastle%')"
             elif loc_lower in ["us", "usa", "united states", "america"]:
-                loc_clause = "(lower(location) LIKE '%us%' OR lower(location) LIKE '%usa%' OR lower(location) LIKE '%united states%' OR lower(location) LIKE '%new york%' OR lower(location) LIKE '%san francisco%' OR lower(location) LIKE '%california%' OR lower(location) LIKE '%seattle%' OR lower(location) LIKE '%texas%' OR lower(location) LIKE '%boston%')"
+                loc_clause = "(lower(location) LIKE '%us%' OR lower(location) LIKE '%usa%' OR lower(location) LIKE '%united states%' OR lower(location) LIKE '%new york%' OR lower(location) LIKE '%san francisco%' OR lower(location) LIKE '%california%' OR lower(location) LIKE '%seattle%')"
             else:
-                loc_clause = f"(lower(location) LIKE ?)"
+                loc_clause = "(lower(location) LIKE ?)"
                 params.append(f"%{loc_lower}%")
             
             if remote:
-                sql += f" AND ({loc_clause} OR lower(location) LIKE '%remote%' OR lower(location) LIKE '%anywhere%')"
+                sql += f" AND ({loc_clause} OR lower(location) LIKE '%remote%')"
             else:
                 sql += f" AND {loc_clause}"
 
-    elif remote:
-        sql += " AND (lower(location) LIKE '%remote%' OR lower(location) LIKE '%anywhere%' OR lower(location) LIKE '%telecommute%')"
-        
-    if level:
-        sql += " AND lower(level) = ?"
-        params.append(level.lower())
-        
-    if category:
-        sql += " AND lower(title) LIKE ?"
-        params.append(f"%{category.lower()}%")
-    
-    # If persona_vector is present, we pull all candidates and rank in Python
-    # Otherwise we use created_at for ranking
-    if not persona_vector:
-        sql += " ORDER BY created_at DESC LIMIT ? OFFSET ?"
-        params.extend([limit, offset])
-        rows = con.execute(sql, params).fetchall()
-        con.close()
-        return [dict(row) for row in rows]
-    else:
-        # Pull more candidates to allow for ranking and filtering
-        # We cap at 200 to keep it fast
-        rows = con.execute(sql, params).fetchall()
-        con.close()
-        
-        candidates = []
-        for row in rows:
-            job = dict(row)
-            sim = 0.0
-            if job.get("semantic_vector"):
-                try:
-                    job_v = np.frombuffer(job["semantic_vector"], dtype=np.float32).tolist()
-                    sim = semantic.cosine_similarity(persona_vector, job_v)
-                except Exception as e:
-                    logger.debug(f"Failed to calculate similarity: {e}")
-            
-            # Semantic Floor: drop jobs that are totally unrelated
-            # 0.35 is a good threshold for dense embeddings
-            if sim >= 0.35:
-                job["semantic_score"] = round(sim, 3)
-                candidates.append(job)
-        
-        # Sort by semantic score descending
-        candidates.sort(key=lambda x: x.get("semantic_score", 0), reverse=True)
-        
-        return candidates[offset : offset + limit]
+    # Roles and Domains are now "Semantic Interests" handled in Python ranking,
+    # so we no longer apply them in SQL.
 
+    # To keep semantic search snappy but accurate, we pull more than the limit 
+    # then rank and return the page. Capping at 500 for performance.
+    fetch_limit = 500 if persona_vector else limit + offset
+    sql += f" LIMIT {fetch_limit}"
+
+    rows = con.execute(sql, params).fetchall()
+    con.close()
+    
+    candidates = []
+    for row in rows:
+        job = dict(row)
+        sim = 0.0
+        if persona_vector and job.get("semantic_vector"):
+            try:
+                job_v = np.frombuffer(job["semantic_vector"], dtype=np.float32).tolist()
+                sim = semantic.cosine_similarity(persona_vector, job_v)
+            except: pass
+            
+        job.pop("semantic_vector", None)
+        job["semantic_score"] = round(sim, 3)
+        candidates.append(job)
+
+    # Sort and Limit
+    if persona_vector:
+        candidates.sort(key=lambda x: x.get("semantic_score", 0), reverse=True)
+    else:
+        candidates.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+        
+    return candidates[offset : offset + limit]
 
 def job_count() -> int:
     """Return the total number of jobs in the database."""

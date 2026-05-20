@@ -445,6 +445,37 @@ async def update_application_status(
     return {"id": app_id, "status": status, "updated": True}
 
 
+@app.post("/jobs/save")
+async def save_job(
+    body: dict,
+    current_user: Annotated[auth.User, Depends(auth.get_current_user)],
+):
+    """Bookmark a job for later by adding it to the tracker with 'Saved' status."""
+    job = body.get("job", {})
+    if not job:
+        raise HTTPException(status_code=400, detail="Job data is required")
+    
+    # We use empty defaults for profile/scores since the job hasn't been analysed yet
+    app_id = tracker.add_application(
+        user_id=current_user.id,
+        job=job,
+        cv_profile={},
+        cover_letter="",
+        score_data={
+            "composite_score": 0.0,
+            "exposure_score": 0.5,
+            "fit_score": 0.0,
+            "skill_gaps": [],
+            "level_match": "ok"
+        },
+        status="Saved"
+    )
+    
+    if app_id:
+        return {"id": app_id, "status": "Saved"}
+    return {"status": "duplicate", "message": "This job is already in your tracker."}
+
+
 # ── Onboarding ────────────────────────────────────────────────────────────────
 
 @app.get("/onboarding/status")
@@ -477,37 +508,37 @@ async def get_jobs(
     """Return job listings for the job feed with pagination and filtering."""
     tag_list = [t.strip() for t in tags.split(",")] if tags else []
 
-    # If no query, derive defaults from user persona
-    effective_query = query
-    effective_location = location
-    persona_vector = None
-    
-    # We always pull the persona to get preferences and potentially for semantic search
+    # Always pull the persona to get preferences and for semantic search
     persona_data = tracker.get_user_persona(current_user.id)
     
+    effective_query = query
+    effective_location = location
+
     if not effective_query:
         prefs = persona_data.get("preferences", {})
         titles = prefs.get("target_titles", [])
-        
         # Join multiple target titles for a broader default search
         effective_query = " ".join(titles) if titles else ""
         
         locs = prefs.get("preferred_locations", [])
         if not effective_location:
             effective_location = locs[0] if locs else ""
-            
-        # Automatically add persona skills as tags if no tags are provided
-        if not tag_list:
-            for skill_cat in persona_data.get("skills", []):
-                for skill in skill_cat.get("skills", []):
-                    if skill.lower() in ["python", "java", "typescript", "javascript", "c++", "rust", "go", "react", "aws"]:
-                        tag_list.append(skill.lower())
 
-    # Generate semantic vector for the persona to enable semantic ranking
-    # We do this if no explicit keyword query is provided (or we could do it always)
-    if not query:
-        persona_text = semantic.vectorize_persona(persona_data)
-        persona_vector = await semantic.get_embedding(persona_text)
+    # Generate semantic vector that combines Persona + current search query/tags
+    # This "Interest-Weighted" vector ensures the AI prioritizes both who you are AND what you want.
+    persona_text = semantic.vectorize_persona(persona_data)
+    
+    # Merge explicit keywords and tags into a single semantic intent block
+    intent_parts = []
+    if query: intent_parts.append(query)
+    if tag_list: intent_parts.extend(tag_list)
+    
+    if intent_parts:
+        intent_str = ", ".join(intent_parts)
+        # Boost the query by repeating it in the text
+        persona_text = f"Current user interest: {intent_str}. Specific focus: {intent_str}. {persona_text}"
+    
+    persona_vector = await semantic.get_embedding(persona_text)
 
     offset = (page - 1) * limit
 
@@ -524,28 +555,36 @@ async def get_jobs(
         offset=offset,
     )
 
-    # Fallback: only trigger live scraping when the DB is completely empty
-    # (i.e. first boot). If the DB has jobs but this query returned 0, that's
-    # just a filter miss — don't hammer external APIs for every empty search.
-    if not jobs and page == 1 and jobs_db.job_count() == 0:
-        # Use only the first title for live search to keep it focused
-        live_query = titles[0] if not query and titles else (effective_query or "software engineer")
-        live_jobs = await search_jobs(live_query, effective_location or "London")
-        # Persist them for future queries
-        for j in live_jobs:
-            j["source"] = j.get("source", "live")
-            j["level"] = _infer_level(j.get("title", ""))
-        jobs_db.add_jobs(live_jobs)
-        jobs = jobs_db.get_jobs(
-            query=effective_query,
-            location=effective_location,
-            level=level,
-            category=category,
-            remote=remote,
-            tags=tag_list,
-            limit=limit,
-            offset=offset,
-        )
+    # Proactive Infinite Discovery: If we don't have enough local matches for this 
+    # specific location/query, trigger a live discovery across external APIs.
+    # We trigger this if we have fewer than 10 results on the first page, 
+    # or if we are at the end of our local results.
+    if (not jobs or len(jobs) < 10) and page == 1:
+        # Use only the first title or the specific user query for live search
+        live_query = query if query else (titles[0] if persona_data.get("preferences", {}).get("target_titles") else "software engineer")
+        
+        # Don't trigger if the query is just a single character (e.g. typing)
+        if len(live_query) > 2:
+            live_jobs = await search_jobs(live_query, effective_location or "London")
+            if live_jobs:
+                # Persist them for future queries
+                for j in live_jobs:
+                    j["source"] = j.get("source", "live")
+                    j["level"] = _infer_level(j.get("title", ""))
+                jobs_db.add_jobs(live_jobs)
+                
+                # Re-query the database to get the newly added jobs ranked with the old ones
+                jobs = jobs_db.get_jobs(
+                    query=effective_query,
+                    location=effective_location,
+                    level=level,
+                    category=category,
+                    remote=remote,
+                    tags=tag_list,
+                    persona_vector=persona_vector,
+                    limit=limit,
+                    offset=offset,
+                )
 
     return {
         "jobs": jobs,
