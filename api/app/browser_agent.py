@@ -7,8 +7,8 @@ from typing import AsyncGenerator
 from playwright.async_api import Page
 
 _BACKEND = os.environ.get("LLM_BACKEND", "ollama").lower()
-_OLLAMA_HOST  = os.environ.get("OLLAMA_HOST",  "http://localhost:11434")
-_OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "gemma4:latest")
+_OLLAMA_HOST  = os.environ.get("OLLAMA_HOST",  "http://ollama:11434")
+_OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen3.5:9b")
 
 try:
     from browser_use import Agent, BrowserSession, BrowserProfile

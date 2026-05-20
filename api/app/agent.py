@@ -37,9 +37,9 @@ if _BACKEND == "groq":
     AGENT_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"
     LLM_MODEL   = "meta-llama/llama-4-scout-17b-16e-instruct"
 else:
-    # Ollama — local Gemma 4
-    _OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
-    _OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "gemma4:latest")
+    # Ollama — local Qwen 3.5 9B
+    _OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://ollama:11434")
+    _OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen3.5:9b")
     client = AsyncOpenAI(
         api_key="ollama",                        # Ollama ignores the key but requires a value
         base_url=f"{_OLLAMA_HOST}/v1",

@@ -4,8 +4,10 @@ SQLite-backed job database for Windrush job feed.
 import json
 import logging
 import os
+import re
 import sqlite3
 import uuid
+import numpy as np
 from datetime import datetime, timezone
 
 logger = logging.getLogger("windrush.jobs_db")
@@ -87,34 +89,34 @@ def _normalize_company(name: str) -> str:
     return " ".join(n.split())
 
 def _extract_tags(job: dict) -> str:
-    """Extract standard tags from job title and description."""
+    """Extract categorical tags (Level, Role, Domain) from job title and description."""
     tags = set()
-    text = (job.get("title", "") + " " + job.get("description", "")).lower()
+    title = job.get("title", "").lower()
+    desc = job.get("description", "").lower()
+    text = f"{title} {desc}"
     
-    # Tech stack
-    if "python" in text: tags.add("python")
-    if "java " in text or "java," in text: tags.add("java")
-    if "typescript" in text or "ts" in text: tags.add("typescript")
-    if "javascript" in text or "js" in text: tags.add("javascript")
-    if "c++" in text: tags.add("c++")
-    if "rust" in text: tags.add("rust")
-    if "go " in text or "golang" in text: tags.add("go")
-    if "react" in text: tags.add("react")
-    if "aws" in text: tags.add("aws")
+    # 1. Seniority Levels
+    if any(w in title for w in ["junior", "jr", "entry", "associate"]): tags.add("junior")
+    if any(w in title for w in ["graduate", "grad", "intern", "trainee"]): tags.add("graduate")
+    if any(w in title for w in ["senior", "sr", "lead", "principal", "staff", "architect"]): tags.add("senior")
     
-    # Traits
-    if any(w in text for w in ["remote", "work from home", "telecommute", "anywhere"]):
-        tags.add("remote")
-    if any(w in text for w in ["visa", "sponsorship", "relocation"]):
-        tags.add("sponsorship")
-    if any(w in text for w in ["startup", "start-up"]):
-        tags.add("startup")
+    # 2. Functional Roles
+    if "software" in title or "developer" in title or "engineer" in title: tags.add("software")
+    if "machine learning" in title or " ml" in title: tags.add("ml")
+    if "data" in title: tags.add("data")
+    if "ai " in title or "artificial intelligence" in title or "generative" in title: tags.add("ai")
+    if "backend" in title or "back end" in title: tags.add("backend")
+    if "frontend" in title or "front end" in title or "react" in title: tags.add("frontend")
+    if "fullstack" in title or "full stack" in title: tags.add("fullstack")
+    if "devops" in title or "infrastructure" in title or "sre" in title or "cloud" in title: tags.add("devops")
+    if "security" in title or "cyber" in title: tags.add("security")
+    if "analyst" in title: tags.add("analyst")
     
-    # Domains
-    if any(w in text for w in ["fintech", "finance", "trading", "quant"]):
-        tags.add("fintech")
-    if any(w in text for w in ["healthtech", "healthcare", "medical"]):
-        tags.add("healthtech")
+    # 3. Domains & Traits
+    if any(w in text for w in ["fintech", "finance", "trading", "quant", "banking"]): tags.add("fintech")
+    if any(w in text for w in ["startup", "start-up", "series a", "series b"]): tags.add("startup")
+    if any(w in text for w in ["visa", "sponsorship", "relocation"]): tags.add("sponsorship")
+    if any(w in text for w in ["remote", "work from home", "telecommute", "anywhere"]): tags.add("remote")
     
     return json.dumps(list(tags))
 

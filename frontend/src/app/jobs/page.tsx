@@ -11,10 +11,11 @@ const LEVEL_OPTIONS = [
   { label: "Senior+", value: "senior" },
 ];
 
-const JOB_TAGS = [
-  "python", "java", "typescript", "javascript", "c++", "rust", "go", "react", "aws",
-  "remote", "sponsorship", "startup", "fintech", "healthtech"
-];
+const ROLE_TAGS = {
+  levels: ["junior", "graduate", "senior"],
+  roles: ["software", "ml", "ai", "data", "backend", "frontend", "fullstack", "devops", "security", "analyst"],
+  domains: ["fintech", "startup", "sponsorship", "remote"]
+};
 
 export default function JobsPage() {
   const [jobs, setJobs] = useState<Job[]>([]);
@@ -24,18 +25,18 @@ export default function JobsPage() {
   const [hasMore, setHasMore] = useState(true);
   const [page, setPage] = useState(1);
 
-  // Input state (what the user is typing — does NOT trigger fetches)
+  // Input state (what the user is typing)
   const [queryInput, setQueryInput] = useState("");
   const [locationInput, setLocationInput] = useState("");
+  const [showSuggestions, setShowSuggestions] = useState(false);
 
-  // Committed search state (only updated on form submit — triggers fetches)
-  const [committedQuery, setCommittedQuery] = useState("");
+  // Hybrid state (tokens + location)
   const [committedLocation, setCommittedLocation] = useState("");
+  const [selectedTags, setSelectedTags] = useState<string[]>([]);
 
-  // Filter state (discrete selections — trigger fetches immediately)
+  // Filter state (discrete selections)
   const [level, setLevel] = useState("");
   const [remote, setRemote] = useState(false);
-  const [selectedTags, setSelectedTags] = useState<string[]>([]);
 
   // Track whether user has actively searched
   const [activeSearch, setActiveSearch] = useState(false);
@@ -53,11 +54,11 @@ export default function JobsPage() {
 
       try {
         const params = new URLSearchParams();
-        if (committedQuery) params.set("query", committedQuery);
+        // If we have tags, we send them. If not, the backend uses the persona.
+        if (selectedTags.length > 0) params.set("tags", selectedTags.join(","));
         if (committedLocation) params.set("location", committedLocation);
         if (level) params.set("level", level);
         if (remote) params.set("remote", "true");
-        if (selectedTags.length > 0) params.set("tags", selectedTags.join(","));
         params.set("page", String(pageNum));
         params.set("limit", "20");
 
@@ -79,7 +80,7 @@ export default function JobsPage() {
         setLoadingMore(false);
       }
     },
-    [committedQuery, committedLocation, level, remote, selectedTags]
+    [selectedTags, committedLocation, level, remote]
   );
 
   // Fetch when committed search params or filters change
@@ -112,23 +113,28 @@ export default function JobsPage() {
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
-    setCommittedQuery(queryInput);
+    if (queryInput.trim()) {
+      addTag(queryInput.trim().toLowerCase());
+      setQueryInput("");
+    }
     setCommittedLocation(locationInput);
     setActiveSearch(true);
     setPage(1);
   };
 
-  const toggleTag = (tag: string) => {
-    setSelectedTags(prev => 
-      prev.includes(tag) ? prev.filter(t => t !== tag) : [...prev, tag]
-    );
-    setPage(1);
+  const addTag = (tag: string) => {
+    if (!selectedTags.includes(tag)) {
+      setSelectedTags(prev => [...prev, tag]);
+    }
+  };
+
+  const removeTag = (tag: string) => {
+    setSelectedTags(prev => prev.filter(t => t !== tag));
   };
 
   const clearSearch = () => {
     setQueryInput("");
     setLocationInput("");
-    setCommittedQuery("");
     setCommittedLocation("");
     setLevel("");
     setRemote(false);
@@ -136,6 +142,8 @@ export default function JobsPage() {
     setActiveSearch(false);
     setPage(1);
   };
+
+  const allAvailableTags = [...ROLE_TAGS.levels, ...ROLE_TAGS.roles, ...ROLE_TAGS.domains];
 
   return (
     <div className="p-8 max-w-5xl mx-auto">
@@ -148,72 +156,67 @@ export default function JobsPage() {
           Job Feed
         </h1>
         <p className="text-zinc-500 text-sm mt-1">
-          {activeSearch
-            ? "Search results"
-            : "Opportunities tailored to your profile"}
+          {activeSearch || selectedTags.length > 0
+            ? "Precision search results"
+            : "AI-ranked opportunities for your profile"}
         </p>
       </div>
 
-      {/* Search bar — only fires on submit, NOT on each keystroke */}
-      <form onSubmit={handleSearch} className="flex gap-2 mb-4">
-        <input
-          value={queryInput}
-          onChange={(e) => setQueryInput(e.target.value)}
-          placeholder="Job title, company, or keywords"
-          className="flex-1 bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-2.5 text-sm text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:border-teal-500 transition-colors"
-        />
-        <input
-          value={locationInput}
-          onChange={(e) => setLocationInput(e.target.value)}
-          placeholder="City or region"
-          className="w-44 bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-2.5 text-sm text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:border-teal-500 transition-colors"
-        />
-        <button
-          type="submit"
-          className="px-5 py-2.5 bg-white text-black text-sm font-bold rounded-lg hover:bg-zinc-200 transition-colors"
-        >
-          Search
-        </button>
-      </form>
+      {/* Tokenized Search Bar */}
+      <div className="relative mb-4">
+        <form onSubmit={handleSearch} className="flex gap-2">
+          <div className="flex-1 flex flex-wrap items-center gap-2 bg-zinc-900 border border-zinc-800 rounded-lg px-3 min-h-[44px] focus-within:border-teal-500 transition-colors">
+            {selectedTags.map(tag => (
+              <span key={tag} className={`flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded border uppercase tracking-wider ${
+                ROLE_TAGS.levels.includes(tag) ? 'bg-blue-500/10 border-blue-500/30 text-blue-400' :
+                ROLE_TAGS.roles.includes(tag) ? 'bg-teal-500/10 border-teal-500/30 text-teal-400' :
+                'bg-purple-500/10 border-purple-500/30 text-purple-400'
+              }`}>
+                {tag}
+                <button type="button" onClick={() => removeTag(tag)} className="hover:text-white ml-0.5">✕</button>
+              </span>
+            ))}
+            <input
+              value={queryInput}
+              onFocus={() => setShowSuggestions(true)}
+              onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
+              onChange={(e) => setQueryInput(e.target.value)}
+              placeholder={selectedTags.length === 0 ? "Add roles (e.g. Junior, Software, ML)..." : ""}
+              className="flex-1 min-w-[120px] bg-transparent border-none outline-none py-2 text-sm text-zinc-100 placeholder:text-zinc-600"
+            />
+          </div>
+          <input
+            value={locationInput}
+            onChange={(e) => setLocationInput(e.target.value)}
+            placeholder="City or region"
+            className="w-44 bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-2.5 text-sm text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:border-teal-500 transition-colors"
+          />
+          <button
+            type="submit"
+            className="px-5 py-2.5 bg-white text-black text-sm font-bold rounded-lg hover:bg-zinc-200 transition-colors shrink-0"
+          >
+            Search
+          </button>
+        </form>
 
-      {/* Tags selector */}
-      <div className="flex flex-wrap gap-1.5 mb-4">
-        {JOB_TAGS.map(tag => {
-          const isSelected = selectedTags.includes(tag);
-          return (
-            <button
-              key={tag}
-              onClick={() => toggleTag(tag)}
-              className={`text-[10px] px-2 py-1 rounded border uppercase tracking-wider transition-colors ${
-                isSelected 
-                  ? "bg-teal-500/20 border-teal-500/40 text-teal-300" 
-                  : "bg-zinc-900 border-zinc-800 text-zinc-500 hover:border-zinc-700"
-              }`}
-            >
-              #{tag}
-            </button>
-          );
-        })}
+        {/* Tag Suggestions */}
+        {showSuggestions && queryInput.length > 0 && (
+          <div className="absolute z-10 left-0 right-0 mt-2 bg-zinc-900 border border-zinc-800 rounded-lg shadow-xl p-2 flex flex-wrap gap-2">
+            {allAvailableTags.filter(t => t.includes(queryInput.toLowerCase()) && !selectedTags.includes(t)).map(tag => (
+              <button
+                key={tag}
+                onClick={() => { addTag(tag); setQueryInput(""); setShowSuggestions(false); }}
+                className="text-[10px] px-2 py-1 rounded border border-zinc-700 bg-zinc-800 text-zinc-300 hover:border-teal-500 hover:text-teal-400 uppercase tracking-wider"
+              >
+                +{tag}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Filters row */}
       <div className="flex flex-wrap items-center gap-3 mb-6">
-        {/* Level filter */}
-        <select
-          value={level}
-          onChange={(e) => {
-            setLevel(e.target.value);
-            setPage(1);
-          }}
-          className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs text-zinc-300 focus:outline-none focus:border-teal-500 transition-colors cursor-pointer"
-        >
-          {LEVEL_OPTIONS.map((opt) => (
-            <option key={opt.value} value={opt.value}>
-              {opt.label}
-            </option>
-          ))}
-        </select>
-
         {/* Remote toggle */}
         <button
           onClick={() => {
@@ -228,6 +231,22 @@ export default function JobsPage() {
         >
           🌍 Remote
         </button>
+
+        {/* Role Suggestion Quick-Chips (Only show when input is empty) */}
+        {!queryInput && (
+          <div className="flex flex-wrap gap-2 items-center">
+            <span className="text-[10px] text-zinc-600 uppercase tracking-widest font-bold ml-2">Quick Add:</span>
+            {allAvailableTags.slice(0, 8).filter(t => !selectedTags.includes(t)).map(tag => (
+              <button
+                key={tag}
+                onClick={() => addTag(tag)}
+                className="text-[9px] px-2 py-0.5 rounded border border-zinc-800 bg-zinc-950 text-zinc-500 hover:border-zinc-600 transition-colors uppercase tracking-tight"
+              >
+                {tag}
+              </button>
+            ))}
+          </div>
+        )}
 
         {/* Clear filters (only show when active) */}
         {(activeSearch || selectedTags.length > 0 || level || remote) && (
