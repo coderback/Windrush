@@ -37,9 +37,9 @@ if _BACKEND == "groq":
     AGENT_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"
     LLM_MODEL   = "meta-llama/llama-4-scout-17b-16e-instruct"
 else:
-    # Ollama — local Qwen 3.5 9B
+    # Ollama — local Qwen 3.5 4B
     _OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://ollama:11434")
-    _OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen3.5:9b")
+    _OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen3.5:4b")
     client = AsyncOpenAI(
         api_key="ollama",                        # Ollama ignores the key but requires a value
         base_url=f"{_OLLAMA_HOST}/v1",
@@ -438,7 +438,11 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
 
     elif name == "score_ai_risk":
         skills = tool_input.get("skills", [])
-        results = []
+        if not skills:
+            return {"skill_risks": []}
+
+        # First, get raw scores from our index/hardcoded list
+        raw_results = []
         for skill in skills:
             key = skill.lower().strip()
             if key in _HARDCODED_EXPOSURE:
@@ -447,14 +451,32 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
                 data = lookup_by_title(skill)
                 raw = data.get("overall_exposure", 0.0)
                 exposure = round(raw, 2) if raw and raw != 0.5 else 0.55
-            pct = round(exposure * 100)
-            risk_label = "High" if exposure >= 0.65 else ("Medium" if exposure >= 0.35 else "Low")
-            results.append({
+            
+            raw_results.append({
                 "skill": skill,
-                "exposure_score": pct,
-                "risk_label": risk_label,
+                "exposure_score": round(exposure * 100),
+                "risk_label": "High" if exposure >= 0.65 else ("Medium" if exposure >= 0.35 else "Low")
             })
-        return {"skill_risks": results}
+
+        # Use LLM to generate reasoning for these scores
+        text = await _llm(
+            system=(
+                "You are an AI workforce expert. Provide a concise, one-sentence reasoning for the AI exposure risk of each skill. "
+                "Focus on why the skill is either easily automated or requires human-centric reasoning/physicality. "
+                "Return ONLY valid JSON with a 'skill_risks' array. "
+                "Each object MUST have: skill, exposure_score, risk_label, and reasoning. "
+                "Keep the scores/labels from the input, just add reasoning. "
+                "Output ONLY JSON."
+            ),
+            user=f"Skills and Scores: {json.dumps(raw_results)}",
+            max_tokens=2048,
+        )
+
+        text = text.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+        try:
+            return json.loads(text or f'{{"skill_risks": {json.dumps(raw_results)}}}')
+        except json.JSONDecodeError:
+            return {"skill_risks": raw_results}
 
     elif name == "search_jobs":
         jobs = await search_jobs(tool_input.get("query", ""), tool_input.get("location", "London"))
@@ -488,89 +510,51 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
         return {"results": results, "jobs": jobs, "count": len(jobs)}
 
     elif name == "score_job_fit":
-        import re as _re
         jobs = tool_input.get("jobs", [])
         persona = tool_input.get("persona", {})
+
+        if not jobs:
+            return {"ranked_jobs": []}
+
+        # Use LLM for deep semantic analysis instead of keyword counting
+        text = await _llm(
+            system=(
+                "You are an expert technical recruiter and career advisor. "
+                "Analyse the conceptual alignment between the candidate's Persona and the provided Job Descriptions. "
+                "Return ONLY valid JSON with a 'ranked_jobs' array containing objects for each job. "
+                "Each object MUST have: "
+                "1. job_id: (string, from the input), "
+                "2. fit_score: (integer 0-100, based on responsibility overlap and skill alignment), "
+                "3. level_match: (string: 'strong', 'ok', or 'reach' based on seniority alignment), "
+                "4. matched_skills: (array of strings, key strengths user has for THIS role), "
+                "5. skill_gaps: (array of strings, specific areas for growth or missing domain knowledge), "
+                "6. reasoning: (string, 1-sentence justification for the score). "
+                "STRICT RULES: Do NOT match literally; use semantic reasoning (e.g., 'Distributed Systems' matches 'High-Frequency Trading'). "
+                "Identify 'Reach' roles accurately if seniority is a jump. "
+                "Output ONLY the JSON, no markdown."
+            ),
+            user=(
+                f"Candidate Persona: {json.dumps(persona)}\n\n"
+                f"Jobs to Analyse: {json.dumps(jobs[:5])}"
+            ),
+            max_tokens=2048,
+        )
         
-        # Correctly extract skills from categorized structure
-        cv_skills = set()
-        skills_input = persona.get("skills", [])
-        for item in skills_input:
-            if isinstance(item, dict):
-                for s in item.get("skills", []):
-                    cv_skills.add(s.lower())
-            elif isinstance(item, str):
-                cv_skills.add(item.lower())
-
-        # Infer years from history
-        cv_years = 0.0
-        # If persona is the new structure
-        if "core_info" in persona:
-             # Basic inference or use a stored field if we add it
-             # For now, let's just use the skills and history
-             pass
-        
-        # Skill vocabulary for gap detection — reuse existing hardcoded keys
-        _skill_vocab = set(_HARDCODED_EXPOSURE.keys())
-
-        def _level_match(title: str, desc: str) -> tuple[str, float]:
-            """Infer required experience and return (match_label, level_bonus)."""
-            required = 0.0
-            # Infer from title seniority words
-            title_l = title.lower()
-            if any(w in title_l for w in ("senior", "sr.")):
-                required = 3.0
-            elif any(w in title_l for w in ("lead", "principal", "staff")):
-                required = 5.0
-            elif any(w in title_l for w in ("graduate", "junior", "jr.", "entry")):
-                required = 0.0
-            # Override with explicit years mention in description
-            matches = _re.findall(r"(\d+)\+?\s*(?:years?|yrs?)", desc, _re.I)
-            if matches:
-                required = max(float(m) for m in matches)
-            if cv_years >= required:
-                return "strong", 1.0
-            elif cv_years >= required - 1:
-                return "ok", 0.6
-            else:
-                return "reach", 0.2
-
-        def _skill_gaps(desc: str) -> list[str]:
-            desc_l = desc.lower()
-            gaps = [
-                skill for skill in _skill_vocab
-                if skill in desc_l and skill not in cv_skills
-            ]
-            return gaps[:6]
-
-        scored = []
-        for job in jobs:
-            exposure = job.get("exposure_score", 0.5)
-            desc = job.get("description", "")
-            desc_lower = desc.lower()
-            matched = [s for s in cv_skills if s in desc_lower]
-            skill_matches = len(matched)
-            fit_score = min(skill_matches / max(len(cv_skills), 1), 1.0)
-            level, level_bonus = _level_match(job.get("title", ""), desc)
-            gaps = _skill_gaps(desc)
-            composite = (1 - exposure) * 0.35 + fit_score * 0.45 + level_bonus * 0.20
-            scored.append({
-                "job_id": job.get("job_id"),
-                "title": job.get("title"),
-                "company": job.get("company"),
-                "location": job.get("location"),
-                "url": job.get("url"),
-                "description": desc,
-                "exposure_score": exposure,
-                "fit_score": round(fit_score * 100),
-                "level_match": level,
-                "skill_gaps": gaps,
-                "matched_skills": sorted(matched)[:10],
-                "composite_score": round(composite, 2),
-            })
-
-        scored.sort(key=lambda j: j["composite_score"], reverse=True)
-        return {"ranked_jobs": scored[:4]}
+        text = text.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+        try:
+            data = json.loads(text or "{}")
+            ranked = data.get("ranked_jobs", [])
+            
+            # Merge back any missing metadata from original jobs if necessary
+            # (though the LLM should return most of it if we asked, but let's be safe)
+            for r in ranked:
+                orig = next((j for j in jobs if j.get("job_id") == r.get("job_id")), {})
+                for k, v in orig.items():
+                    if k not in r: r[k] = v
+            
+            return {"ranked_jobs": ranked}
+        except json.JSONDecodeError:
+            return {"ranked_jobs": []}
 
     elif name == "generate_cover_letter":
         job = tool_input.get("job", {})

@@ -85,6 +85,7 @@ export default function JobCard({ job }: { job: Job }) {
     try {
       const res = await authFetch("/api/jobs/save", {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ job }),
       });
       if (res.ok) setSaved(true);

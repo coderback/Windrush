@@ -19,17 +19,18 @@ interface Application {
   created_at: string;
 }
 
-const STATUSES = ["Saved", "Evaluated", "Applied", "Responded", "Interview", "Offer", "Rejected", "Discarded"];
+const STATUSES = ["Saved", "Pending Review", "Evaluated", "Applied", "Responded", "Interview", "Offer", "Rejected", "Discarded"];
 
 const statusStyle: Record<string, string> = {
-  Saved:      "bg-purple-500/20 text-purple-400",
-  Evaluated:  "bg-zinc-700 text-zinc-300",
-  Applied:    "bg-blue-500/20 text-blue-400",
-  Responded:  "bg-amber-500/20 text-amber-400",
-  Interview:  "bg-teal-500/20 text-teal-400",
-  Offer:      "bg-green-500/20 text-green-400",
-  Rejected:   "bg-red-500/20 text-red-400",
-  Discarded:  "bg-zinc-800 text-zinc-600",
+  Saved:          "bg-purple-500/20 text-purple-400",
+  "Pending Review": "bg-zinc-600 text-zinc-300",
+  Evaluated:      "bg-zinc-700 text-zinc-300",
+  Applied:        "bg-blue-500/20 text-blue-400",
+  Responded:      "bg-amber-500/20 text-amber-400",
+  Interview:      "bg-teal-500/20 text-teal-400",
+  Offer:          "bg-green-500/20 text-green-400",
+  Rejected:       "bg-red-500/20 text-red-400",
+  Discarded:      "bg-zinc-800 text-zinc-600",
 };
 
 export default function ApplicationTracker() {
