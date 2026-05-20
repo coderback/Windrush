@@ -20,7 +20,9 @@ services:
     expose: ["8000"]
     environment:
       - GROQ_API_KEY=${GROQ_API_KEY}
-      - LLM_BACKEND=groq
+      - LLM_BACKEND=${LLM_BACKEND:-ollama}
+      - OLLAMA_HOST=http://ollama:11434
+      - EMBEDDING_MODEL=nomic-embed-text
       - ECONOMIC_INDEX_PATH=/data/economic_index.json
       - TASK_PENETRATION_PATH=/data/task_penetration.csv
       - ADZUNA_APP_ID=${ADZUNA_APP_ID}
@@ -32,7 +34,24 @@ services:
     volumes:
       - economic_data:/data:ro
       - app_data:/appdata
-    depends_on: [jobs-mcp, civic-guardrails]
+    depends_on:
+      - jobs-mcp
+      - civic-guardrails
+      - ollama
+
+  ollama:
+    image: ollama/ollama:latest
+    volumes:
+      - ollama_data:/root/.ollama
+    expose: ["11434"]
+    # If you have an NVIDIA GPU, uncomment the following lines to enable hardware acceleration:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
 
   jobs-mcp:
     build: ./jobs-mcp
@@ -63,3 +82,4 @@ volumes:
       device: ./data
   guardrail_logs:
   app_data:
+  ollama_data:

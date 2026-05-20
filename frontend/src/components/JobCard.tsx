@@ -14,6 +14,8 @@ export interface Job {
   description?: string;
   url?: string;
   exposure_score?: number;
+  semantic_score?: number;
+  tags?: string | string[];
   source?: string;
   level?: string;
   posted_at?: string;
@@ -61,6 +63,10 @@ export default function JobCard({ job }: { job: Job }) {
   const badge = levelBadge(job.level);
   const ago = timeAgo(job.created_at ?? job.posted_at);
 
+  // Parse tags if they are a JSON string
+  const tags: string[] = typeof job.tags === 'string' ? JSON.parse(job.tags) : (job.tags || []);
+  const matchScore = job.semantic_score ? Math.round(job.semantic_score * 100) : null;
+
   const handleClick = () => {
     sessionStorage.setItem(`job_${jobId}`, JSON.stringify(job));
     router.push(`/jobs/${encodeURIComponent(jobId)}`);
@@ -72,17 +78,28 @@ export default function JobCard({ job }: { job: Job }) {
       onClick={handleClick}
     >
       <div className="flex items-start justify-between gap-3 mb-3">
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1">
           <h3 className="text-sm font-semibold text-zinc-100 group-hover:text-teal-300 transition-colors truncate">
             {job.title}
           </h3>
           <p className="text-xs text-zinc-500 mt-0.5">{job.company}</p>
         </div>
-        {badge && (
-          <span className={`shrink-0 text-[10px] px-2 py-0.5 rounded-full border font-medium ${badge.cls}`}>
-            {badge.label}
-          </span>
-        )}
+        <div className="flex flex-col items-end gap-1.5 shrink-0">
+          {badge && (
+            <span className={`text-[10px] px-2 py-0.5 rounded-full border font-medium ${badge.cls}`}>
+              {badge.label}
+            </span>
+          )}
+          {matchScore !== null && (
+             <div className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+               matchScore >= 70 ? 'border-teal-500/30 text-teal-400 bg-teal-500/10' : 
+               matchScore >= 50 ? 'border-amber-500/30 text-amber-400 bg-amber-500/10' :
+               'border-zinc-700 text-zinc-400 bg-zinc-800'
+             }`}>
+               {matchScore}% Match
+             </div>
+          )}
+        </div>
       </div>
 
       <div className="flex items-center flex-wrap gap-x-3 gap-y-1 text-xs text-zinc-600 mb-3">
@@ -92,12 +109,22 @@ export default function JobCard({ job }: { job: Job }) {
         {ago && <><span>·</span><span>{ago}</span></>}
       </div>
 
+      {tags.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 mb-3">
+          {tags.map(tag => (
+            <span key={tag} className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400 border border-zinc-700 uppercase tracking-wider">
+              #{tag}
+            </span>
+          ))}
+        </div>
+      )}
+
       {job.description && (
         <p className="text-xs text-zinc-500 line-clamp-2 mb-4">{job.description}</p>
       )}
 
-      <div className="flex items-center justify-end">
-        <span className="text-xs text-teal-500 group-hover:underline">View & Apply →</span>
+      <div className="flex items-center justify-end text-[10px] uppercase tracking-widest font-bold">
+        <span className="text-teal-500 group-hover:underline">View & Apply →</span>
       </div>
     </div>
   );

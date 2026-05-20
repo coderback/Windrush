@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     job_id          TEXT NOT NULL,
     title           TEXT NOT NULL,
     company         TEXT NOT NULL,
+    normalized_company TEXT,
     location        TEXT,
     description     TEXT,
     url             TEXT,
@@ -26,6 +27,8 @@ CREATE TABLE IF NOT EXISTS jobs (
     exposure_score  REAL,
     level           TEXT,
     source          TEXT,
+    tags            TEXT,
+    semantic_vector BLOB,
     created_at      TEXT NOT NULL,
     updated_at      TEXT,
     expires_at      TEXT
@@ -34,7 +37,7 @@ CREATE TABLE IF NOT EXISTS jobs (
 
 _CREATE_INDEX = """
 CREATE UNIQUE INDEX IF NOT EXISTS idx_dedup_jobs
-    ON jobs(lower(company), lower(title), lower(location));
+    ON jobs(lower(normalized_company), lower(title), lower(location));
 """
 
 def init_db(db_path: str = "") -> None:
@@ -47,15 +50,26 @@ def init_db(db_path: str = "") -> None:
         con = sqlite3.connect(_DB_PATH)
         con.execute("PRAGMA journal_mode=WAL")
         con.execute(_CREATE_JOBS_TABLE)
+        
+        # Fallbacks for existing tables
+        try: con.execute("ALTER TABLE jobs ADD COLUMN updated_at TEXT")
+        except sqlite3.OperationalError: pass
+        try: con.execute("ALTER TABLE jobs ADD COLUMN expires_at TEXT")
+        except sqlite3.OperationalError: pass
+        try: con.execute("ALTER TABLE jobs ADD COLUMN normalized_company TEXT")
+        except sqlite3.OperationalError: pass
+        try: con.execute("ALTER TABLE jobs ADD COLUMN tags TEXT")
+        except sqlite3.OperationalError: pass
+        try: con.execute("ALTER TABLE jobs ADD COLUMN semantic_vector BLOB")
+        except sqlite3.OperationalError: pass
+        
+        # Ensure older rows have a normalized_company before we create/recreate the index
+        con.execute("UPDATE jobs SET normalized_company = lower(company) WHERE normalized_company IS NULL")
+        
+        # Drop old index if it exists and create the new one
+        con.execute("DROP INDEX IF EXISTS idx_dedup_jobs")
         con.execute(_CREATE_INDEX)
-        try:
-            con.execute("ALTER TABLE jobs ADD COLUMN updated_at TEXT")
-        except sqlite3.OperationalError:
-            pass
-        try:
-            con.execute("ALTER TABLE jobs ADD COLUMN expires_at TEXT")
-        except sqlite3.OperationalError:
-            pass
+        
         con.commit()
         con.close()
         logger.info("Jobs DB initialised at %s", _DB_PATH)
@@ -64,6 +78,47 @@ def init_db(db_path: str = "") -> None:
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+def _normalize_company(name: str) -> str:
+    """Strips common legal and regional suffixes to prevent duplicates."""
+    n = name.lower()
+    n = re.sub(r"[^\w\s]", "", n)
+    n = re.sub(r"\b(ltd|limited|inc|corp|corporation|plc|uk|usa|llc)\b", "", n)
+    return " ".join(n.split())
+
+def _extract_tags(job: dict) -> str:
+    """Extract standard tags from job title and description."""
+    tags = set()
+    text = (job.get("title", "") + " " + job.get("description", "")).lower()
+    
+    # Tech stack
+    if "python" in text: tags.add("python")
+    if "java " in text or "java," in text: tags.add("java")
+    if "typescript" in text or "ts" in text: tags.add("typescript")
+    if "javascript" in text or "js" in text: tags.add("javascript")
+    if "c++" in text: tags.add("c++")
+    if "rust" in text: tags.add("rust")
+    if "go " in text or "golang" in text: tags.add("go")
+    if "react" in text: tags.add("react")
+    if "aws" in text: tags.add("aws")
+    
+    # Traits
+    if any(w in text for w in ["remote", "work from home", "telecommute", "anywhere"]):
+        tags.add("remote")
+    if any(w in text for w in ["visa", "sponsorship", "relocation"]):
+        tags.add("sponsorship")
+    if any(w in text for w in ["startup", "start-up"]):
+        tags.add("startup")
+    
+    # Domains
+    if any(w in text for w in ["fintech", "finance", "trading", "quant"]):
+        tags.add("fintech")
+    if any(w in text for w in ["healthtech", "healthcare", "medical"]):
+        tags.add("healthtech")
+    
+    return json.dumps(list(tags))
+
+from . import semantic
 
 def add_jobs(jobs: list[dict]) -> tuple[int, int]:
     """Insert a list of jobs into the DB, ignoring duplicates.
@@ -77,17 +132,28 @@ def add_jobs(jobs: list[dict]) -> tuple[int, int]:
     con = sqlite3.connect(_DB_PATH)
     for job in jobs:
         now_str = _now()
+        normalized_co = _normalize_company(job.get("company", ""))
+        tags_json = _extract_tags(job)
+        
+        # Calculate semantic vector for the job (title + desc)
+        job_text = f"{job.get('title', '')} {job.get('description', '')}"
+        embedding = semantic.get_embedding_sync(job_text)
+        vector_blob = None
+        if embedding:
+            vector_blob = np.array(embedding, dtype=np.float32).tobytes()
+        
         try:
             con.execute(
                 """INSERT INTO jobs
-                   (id, job_id, title, company, location, description, url,
-                    salary_min, salary_max, exposure_score, level, source, created_at, updated_at, expires_at)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                   (id, job_id, title, company, normalized_company, location, description, url,
+                    salary_min, salary_max, exposure_score, level, source, tags, semantic_vector, created_at, updated_at, expires_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     uuid.uuid4().hex,
                     str(job.get("job_id", "")),
                     job.get("title", ""),
                     job.get("company", ""),
+                    normalized_co,
                     job.get("location", ""),
                     job.get("description", ""),
                     job.get("url", ""),
@@ -96,6 +162,8 @@ def add_jobs(jobs: list[dict]) -> tuple[int, int]:
                     job.get("exposure_score"),
                     job.get("level", "mid"),
                     job.get("source", "unknown"),
+                    tags_json,
+                    vector_blob,
                     now_str,
                     now_str,
                     job.get("expires_at"),
@@ -103,10 +171,13 @@ def add_jobs(jobs: list[dict]) -> tuple[int, int]:
             )
             added += 1
         except sqlite3.IntegrityError:
-            # Duplicate based on unique index, just update the heartbeat
+            # Duplicate based on unique index, just update the heartbeat and tags
+            # Also update the vector if it was missing
             con.execute(
-                "UPDATE jobs SET updated_at = ? WHERE lower(company)=lower(?) AND lower(title)=lower(?) AND lower(location)=lower(?)",
-                (now_str, job.get("company", ""), job.get("title", ""), job.get("location", ""))
+                """UPDATE jobs SET updated_at = ?, tags = ?, 
+                   semantic_vector = COALESCE(semantic_vector, ?) 
+                   WHERE lower(normalized_company)=? AND lower(title)=lower(?) AND lower(location)=lower(?)""",
+                (now_str, tags_json, vector_blob, normalized_co, job.get("title", ""), job.get("location", ""))
             )
             updated += 1
         except Exception as exc:
@@ -133,6 +204,8 @@ def get_jobs(
     level: str = "",
     category: str = "",
     remote: bool = False,
+    tags: list[str] = None,
+    persona_vector: list[float] = None,
     limit: int = 20,
     offset: int = 0
 ) -> list[dict]:
@@ -149,97 +222,87 @@ def get_jobs(
     sql += " AND (expires_at IS NULL OR expires_at > ?)"
     params.append(_now())
 
-    if query:
-        # Simple LIKE match on title or description
+    # Only use LIKE if no semantic search is being performed or if specific keywords are provided
+    if query and not persona_vector:
         sql += " AND (lower(title) LIKE ? OR lower(company) LIKE ?)"
         q = f"%{query.lower()}%"
         params.extend([q, q])
+        
+    if tags:
+        for tag in tags:
+            sql += " AND lower(tags) LIKE ?"
+            params.append(f"%\"{tag.lower()}\"%")
     
     if location:
         loc_lower = location.lower().strip()
+        if "london" in loc_lower and "uk" in loc_lower:
+            sql += " AND lower(location) NOT LIKE '%ontario%' AND lower(location) NOT LIKE '%new london%'"
+            
         if loc_lower == "remote" or remote:
-            sql += " AND lower(location) LIKE '%remote%'"
+            sql += " AND (lower(location) LIKE '%remote%' OR lower(location) LIKE '%anywhere%' OR lower(location) LIKE '%telecommute%')"
         else:
-            # Handle regional aliases
+            loc_clause = ""
             if loc_lower in ["uk", "united kingdom", "gb", "great britain"]:
                 loc_clause = "(lower(location) LIKE '%uk%' OR lower(location) LIKE '%united kingdom%' OR lower(location) LIKE '%england%' OR lower(location) LIKE '%london%' OR lower(location) LIKE '%bristol%' OR lower(location) LIKE '%manchester%' OR lower(location) LIKE '%birmingham%' OR lower(location) LIKE '%leeds%' OR lower(location) LIKE '%scotland%' OR lower(location) LIKE '%edinburgh%' OR lower(location) LIKE '%glasgow%' OR lower(location) LIKE '%wales%' OR lower(location) LIKE '%cardiff%' OR lower(location) LIKE '%northern ireland%' OR lower(location) LIKE '%belfast%')"
-                sql += f" AND ({loc_clause}"
-                if remote:
-                    sql += " OR lower(location) LIKE '%remote%'"
-                sql += ")"
             elif loc_lower in ["england"]:
                 loc_clause = "(lower(location) LIKE '%england%' OR lower(location) LIKE '%london%' OR lower(location) LIKE '%bristol%' OR lower(location) LIKE '%manchester%' OR lower(location) LIKE '%birmingham%' OR lower(location) LIKE '%leeds%' OR lower(location) LIKE '%liverpool%' OR lower(location) LIKE '%newcastle%')"
-                sql += f" AND ({loc_clause}"
-                if remote:
-                    sql += " OR lower(location) LIKE '%remote%'"
-                sql += ")"
-            elif loc_lower in ["scotland"]:
-                loc_clause = "(lower(location) LIKE '%scotland%' OR lower(location) LIKE '%edinburgh%' OR lower(location) LIKE '%glasgow%' OR lower(location) LIKE '%aberdeen%' OR lower(location) LIKE '%dundee%')"
-                sql += f" AND ({loc_clause}"
-                if remote:
-                    sql += " OR lower(location) LIKE '%remote%'"
-                sql += ")"
-            elif loc_lower in ["wales"]:
-                loc_clause = "(lower(location) LIKE '%wales%' OR lower(location) LIKE '%cardiff%' OR lower(location) LIKE '%swansea%' OR lower(location) LIKE '%newport%')"
-                sql += f" AND ({loc_clause}"
-                if remote:
-                    sql += " OR lower(location) LIKE '%remote%'"
-                sql += ")"
-            elif loc_lower in ["ireland", "northern ireland", "roi", "republic of ireland"]:
-                loc_clause = "(lower(location) LIKE '%ireland%' OR lower(location) LIKE '%dublin%' OR lower(location) LIKE '%belfast%' OR lower(location) LIKE '%cork%' OR lower(location) LIKE '%galway%')"
-                sql += f" AND ({loc_clause}"
-                if remote:
-                    sql += " OR lower(location) LIKE '%remote%'"
-                sql += ")"
             elif loc_lower in ["us", "usa", "united states", "america"]:
                 loc_clause = "(lower(location) LIKE '%us%' OR lower(location) LIKE '%usa%' OR lower(location) LIKE '%united states%' OR lower(location) LIKE '%new york%' OR lower(location) LIKE '%san francisco%' OR lower(location) LIKE '%california%' OR lower(location) LIKE '%seattle%' OR lower(location) LIKE '%texas%' OR lower(location) LIKE '%boston%')"
-                sql += f" AND ({loc_clause}"
-                if remote:
-                    sql += " OR lower(location) LIKE '%remote%'"
-                sql += ")"
-            elif loc_lower in ["eu", "europe", "european union"]:
-                loc_clause = "(lower(location) LIKE '%eu%' OR lower(location) LIKE '%europe%' OR lower(location) LIKE '%germany%' OR lower(location) LIKE '%berlin%' OR lower(location) LIKE '%france%' OR lower(location) LIKE '%paris%' OR lower(location) LIKE '%spain%' OR lower(location) LIKE '%barcelona%' OR lower(location) LIKE '%netherlands%' OR lower(location) LIKE '%amsterdam%')"
-                sql += f" AND ({loc_clause}"
-                if remote:
-                    sql += " OR lower(location) LIKE '%remote%'"
-                sql += ")"
-            elif loc_lower in ["ca", "canada"]:
-                loc_clause = "(lower(location) LIKE '%canada%' OR lower(location) LIKE '%toronto%' OR lower(location) LIKE '%vancouver%' OR lower(location) LIKE '%montreal%')"
-                sql += f" AND ({loc_clause}"
-                if remote:
-                    sql += " OR lower(location) LIKE '%remote%'"
-                sql += ")"
-            elif loc_lower in ["au", "australia"]:
-                loc_clause = "(lower(location) LIKE '%australia%' OR lower(location) LIKE '%sydney%' OR lower(location) LIKE '%melbourne%' OR lower(location) LIKE '%brisbane%')"
-                sql += f" AND ({loc_clause}"
-                if remote:
-                    sql += " OR lower(location) LIKE '%remote%'"
-                sql += ")"
             else:
-                sql += " AND (lower(location) LIKE ?"
+                loc_clause = f"(lower(location) LIKE ?)"
                 params.append(f"%{loc_lower}%")
-                if remote:
-                    sql += " OR lower(location) LIKE '%remote%'"
-                sql += ")"
+            
+            if remote:
+                sql += f" AND ({loc_clause} OR lower(location) LIKE '%remote%' OR lower(location) LIKE '%anywhere%')"
+            else:
+                sql += f" AND {loc_clause}"
+
     elif remote:
-        sql += " AND lower(location) LIKE '%remote%'"
+        sql += " AND (lower(location) LIKE '%remote%' OR lower(location) LIKE '%anywhere%' OR lower(location) LIKE '%telecommute%')"
         
     if level:
         sql += " AND lower(level) = ?"
         params.append(level.lower())
         
     if category:
-        # e.g. "software engineer"
         sql += " AND lower(title) LIKE ?"
         params.append(f"%{category.lower()}%")
+    
+    # If persona_vector is present, we pull all candidates and rank in Python
+    # Otherwise we use created_at for ranking
+    if not persona_vector:
+        sql += " ORDER BY created_at DESC LIMIT ? OFFSET ?"
+        params.extend([limit, offset])
+        rows = con.execute(sql, params).fetchall()
+        con.close()
+        return [dict(row) for row in rows]
+    else:
+        # Pull more candidates to allow for ranking and filtering
+        # We cap at 200 to keep it fast
+        rows = con.execute(sql, params).fetchall()
+        con.close()
         
-    sql += " ORDER BY created_at DESC LIMIT ? OFFSET ?"
-    params.extend([limit, offset])
-    
-    rows = con.execute(sql, params).fetchall()
-    con.close()
-    
-    return [dict(row) for row in rows]
+        candidates = []
+        for row in rows:
+            job = dict(row)
+            sim = 0.0
+            if job.get("semantic_vector"):
+                try:
+                    job_v = np.frombuffer(job["semantic_vector"], dtype=np.float32).tolist()
+                    sim = semantic.cosine_similarity(persona_vector, job_v)
+                except Exception as e:
+                    logger.debug(f"Failed to calculate similarity: {e}")
+            
+            # Semantic Floor: drop jobs that are totally unrelated
+            # 0.35 is a good threshold for dense embeddings
+            if sim >= 0.35:
+                job["semantic_score"] = round(sim, 3)
+                candidates.append(job)
+        
+        # Sort by semantic score descending
+        candidates.sort(key=lambda x: x.get("semantic_score", 0), reverse=True)
+        
+        return candidates[offset : offset + limit]
 
 
 def job_count() -> int:

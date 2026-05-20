@@ -11,6 +11,11 @@ const LEVEL_OPTIONS = [
   { label: "Senior+", value: "senior" },
 ];
 
+const JOB_TAGS = [
+  "python", "java", "typescript", "javascript", "c++", "rust", "go", "react", "aws",
+  "remote", "sponsorship", "startup", "fintech", "healthtech"
+];
+
 export default function JobsPage() {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [loading, setLoading] = useState(true);
@@ -30,6 +35,7 @@ export default function JobsPage() {
   // Filter state (discrete selections — trigger fetches immediately)
   const [level, setLevel] = useState("");
   const [remote, setRemote] = useState(false);
+  const [selectedTags, setSelectedTags] = useState<string[]>([]);
 
   // Track whether user has actively searched
   const [activeSearch, setActiveSearch] = useState(false);
@@ -51,6 +57,7 @@ export default function JobsPage() {
         if (committedLocation) params.set("location", committedLocation);
         if (level) params.set("level", level);
         if (remote) params.set("remote", "true");
+        if (selectedTags.length > 0) params.set("tags", selectedTags.join(","));
         params.set("page", String(pageNum));
         params.set("limit", "20");
 
@@ -72,7 +79,7 @@ export default function JobsPage() {
         setLoadingMore(false);
       }
     },
-    [committedQuery, committedLocation, level, remote]
+    [committedQuery, committedLocation, level, remote, selectedTags]
   );
 
   // Fetch when committed search params or filters change
@@ -105,10 +112,16 @@ export default function JobsPage() {
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
-    // Commit the typed values — this triggers the fetch via useEffect
     setCommittedQuery(queryInput);
     setCommittedLocation(locationInput);
     setActiveSearch(true);
+    setPage(1);
+  };
+
+  const toggleTag = (tag: string) => {
+    setSelectedTags(prev => 
+      prev.includes(tag) ? prev.filter(t => t !== tag) : [...prev, tag]
+    );
     setPage(1);
   };
 
@@ -119,6 +132,7 @@ export default function JobsPage() {
     setCommittedLocation("");
     setLevel("");
     setRemote(false);
+    setSelectedTags([]);
     setActiveSearch(false);
     setPage(1);
   };
@@ -162,6 +176,26 @@ export default function JobsPage() {
         </button>
       </form>
 
+      {/* Tags selector */}
+      <div className="flex flex-wrap gap-1.5 mb-4">
+        {JOB_TAGS.map(tag => {
+          const isSelected = selectedTags.includes(tag);
+          return (
+            <button
+              key={tag}
+              onClick={() => toggleTag(tag)}
+              className={`text-[10px] px-2 py-1 rounded border uppercase tracking-wider transition-colors ${
+                isSelected 
+                  ? "bg-teal-500/20 border-teal-500/40 text-teal-300" 
+                  : "bg-zinc-900 border-zinc-800 text-zinc-500 hover:border-zinc-700"
+              }`}
+            >
+              #{tag}
+            </button>
+          );
+        })}
+      </div>
+
       {/* Filters row */}
       <div className="flex flex-wrap items-center gap-3 mb-6">
         {/* Level filter */}
@@ -196,7 +230,7 @@ export default function JobsPage() {
         </button>
 
         {/* Clear filters (only show when active) */}
-        {activeSearch && (
+        {(activeSearch || selectedTags.length > 0 || level || remote) && (
           <button
             onClick={clearSearch}
             className="text-xs px-3 py-1.5 rounded-lg border border-zinc-800 text-zinc-500 hover:text-zinc-300 hover:border-zinc-600 transition-colors ml-auto"

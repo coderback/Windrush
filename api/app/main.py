@@ -460,6 +460,8 @@ async def onboarding_complete(current_user: Annotated[auth.User, Depends(auth.ge
 
 # ── Job Feed ──────────────────────────────────────────────────────────────────
 
+from . import semantic
+
 @app.get("/jobs")
 async def get_jobs(
     query: str = Query(default=""),
@@ -467,22 +469,45 @@ async def get_jobs(
     level: str = Query(default=""),
     category: str = Query(default=""),
     remote: bool = Query(default=False),
+    tags: str = Query(default=""),
     page: int = Query(default=1, ge=1),
     limit: int = Query(default=20, ge=1, le=100),
     current_user: Annotated[auth.User, Depends(auth.get_current_user)] = None,
 ):
     """Return job listings for the job feed with pagination and filtering."""
+    tag_list = [t.strip() for t in tags.split(",")] if tags else []
+
     # If no query, derive defaults from user persona
     effective_query = query
     effective_location = location
+    persona_vector = None
+    
+    # We always pull the persona to get preferences and potentially for semantic search
+    persona_data = tracker.get_user_persona(current_user.id)
+    
     if not effective_query:
-        persona = tracker.get_user_persona(current_user.id)
-        prefs = persona.get("preferences", {})
+        prefs = persona_data.get("preferences", {})
         titles = prefs.get("target_titles", [])
-        effective_query = titles[0] if titles else ""
+        
+        # Join multiple target titles for a broader default search
+        effective_query = " ".join(titles) if titles else ""
+        
         locs = prefs.get("preferred_locations", [])
         if not effective_location:
             effective_location = locs[0] if locs else ""
+            
+        # Automatically add persona skills as tags if no tags are provided
+        if not tag_list:
+            for skill_cat in persona_data.get("skills", []):
+                for skill in skill_cat.get("skills", []):
+                    if skill.lower() in ["python", "java", "typescript", "javascript", "c++", "rust", "go", "react", "aws"]:
+                        tag_list.append(skill.lower())
+
+    # Generate semantic vector for the persona to enable semantic ranking
+    # We do this if no explicit keyword query is provided (or we could do it always)
+    if not query:
+        persona_text = semantic.vectorize_persona(persona_data)
+        persona_vector = await semantic.get_embedding(persona_text)
 
     offset = (page - 1) * limit
 
@@ -493,6 +518,8 @@ async def get_jobs(
         level=level,
         category=category,
         remote=remote,
+        tags=tag_list,
+        persona_vector=persona_vector,
         limit=limit,
         offset=offset,
     )
@@ -501,7 +528,9 @@ async def get_jobs(
     # (i.e. first boot). If the DB has jobs but this query returned 0, that's
     # just a filter miss — don't hammer external APIs for every empty search.
     if not jobs and page == 1 and jobs_db.job_count() == 0:
-        live_jobs = await search_jobs(effective_query or "software engineer", effective_location or "London")
+        # Use only the first title for live search to keep it focused
+        live_query = titles[0] if not query and titles else (effective_query or "software engineer")
+        live_jobs = await search_jobs(live_query, effective_location or "London")
         # Persist them for future queries
         for j in live_jobs:
             j["source"] = j.get("source", "live")
@@ -513,6 +542,7 @@ async def get_jobs(
             level=level,
             category=category,
             remote=remote,
+            tags=tag_list,
             limit=limit,
             offset=offset,
         )
