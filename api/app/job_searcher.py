@@ -270,6 +270,25 @@ _GREENHOUSE_COMPANIES: list[tuple[str, str]] = [
     # added from discovery
     ("twilio",           "Twilio"),
     ("dialpad",          "Dialpad"),
+    # added from grad-programmes.json
+    ("b2c2",             "B2C2"),
+    ("baringa",          "Baringa"),
+    ("cambridgeconsultantslimited", "Cambridge Consultants"),
+    ("catapultsports",   "Catapult"),
+    ("davinciderivatives", "Da Vinci Trading"),
+    ("drweng",           "DRW"),
+    ("dvtrading",        "DV Trading"),
+    ("fiveringsllc",     "Five Rings"),
+    ("flowtraders",      "Flow Traders"),
+    ("glencoreuk",       "Glencore"),
+    ("imc",              "IMC Trading"),
+    ("lunarenergy",      "Lunar Energy"),
+    ("mw-tech-grad",     "Marshall Wace"),
+    ("obsidiansecurity", "Obsidian Security"),
+    ("rothesaygraduates", "Rothesay"),
+    ("towerpeak",        "Tower Peak Partners"),
+    ("xantium",          "Xantium"),
+    ("xpcampus",         "ExodusPoint"),
 ]
 
 _ASHBY_COMPANIES: list[tuple[str, str]] = [
@@ -298,6 +317,9 @@ _ASHBY_COMPANIES: list[tuple[str, str]] = [
     ("openai",      "OpenAI"),
     ("talkdesk",    "Talkdesk"),
     ("faculty",     "Faculty AI"),
+    # added from grad-programmes.json
+    ("hawkeyeinnovations", "Hawk-Eye Innovations"),
+    ("spaice-tech", "SPAICE"),
 ]
 
 _LEVER_COMPANIES: list[tuple[str, str]] = [
@@ -307,8 +329,18 @@ _LEVER_COMPANIES: list[tuple[str, str]] = [
     ("palantir",    "Palantir"),
     ("mistral",     "Mistral AI"),
     ("clarity-ai",  "Clarity AI"),
+    # added from grad-programmes.json
+    ("frontier",    "Frontier Developments"),
+    ("ion",         "ION"),
 ]
 
+_WORKABLE_COMPANIES: list[tuple[str, str]] = [
+    ("starling-bank", "Starling Bank"),
+    ("riverlane", "Riverlane"),
+    ("capula-investment-management-ltd", "Capula Investment Management"),
+    ("longshot-systems-ltd", "Longshot Systems"),
+    ("insight-investment", "Insight Investment"),
+]
 
 async def _fetch_greenhouse(slug: str, company: str, keywords: list[str]) -> list[dict]:
     try:
@@ -403,6 +435,38 @@ async def _fetch_lever(slug: str, company: str, keywords: list[str]) -> list[dic
     except Exception:
         return []
 
+async def _fetch_workable(slug: str, company: str, keywords: list[str]) -> list[dict]:
+    try:
+        url = f"https://apply.workable.com/api/v1/widget/accounts/{slug}?details=true"
+        async with httpx.AsyncClient(timeout=8.0) as client:
+            resp = await client.get(url)
+            resp.raise_for_status()
+            data = resp.json()
+        jobs = []
+        for item in data.get("jobs", []):
+            title = item.get("title", "")
+            if not _title_matches_query(title, keywords):
+                continue
+            city = item.get("city", "")
+            country = item.get("country", "")
+            loc = f"{city}, {country}".strip(", ")
+            if not loc and item.get("telecommuting"):
+                loc = "Remote"
+            desc_raw = item.get("description") or ""
+            jobs.append({
+                "job_id": f"workable-{item.get('shortcode', '')}",
+                "title": title,
+                "company": company,
+                "location": loc or "Remote",
+                "description": re.sub(r"<[^>]+>", " ", desc_raw)[:500],
+                "url": item.get("url", ""),
+                "salary_min": None,
+                "salary_max": None,
+                "exposure_score": round(occupation_exposure(title), 3),
+            })
+        return jobs
+    except Exception:
+        return []
 
 async def _search_level2_ats_apis(query: str) -> list[dict]:
     """
@@ -417,6 +481,7 @@ async def _search_level2_ats_apis(query: str) -> list[dict]:
         [_fetch_greenhouse(slug, name, keywords) for slug, name in _GREENHOUSE_COMPANIES]
         + [_fetch_ashby(slug, name, keywords)    for slug, name in _ASHBY_COMPANIES]
         + [_fetch_lever(slug, name, keywords)    for slug, name in _LEVER_COMPANIES]
+        + [_fetch_workable(slug, name, keywords) for slug, name in _WORKABLE_COMPANIES]
     )
 
     results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -554,6 +619,51 @@ async def _search_level3_websearch() -> list[dict]:
 
 
 # ── Level 4: Adzuna paid API ──────────────────────────────────────────────────
+
+async def _search_level4_workable(query: str, location: str) -> list[dict]:
+    """
+    Query the global Workable job board API.
+    Provides excellent structured data across all Workable customers.
+    """
+    try:
+        import urllib.parse
+        q = urllib.parse.quote(query)
+        loc = urllib.parse.quote(location)
+        url = f"https://jobs.workable.com/api/v1/jobs?query={q}&location={loc}"
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(url)
+            resp.raise_for_status()
+            data = resp.json()
+    except Exception as e:
+        logger.error("Workable global search failed: %s", e)
+        return []
+
+    jobs = []
+    for item in data.get("jobs", []):
+        title = item.get("title", "")
+        company_name = item.get("company", {}).get("title", "Unknown")
+        loc_str = ", ".join(item.get("locations", [])) or "Remote"
+        
+        # Combine descriptions
+        desc_raw = (item.get("description", "") + " " + item.get("requirementsSection", "")).strip()
+        
+        jobs.append({
+            "job_id": f"workable-global-{item.get('id', '')}",
+            "title": title,
+            "company": company_name,
+            "location": loc_str,
+            "description": re.sub(r"<[^>]+>", " ", desc_raw)[:500],
+            "url": item.get("url", ""),
+            "salary_min": None,
+            "salary_max": None,
+            "exposure_score": round(occupation_exposure(title), 3),
+        })
+
+    logger.info("Level 4 (Workable): Found %d jobs for %r in %r", len(jobs), query, location)
+    return jobs
+
+
+# ── Post-Processing ───────────────────────────────────────────────────────────
 
 async def _search_level4_adzuna(query: str, location: str) -> list[dict]:
     if not (ADZUNA_APP_ID and ADZUNA_API_KEY):
