@@ -65,9 +65,12 @@ def init_db(db_path: str = "") -> None:
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
-def add_jobs(jobs: list[dict]) -> int:
-    """Insert a list of jobs into the DB, ignoring duplicates."""
+def add_jobs(jobs: list[dict]) -> tuple[int, int]:
+    """Insert a list of jobs into the DB, ignoring duplicates.
+    Returns (added_count, updated_count).
+    """
     added = 0
+    updated = 0
     if not _DB_PATH:
         init_db()
     
@@ -105,12 +108,13 @@ def add_jobs(jobs: list[dict]) -> int:
                 "UPDATE jobs SET updated_at = ? WHERE lower(company)=lower(?) AND lower(title)=lower(?) AND lower(location)=lower(?)",
                 (now_str, job.get("company", ""), job.get("title", ""), job.get("location", ""))
             )
+            updated += 1
         except Exception as exc:
             logger.error("Failed to insert job %s: %s", job.get("title"), exc)
     
     con.commit()
     con.close()
-    return added
+    return added, updated
 
 def purge_expired_jobs(sync_start: str) -> None:
     if not _DB_PATH: return

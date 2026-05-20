@@ -875,6 +875,17 @@ async def _search_level4_adzuna(query: str, location: str) -> list[dict]:
     if not (ADZUNA_APP_ID and ADZUNA_API_KEY):
         return []
 
+    # Map location to country code
+    country = "gb"
+    loc_lower = location.lower()
+    if any(x in loc_lower for x in ["usa", "us", "san francisco", "new york", "seattle"]):
+        country = "us"
+    elif any(x in loc_lower for x in ["canada", "toronto", "vancouver"]):
+        country = "ca"
+    elif any(x in loc_lower for x in ["australia", "sydney"]):
+        country = "au"
+
+    base_url = f"https://api.adzuna.com/v1/api/jobs/{country}/search/1"
     query = re.sub(r"\s+", " ", _BOOLEAN_OPS.sub(" ", query)).strip()
 
     async def _fetch(q: str) -> list[dict]:
@@ -885,10 +896,9 @@ async def _search_level4_adzuna(query: str, location: str) -> list[dict]:
             "where": location,
             "results_per_page": 20,
             "sort_by": "relevance",
-            "salary_is_predicted": 0,
         }
         async with httpx.AsyncClient(timeout=12.0) as client:
-            resp = await client.get(ADZUNA_BASE, params=params, headers={"Content-Type": "application/json"})
+            resp = await client.get(base_url, params=params)
             resp.raise_for_status()
             data = resp.json()
         jobs = []
@@ -912,12 +922,12 @@ async def _search_level4_adzuna(query: str, location: str) -> list[dict]:
         if not jobs:
             simplified = _SENIORITY_WORDS.sub("", query).strip()
             if simplified and simplified != query:
-                logger.info("Adzuna: 0 results for %r — retrying as %r", query, simplified)
+                logger.info("Adzuna (%s): 0 results for %r — retrying as %r", country, query, simplified)
                 jobs = await _fetch(simplified)
-        logger.info("Level 4 (Adzuna): %d jobs for %r in %r", len(jobs), query, location)
+        logger.info("Level 4 (Adzuna %s): %d jobs for %r in %r", country, len(jobs), query, location)
         return jobs
     except Exception as exc:
-        logger.warning("Adzuna search failed: %s", exc)
+        logger.warning("Adzuna %s search failed: %s", country, exc)
         return []
 
 

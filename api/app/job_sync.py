@@ -43,6 +43,17 @@ async def sync_jobs():
     
     all_jobs = []
     
+    logger.info("Syncing Level 1 custom career pages (Playwright)")
+    # Extract keywords from all queries for a broad Level 1 search
+    all_keywords = []
+    for q in queries:
+        all_keywords.extend(job_searcher._query_keywords(q))
+    unique_keywords = list(set(all_keywords))
+    l1 = await job_searcher._search_level1_playwright(unique_keywords)
+    for job in l1:
+        job["source"] = "ats"  # Treat custom pages as ATS-like for retention
+    all_jobs.extend(l1)
+
     logger.info("Syncing Level 2 ATS APIs (Single Pass Extraction)")
     l2 = await job_searcher._search_level2_ats_apis(queries)
     for job in l2:
@@ -75,8 +86,8 @@ async def sync_jobs():
         
     deduped = job_searcher._deduplicate(all_jobs)
     
-    added = jobs_db.add_jobs(deduped)
-    logger.info(f"Sync complete. Added {added} new jobs.")
+    added, refreshed = jobs_db.add_jobs(deduped)
+    logger.info(f"Sync complete. Added {added} new jobs, refreshed {refreshed} existing.")
     
     # Purge any dynamic jobs that were not refreshed in this run
     jobs_db.purge_expired_jobs(sync_start)
