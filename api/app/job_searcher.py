@@ -11,6 +11,7 @@ seniority-boosted, and capped at 20. Falls back to fixture if all sources
 return zero results.
 """
 import asyncio
+import html as _html
 import logging
 import os
 import re
@@ -38,6 +39,11 @@ _SENIORITY_WORDS = re.compile(
 _BOOLEAN_OPS = re.compile(r"\b(or|and|not)\b", re.I)
 
 _FIXTURE_PATH = pathlib.Path(__file__).parent / "jobs_fixture.json"
+
+# Max chars to store for a job description. ATS APIs return the full JD; we keep
+# it (near) whole so fit-scoring and CV/cover-letter tailoring have real context
+# rather than a 500-char teaser.
+_DESC_MAX = 8000
 
 # Regex to parse "Title @ Company" / "Title at Company" / "Title | Company"
 # from search snippet titles
@@ -70,6 +76,140 @@ def _query_keywords(query: str) -> list[str]:
 def _title_matches_query(title: str, keywords: list[str]) -> bool:
     title_lower = title.lower()
     return any(kw in title_lower for kw in keywords)
+
+
+# ── Full job-description fetcher (on-demand) ───────────────────────────────────
+# Stored descriptions are truncated to 500 chars at sync time (and for Brave
+# results are only a web snippet). When we need the real JD — e.g. to score fit
+# or tailor a CV — we re-fetch the listing page and pull the full description.
+
+def _iter_jsonld_objects(data):
+    """Walk a parsed JSON-LD blob yielding every object (handles @graph + lists)."""
+    if isinstance(data, dict):
+        if isinstance(data.get("@graph"), list):
+            for x in data["@graph"]:
+                yield from _iter_jsonld_objects(x)
+        yield data
+    elif isinstance(data, list):
+        for x in data:
+            yield from _iter_jsonld_objects(x)
+
+
+def _html_to_text(raw: str) -> str:
+    """Strip HTML to readable plain text, preserving paragraph/line breaks."""
+    # Unescape FIRST: some ATS APIs (e.g. Greenhouse) return entity-escaped HTML
+    # (&lt;p&gt;…), so decoding has to happen before tags can be stripped.
+    text = _html.unescape(raw)
+    text = re.sub(r"(?is)<(script|style|noscript|template|svg)[^>]*>.*?</\1>", " ", text)
+    text = re.sub(r"(?i)<br\s*/?>", "\n", text)
+    text = re.sub(r"(?i)</(p|div|li|h[1-6]|tr|ul|ol)>", "\n", text)
+    text = re.sub(r"<[^>]+>", " ", text)
+    text = re.sub(r"[ \t]+", " ", text)
+    text = re.sub(r"\n[ \t]*\n[ \t]*\n+", "\n\n", text)
+    return text.strip()
+
+
+def _extract_jsonld_jobposting(raw_html: str) -> str:
+    """Return the description from a JSON-LD JobPosting block, if present."""
+    for m in re.finditer(
+        r'(?is)<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>',
+        raw_html,
+    ):
+        try:
+            data = json.loads(m.group(1).strip())
+        except Exception:
+            continue
+        for obj in _iter_jsonld_objects(data):
+            t = obj.get("@type", "")
+            types = t if isinstance(t, list) else [t]
+            if any("JobPosting" in str(x) for x in types):
+                desc = obj.get("description", "")
+                if desc:
+                    return _html_to_text(desc)
+    return ""
+
+
+_BROWSER_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36"
+    ),
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+}
+
+
+async def _ats_full_description(url: str) -> str:
+    """
+    Pull a full JD from a known ATS's structured API by reverse-engineering the
+    listing URL. These return clean, complete descriptions — far better than
+    scraping the (often JS-rendered) hosted board page.
+    """
+    from urllib.parse import urlparse
+    parsed = urlparse(url)
+    host = parsed.netloc.lower()
+    path = parsed.path
+
+    async with httpx.AsyncClient(follow_redirects=True, timeout=12.0) as client:
+        # Greenhouse — boards(-api).greenhouse.io/{slug}/jobs/{id}
+        if "greenhouse.io" in host:
+            m = re.search(r"/([^/]+)/jobs/(\d+)", path)
+            if m:
+                slug, jid = m.group(1), m.group(2)
+                r = await client.get(f"https://boards-api.greenhouse.io/v1/boards/{slug}/jobs/{jid}")
+                if r.status_code == 200:
+                    return _html_to_text(r.json().get("content") or "")
+
+        # Lever — jobs.lever.co/{slug}/{id}
+        elif "lever.co" in host:
+            m = re.search(r"/([^/]+)/([0-9a-fA-F-]{8,})", path)
+            if m:
+                slug, pid = m.group(1), m.group(2)
+                r = await client.get(f"https://api.lever.co/v0/postings/{slug}/{pid}")
+                if r.status_code == 200:
+                    data = r.json()
+                    raw = data.get("descriptionPlain") or data.get("description") or ""
+                    return _html_to_text(raw)
+
+    return ""
+
+
+async def fetch_full_description(url: str, max_chars: int = 8000) -> str:
+    """
+    Fetch a job listing's full description on demand.
+
+    Strategy, in order of reliability:
+      1. Known ATS structured API (Greenhouse, Lever) — clean, complete JD.
+      2. JSON-LD JobPosting block on the page — common on real listing pages.
+
+    Returns "" on any failure or if nothing trustworthy is found, so callers
+    safely keep whatever description they already had. We deliberately do NOT
+    fall back to raw page text: SPA shells and marketing sites yield navigation
+    /footer noise that would pollute the analysis.
+    """
+    if not url or not url.startswith("http"):
+        return ""
+
+    try:
+        ats = await _ats_full_description(url)
+        if len(ats) >= 200:
+            return ats[:max_chars].strip()
+    except Exception as exc:
+        logger.debug("ATS description fetch failed for %s: %s", url[:80], exc)
+
+    try:
+        async with httpx.AsyncClient(
+            headers=_BROWSER_HEADERS, follow_redirects=True, timeout=15.0,
+        ) as client:
+            resp = await client.get(url)
+            resp.raise_for_status()
+            raw_html = resp.text
+        jd = _extract_jsonld_jobposting(raw_html)
+        if len(jd) >= 200:
+            return jd[:max_chars].strip()
+    except Exception as exc:
+        logger.debug("JSON-LD description fetch failed for %s: %s", url[:80], exc)
+
+    return ""
 
 
 # ── Title filter (from career-ops/portals.yml) ────────────────────────────────
@@ -414,7 +554,8 @@ _SMARTRECRUITERS_COMPANIES: list[tuple[str, str]] = [
 
 async def _fetch_greenhouse(slug: str, company: str, keywords: list[str]) -> list[dict]:
     try:
-        url = f"https://boards-api.greenhouse.io/v1/boards/{slug}/jobs"
+        # content=true is required — without it the API omits the JD entirely.
+        url = f"https://boards-api.greenhouse.io/v1/boards/{slug}/jobs?content=true"
         async with httpx.AsyncClient(timeout=8.0) as client:
             resp = await client.get(url)
             resp.raise_for_status()
@@ -430,7 +571,7 @@ async def _fetch_greenhouse(slug: str, company: str, keywords: list[str]) -> lis
                 "title": title,
                 "company": company,
                 "location": location or "Remote",
-                "description": (item.get("content") or "")[:500],
+                "description": _html_to_text(item.get("content") or "")[:_DESC_MAX],
                 "url": item.get("absolute_url", ""),
                 "salary_min": None,
                 "salary_max": None,
@@ -459,7 +600,7 @@ async def _fetch_ashby(slug: str, company: str, keywords: list[str]) -> list[dic
                 or "Remote"
             )
             desc_raw = item.get("descriptionPlain") or item.get("description") or ""
-            desc = re.sub(r"<[^>]+>", " ", desc_raw)[:500]
+            desc = re.sub(r"<[^>]+>", " ", desc_raw)[:_DESC_MAX]
             jobs.append({
                 "job_id": f"ashby-{item.get('id', '')}",
                 "title": title,
@@ -495,7 +636,7 @@ async def _fetch_lever(slug: str, company: str, keywords: list[str]) -> list[dic
                 "title": title,
                 "company": company,
                 "location": loc or "Remote",
-                "description": re.sub(r"<[^>]+>", " ", desc_raw)[:500],
+                "description": re.sub(r"<[^>]+>", " ", desc_raw)[:_DESC_MAX],
                 "url": item.get("hostedUrl", ""),
                 "salary_min": None,
                 "salary_max": None,
@@ -528,7 +669,7 @@ async def _fetch_workable(slug: str, company: str, keywords: list[str]) -> list[
                 "title": title,
                 "company": company,
                 "location": loc or "Remote",
-                "description": re.sub(r"<[^>]+>", " ", desc_raw)[:500],
+                "description": re.sub(r"<[^>]+>", " ", desc_raw)[:_DESC_MAX],
                 "url": item.get("url", ""),
                 "salary_min": None,
                 "salary_max": None,

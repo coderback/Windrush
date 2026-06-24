@@ -287,6 +287,22 @@ def get_jobs(
         
     return candidates[offset : offset + limit]
 
+def update_description(job_db_id: str, description: str) -> None:
+    """Persist a freshly-fetched full description back onto a stored job row."""
+    if not _DB_PATH:
+        init_db()
+    try:
+        con = sqlite3.connect(_DB_PATH)
+        con.execute(
+            "UPDATE jobs SET description = ?, updated_at = ? WHERE id = ?",
+            (description, _now(), job_db_id),
+        )
+        con.commit()
+        con.close()
+    except Exception as exc:
+        logger.error("Failed to update job description %s: %s", job_db_id, exc)
+
+
 def job_count() -> int:
     """Return the total number of jobs in the database."""
     if not _DB_PATH:

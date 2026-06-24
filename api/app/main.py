@@ -637,13 +637,36 @@ def _sse_json(event_type: str, data: dict) -> str:
     return f"data: {json.dumps(payload)}\n\n"
 
 
+async def _ensure_full_description(job: dict) -> dict:
+    """
+    Make sure a job has its real, full description before we analyse it.
+
+    Stored descriptions are capped at 500 chars at sync time (and Brave results
+    are only a web snippet), so anything that short is re-fetched from the live
+    listing page. The result is persisted back to the DB so re-runs and revisits
+    are instant.
+    """
+    desc = (job.get("description") or "").strip()
+    if len(desc) > 600:          # already a full description (e.g. previously fetched)
+        return job
+
+    from .job_searcher import fetch_full_description
+    full = await fetch_full_description(job.get("url", ""))
+    if full and len(full) > len(desc):
+        job = {**job, "description": full}
+        db_id = job.get("id")
+        if db_id:
+            jobs_db.update_description(str(db_id), full)
+    return job
+
+
 @app.post("/jobs/analyze")
 async def analyze_job(
     body: dict,
     current_user: Annotated[auth.User, Depends(auth.get_current_user)],
 ):
     """SSE: score fit + AI risk for a single job against the user's persona."""
-    job = body.get("job", {})
+    job = await _ensure_full_description(body.get("job", {}))
     persona = tracker.get_user_persona(current_user.id)
 
     async def gen():
@@ -676,7 +699,7 @@ async def generate_cover_letter_endpoint(
     current_user: Annotated[auth.User, Depends(auth.get_current_user)],
 ):
     """SSE: generate a tailored cover letter for a job."""
-    job = body.get("job", {})
+    job = await _ensure_full_description(body.get("job", {}))
     tone = body.get("tone", "professional")
     persona = tracker.get_user_persona(current_user.id)
 
@@ -696,7 +719,7 @@ async def generate_tailored_cv_endpoint(
     current_user: Annotated[auth.User, Depends(auth.get_current_user)],
 ):
     """SSE: generate a tailored CV (Markdown) for a specific job."""
-    job = body.get("job", {})
+    job = await _ensure_full_description(body.get("job", {}))
     persona = tracker.get_user_persona(current_user.id)
 
     async def gen():
