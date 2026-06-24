@@ -141,6 +141,17 @@ def build_cv_template_data(cv: dict) -> dict:
             "year": (c.get("year") or "").strip(),
         })
 
+    # Section order is seniority-aware (2026 graduate strategy): juniors lead with
+    # Education and place Skills lower; experienced candidates lead with Skills and
+    # keep Education near the end. Falls back to a sensible inference if unset.
+    seniority = (cv.get("seniority") or "").lower()
+    if seniority not in ("junior", "experienced"):
+        seniority = "junior" if (education and len(experience) <= 1) else "experienced"
+    if seniority == "junior":
+        sections = ["summary", "education", "experience", "projects", "skills", "certifications"]
+    else:
+        sections = ["summary", "skills", "experience", "projects", "education", "certifications"]
+
     return {
         "name": (cv.get("name") or "").strip(),
         "headline": (cv.get("headline") or "").strip(),
@@ -151,6 +162,8 @@ def build_cv_template_data(cv: dict) -> dict:
         "projects": projects,
         "education": education,
         "certifications": certifications,
+        "seniority": seniority,
+        "sections": sections,
     }
 
 

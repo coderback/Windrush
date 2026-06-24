@@ -4,8 +4,12 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="657acfba-7aae-4604-a67f-31eee75bbb05" name="Changes" comment="feat: enhance document generation by adding structured JSON support for CVs and cover letters, and implement HTML rendering for live previews">
-      <change beforePath="$PROJECT_DIR$/frontend/src/app/jobs/[id]/page.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/frontend/src/app/jobs/[id]/page.tsx" afterDir="false" />
+    <list default="true" id="657acfba-7aae-4604-a67f-31eee75bbb05" name="Changes" comment="feat: implement document editor for CVs and cover letters with live preview functionality">
+      <change beforePath="$PROJECT_DIR$/.gitignore" beforeDir="false" afterPath="$PROJECT_DIR$/.gitignore" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/api/app/agent.py" beforeDir="false" afterPath="$PROJECT_DIR$/api/app/agent.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/api/app/doc_render.py" beforeDir="false" afterPath="$PROJECT_DIR$/api/app/doc_render.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/api/app/templates/classic_cv.html" beforeDir="false" afterPath="$PROJECT_DIR$/api/app/templates/classic_cv.html" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -479,7 +483,23 @@
       <option name="project" value="LOCAL" />
       <updated>1782320052710</updated>
     </task>
-    <option name="localTasksCounter" value="45" />
+    <task id="LOCAL-00045" summary="feat: implement document editor for CVs and cover letters with live preview functionality">
+      <option name="closed" value="true" />
+      <created>1782320422162</created>
+      <option name="number" value="00045" />
+      <option name="presentableId" value="LOCAL-00045" />
+      <option name="project" value="LOCAL" />
+      <updated>1782320422162</updated>
+    </task>
+    <task id="LOCAL-00046" summary="feat: implement document editor for CVs and cover letters with live preview functionality">
+      <option name="closed" value="true" />
+      <created>1782321166018</created>
+      <option name="number" value="00046" />
+      <option name="presentableId" value="LOCAL-00046" />
+      <option name="project" value="LOCAL" />
+      <updated>1782321166018</updated>
+    </task>
+    <option name="localTasksCounter" value="47" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -509,7 +529,6 @@
     </option>
   </component>
   <component name="VcsManagerConfiguration">
-    <MESSAGE value="refactor next.config.mjs to remove standalone output configuration" />
     <MESSAGE value="refactor next.config.mjs to conditionally set output configuration based on environment" />
     <MESSAGE value="refactor next.config.mjs to add API rewrites based on environment variable" />
     <MESSAGE value="refactor Dockerfile to allow dynamic port configuration for uvicorn" />
@@ -534,7 +553,8 @@
     <MESSAGE value="feat: implement full job description fetching and update logic for job analysis" />
     <MESSAGE value="feat: add document templates and rendering logic for CVs and cover letters" />
     <MESSAGE value="feat: enhance document generation by adding structured JSON support for CVs and cover letters, and implement HTML rendering for live previews" />
-    <option name="LAST_COMMIT_MESSAGE" value="feat: enhance document generation by adding structured JSON support for CVs and cover letters, and implement HTML rendering for live previews" />
+    <MESSAGE value="feat: implement document editor for CVs and cover letters with live preview functionality" />
+    <option name="LAST_COMMIT_MESSAGE" value="feat: implement document editor for CVs and cover letters with live preview functionality" />
   </component>
   <component name="com.intellij.coverage.CoverageDataManagerImpl">
     <SUITE FILE_PATH="coverage/Windrush$analyze_summer.coverage" NAME="analyze_summer Coverage Results" MODIFIED="1779272339042" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />

@@ -385,6 +385,37 @@ def _persona_to_cvdoc(persona: dict) -> dict:
     }
 
 
+def _seniority(persona: dict) -> str:
+    """
+    Classify a persona as 'junior' (recent grad / early career) or 'experienced'.
+    Drives CV section order (Education-first for juniors), length discipline, and
+    cover-letter framing — per the 2026 graduate application strategy.
+    """
+    import datetime as _dt
+    hist = persona.get("history", []) or []
+    senior_kw = ("senior", "lead", "principal", "staff", "head of",
+                 "director", "manager", " vp", "vice president", "chief")
+    if any(any(k in (e.get("title", "") or "").lower() for k in senior_kw) for e in hist):
+        return "experienced"
+
+    now = _dt.date.today().year
+    starts, ends = [], []
+    for e in hist:
+        sm = re.search(r"(19|20)\d{2}", str(e.get("start_date", "")))
+        if sm:
+            starts.append(int(sm.group(0)))
+        if e.get("is_current"):
+            ends.append(now)
+        else:
+            em = re.search(r"(19|20)\d{2}", str(e.get("end_date", "")))
+            if em:
+                ends.append(int(em.group(0)))
+    span = (max(ends) - min(starts)) if (starts and ends) else 0
+    if span >= 4 or len(hist) >= 3:
+        return "experienced"
+    return "junior"
+
+
 _CVDOC_SCHEMA = (
     '{"name":str,"headline":str,'
     '"contact":{"email":str,"phone":str,"location":str,"linkedin":str,"github":str,"website":str},'
@@ -687,6 +718,7 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
         directives = persona.get("custom_directives", "")
         core = persona.get("core_info", {})
         full_name = f"{core.get('first_name', '')} {core.get('last_name', '')}".strip()
+        level = _seniority(persona)
 
         import datetime
         base_letter = {
@@ -701,20 +733,30 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
             },
             "salutation": "Dear Hiring Manager,",
             "paragraphs": [],
-            "signoff": "Sincerely,",
+            "signoff": "Yours faithfully,",
             "archetype": archetype,
         }
 
         system = (
-            f"Write a {tone} cover letter. Archetype: {archetype}. {archetype_guidance} "
+            f"Write a {tone}, authentically human cover letter for a {level} candidate. "
+            f"Archetype: {archetype}. {archetype_guidance} "
             'Return ONLY a JSON object (no prose, no code fences) with this shape: '
-            '{"salutation":str,"paragraphs":[str,str,str],"signoff":str}. '
-            "'paragraphs' must be EXACTLY 3 strings: (1) a hook naming the role and why the candidate fits; "
-            "(2) specific evidence from the candidate's REAL experience using the STAR method "
-            "(Situation, Task, Action, Result); (3) an enthusiastic close with a call to action. "
-            "Be specific — reference the candidate's actual experience and the job's requirements. "
-            "No placeholders like [Your Address] or [Date]. Use 'Dear Hiring Manager,' as the salutation "
-            "unless a named contact is provided. Do NOT invent facts not present in the persona."
+            '{"salutation":str,"paragraphs":[str,...],"signoff":str}. '
+            "Use 3-4 short paragraphs totalling 250-400 words, in this order: "
+            "(1) HOOK 60-80 words — open with a specific, researched reason for THIS company and name the exact "
+            "role; NEVER begin with 'I am writing to apply for'. "
+            "(2) EVIDENCE 100-150 words — ONE relevant project, internship or role told as a concrete "
+            "micro-anecdote: the problem, the decision/action taken, and a quantified result. "
+            "(3) FIT 60-100 words — connect those skills to the employer's specific needs from the job "
+            "description; emphasise transferable strengths. "
+            "(4) CLOSE 30-50 words — brief, non-desperate enthusiasm and a request to talk. "
+            "AUTHENTICITY (critical — recruiters reject robotic AI text): vary sentence length and rhythm and "
+            "include at least one specific detail or metric. Do NOT use any of these words: delve, testament, "
+            "tapestry, landscape, foster, underscore, beacon, synergy, pivotal, intricate, unleash, elevate, "
+            "seamless, robust, leverage. Do NOT cluster 'Furthermore/Moreover/Additionally'. No moralistic "
+            "summary sentences, no placeholders, no invented facts. "
+            "Salutation: 'Dear Hiring Manager,' unless a named contact is provided. "
+            "Sign-off: 'Yours faithfully,' when no name is known, 'Yours sincerely,' when it is (UK convention)."
             + (f"\n\nDirectives from user: {directives}" if directives else "")
             + (f"\n\nDifferentiation hook to weave in naturally: {hook}" if hook else "")
         )
@@ -836,15 +878,39 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
         template_id = tool_input.get("template_id", "classic")
 
         base_cv = _persona_to_cvdoc(persona)
+        level = _seniority(persona)
+        if level == "junior":
+            level_guidance = (
+                "This is an early-career / graduate candidate. Treat substantial university projects, "
+                "capstones, internships and part-time (incl. retail/hospitality) roles as first-class "
+                "experience, reframing duties as transferable competencies (stakeholder management, data "
+                "analysis, operational delivery, working under pressure). The CV MUST fit a SINGLE page."
+            )
+            summary_rule = "summary = 2-3 sentences"
+        else:
+            level_guidance = (
+                "This is an experienced candidate. Lead with scope of ownership, leadership and measurable "
+                "business impact. The CV should fit 1-2 pages."
+            )
+            summary_rule = "summary = 3 sentences"
+
         cv = await _llm_json(
             system=(
-                "You are a professional CV writer. Return ONLY a JSON object (no prose, no code fences) "
-                "for a tailored, ATS-optimised CV using EXACTLY this shape: " + _CVDOC_SCHEMA + ". "
-                "Tailor to the target job: reorder and reword experience, skills and projects to emphasise "
-                "relevance and mirror the job's keywords naturally. "
-                "CONSTRAINTS (critical — the CV must fit 1–2 pages): summary <= 3 sentences; at most 4 "
-                "most-recent roles; at most 4 bullets per role; each bullet <= ~14 words, achievement-oriented "
-                "(STAR) and starting with a strong verb; at most 3 projects. "
+                "You are an expert CV writer for the 2026 ATS-driven graduate market. Return ONLY a JSON "
+                "object (no prose, no code fences) using EXACTLY this shape: " + _CVDOC_SCHEMA + ". "
+                "Tailor to the target job: reorder and reword to mirror the job's exact, conventional keywords. "
+                "ATS RULES: use standard industry skill names and SPELL OUT acronyms next to the abbreviation, "
+                "e.g. 'Search Engine Optimization (SEO)'. Format EVERY date as 'Mon YYYY' or MM/YYYY "
+                "(never 'Summer 2025' or \"Jan '25\"). "
+                "BULLETS: 3-4 per role, each a single line of ~16-26 words, beginning with a strong, varied "
+                "action verb (never 'Responsible for' or 'Helped with'); follow Action + Task/Tool + quantified "
+                "Result. Quantify with scale/volume, frequency, efficiency or percentages even when revenue "
+                "metrics are absent. "
+                f"{level_guidance} "
+                f"LENGTH: {summary_rule} of factual capability (no 'hardworking team player' filler); at most 4 "
+                "most-recent roles; at most 3 projects. "
+                "Avoid AI-cliché filler words (delve, testament, robust, seamless, synergy, leverage, pivotal, "
+                "intricate, elevate). "
                 "Use ONLY facts present in the provided candidate data — do NOT invent employers, dates, "
                 "metrics or skills. Keep every contact field exactly as given."
             ),
@@ -862,6 +928,7 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
         cv["contact"] = base_cv["contact"]
         if not cv.get("name"):
             cv["name"] = base_cv["name"]
+        cv["seniority"] = level  # drives section order in the renderer
         return {"cv": cv, "template_id": template_id}
 
     return {"error": f"Unknown tool: {name}"}
