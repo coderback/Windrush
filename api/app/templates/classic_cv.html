@@ -27,7 +27,7 @@
   <section class="section">
     <h2>Skills</h2>
     {% for grp in cv.skills %}
-      <div class="skill-row"><span class="skill-cat">{{ grp.category }}:</span> {{ grp.items | join(", ") }}</div>
+      <div class="skill-row"><span class="skill-cat">{{ grp.category }}:</span> {{ grp["items"] | join(", ") }}</div>
     {% endfor %}
   </section>
   {% endif %}
