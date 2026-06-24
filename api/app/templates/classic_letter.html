@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>{{ letter.candidate_name }} — Cover Letter</title>
+  <style>{% include "base.css" %}</style>
+</head>
+<body>
+  <header class="letter-head">
+    <h1 class="letter-name">{{ letter.candidate_name }}</h1>
+    {% if letter.contact_items %}
+      <p class="letter-contact">
+        {% for c in letter.contact_items %}{{ c }}{% if not loop.last %} &middot; {% endif %}{% endfor %}
+      </p>
+    {% endif %}
+  </header>
+
+  <div class="letter-meta">
+    {% if letter.date %}{{ letter.date }}<br>{% endif %}
+    {% if letter.job_title and letter.company %}Re: {{ letter.job_title }} at {{ letter.company }}{% elif letter.company %}Re: Application to {{ letter.company }}{% endif %}
+  </div>
+
+  <div class="letter-body">
+    <p>{{ letter.salutation }}</p>
+    {% for para in letter.paragraphs %}
+      <p>{{ para }}</p>
+    {% endfor %}
+  </div>
+
+  <div class="letter-signoff">
+    <p>{{ letter.signoff }}</p>
+    <p class="sig-name">{{ letter.candidate_name }}</p>
+  </div>
+</body>
+</html>

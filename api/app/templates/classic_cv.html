@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>{{ cv.name }} — CV</title>
+  <style>{% include "base.css" %}</style>
+</head>
+<body>
+  <header class="head">
+    <h1 class="name">{{ cv.name }}</h1>
+    {% if cv.headline %}<p class="headline">{{ cv.headline }}</p>{% endif %}
+    {% if cv.contact_items %}
+      <p class="contact">
+        {% for c in cv.contact_items %}{{ c }}{% if not loop.last %} &middot; {% endif %}{% endfor %}
+      </p>
+    {% endif %}
+  </header>
+
+  {% if cv.summary %}
+  <section class="section">
+    <h2>Summary</h2>
+    <p class="summary">{{ cv.summary }}</p>
+  </section>
+  {% endif %}
+
+  {% if cv.skills %}
+  <section class="section">
+    <h2>Skills</h2>
+    {% for grp in cv.skills %}
+      <div class="skill-row"><span class="skill-cat">{{ grp.category }}:</span> {{ grp.items | join(", ") }}</div>
+    {% endfor %}
+  </section>
+  {% endif %}
+
+  {% if cv.experience %}
+  <section class="section">
+    <h2>Experience</h2>
+    {% for role in cv.experience %}
+      <div class="role">
+        <div class="role-head">
+          <div>
+            <span class="role-title">{{ role.title }}</span>{% if role.employer %} <span class="role-employer">&mdash; {{ role.employer }}</span>{% endif %}{% if role.location %}<span class="entry-meta">, {{ role.location }}</span>{% endif %}
+          </div>
+          {% if role.dates %}<div class="role-dates">{{ role.dates }}</div>{% endif %}
+        </div>
+        {% if role.bullets %}
+        <ul class="role-bullets">
+          {% for b in role.bullets %}<li>{{ b }}</li>{% endfor %}
+        </ul>
+        {% endif %}
+      </div>
+    {% endfor %}
+  </section>
+  {% endif %}
+
+  {% if cv.projects %}
+  <section class="section">
+    <h2>Projects</h2>
+    {% for p in cv.projects %}
+      <div class="entry">
+        <div class="entry-head">
+          <div><span class="entry-title">{{ p.name }}</span></div>
+          {% if p.link %}<div class="entry-meta">{{ p.link }}</div>{% endif %}
+        </div>
+        {% if p.description %}<div class="entry-desc">{{ p.description }}</div>{% endif %}
+        {% if p.tech %}<div class="tech">{{ p.tech | join(", ") }}</div>{% endif %}
+      </div>
+    {% endfor %}
+  </section>
+  {% endif %}
+
+  {% if cv.education %}
+  <section class="section">
+    <h2>Education</h2>
+    {% for e in cv.education %}
+      <div class="entry">
+        <div class="entry-head">
+          <div><span class="entry-title">{{ e.degree }}</span>{% if e.institution %} <span class="entry-sub">&mdash; {{ e.institution }}</span>{% endif %}{% if e.grade %} <span class="entry-sub">({{ e.grade }})</span>{% endif %}</div>
+          {% if e.year %}<div class="entry-meta">{{ e.year }}</div>{% endif %}
+        </div>
+      </div>
+    {% endfor %}
+  </section>
+  {% endif %}
+
+  {% if cv.certifications %}
+  <section class="section">
+    <h2>Certifications</h2>
+    {% for c in cv.certifications %}
+      <div class="entry">
+        <div class="entry-head">
+          <div><span class="entry-title">{{ c.name }}</span>{% if c.issuer %} <span class="entry-sub">&mdash; {{ c.issuer }}</span>{% endif %}</div>
+          {% if c.year %}<div class="entry-meta">{{ c.year }}</div>{% endif %}
+        </div>
+      </div>
+    {% endfor %}
+  </section>
+  {% endif %}
+</body>
+</html>
