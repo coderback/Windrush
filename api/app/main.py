@@ -18,6 +18,7 @@ from .job_proxy import search_jobs
 from . import tracker
 from . import auth
 from . import pdf_generator
+from . import doc_render
 from . import jobs_db
 from .models import Persona
 
@@ -782,17 +783,46 @@ async def create_pdf(
     body: dict,
     current_user: Annotated[auth.User, Depends(auth.get_current_user)],
 ):
-    """Generate a PDF from CV or cover-letter Markdown text."""
+    """
+    Generate a PDF for a document.
+
+    Preferred: a structured ``doc`` (CVDoc/LetterDoc) rendered via the HTML template
+    → WeasyPrint. Legacy: raw ``text`` rendered via fpdf2 (kept for back-compat).
+    """
     doc_type = body.get("type", "cv")
-    text = body.get("text", "")
+    doc = body.get("doc")
+    template_id = body.get("template_id", "classic")
     metadata = body.get("metadata", {})
-    if not text:
-        raise HTTPException(status_code=400, detail="text is required")
+
     try:
-        doc_id = pdf_generator.generate_pdf(doc_type, text, metadata)
+        if doc is not None:
+            doc_id = await doc_render.render_pdf(doc_type, doc, template_id)
+        else:
+            text = body.get("text", "")
+            if not text:
+                raise HTTPException(status_code=400, detail="doc or text is required")
+            doc_id = pdf_generator.generate_pdf(doc_type, text, metadata)
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
     return {"doc_id": doc_id, "download_url": f"/api/documents/{doc_id}/download"}
+
+
+@app.post("/documents/preview")
+async def preview_document(
+    body: dict,
+    current_user: Annotated[auth.User, Depends(auth.get_current_user)],
+):
+    """Render a structured document to HTML for the live in-app preview (iframe)."""
+    doc_type = body.get("type", "cv")
+    doc = body.get("doc", {})
+    template_id = body.get("template_id", "classic")
+    try:
+        html = doc_render.render_html(doc_type, doc, template_id)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+    return {"html": html}
 
 
 from fastapi.responses import FileResponse  # noqa: E402

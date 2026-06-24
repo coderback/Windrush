@@ -254,12 +254,13 @@ TOOLS = [
     },
     {
         "name": "generate_tailored_cv",
-        "description": "Generate a tailored CV (Markdown) for a specific job, emphasising the most relevant experience and skills from the user persona.",
+        "description": "Generate a tailored CV (structured JSON CVDoc) for a specific job, emphasising the most relevant experience and skills from the user persona.",
         "input_schema": {
             "type": "object",
             "properties": {
                 "job": {"type": "object", "description": "Target job object with title, company, description"},
                 "persona": {"type": "object", "description": "Structured User Persona"},
+                "template_id": {"type": "string", "description": "Document template id (default 'classic')"},
             },
             "required": ["job", "persona"],
         },
@@ -291,6 +292,108 @@ async def _llm(system: str, user: str, max_tokens: int = 2048) -> str:
         ],
     )
     return resp.choices[0].message.content or ""
+
+
+async def _llm_json(system: str, user: str, max_tokens: int = 2048) -> dict | None:
+    """
+    LLM call that expects a single JSON object back. Strips ```json fences and any
+    surrounding prose, then parses. Returns None on unparseable output so callers
+    can fall back to a deterministically-built document.
+    """
+    raw = await _llm(system, user, max_tokens=max_tokens)
+    text = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+    if not text.startswith("{"):
+        start, end = text.find("{"), text.rfind("}")
+        if start != -1 and end > start:
+            text = text[start:end + 1]
+    try:
+        data = json.loads(text or "")
+    except json.JSONDecodeError:
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _persona_to_cvdoc(persona: dict) -> dict:
+    """
+    Build a complete CVDoc straight from the persona — used both as the structured
+    context handed to the LLM and as the fallback if the model returns bad JSON.
+    """
+    core = persona.get("core_info", {})
+    name = f"{core.get('first_name', '')} {core.get('last_name', '')}".strip()
+    contact = {
+        "email": core.get("email", ""),
+        "phone": core.get("phone", ""),
+        "location": core.get("city", "") or core.get("location", ""),
+        "linkedin": core.get("linkedin", ""),
+        "github": core.get("github", ""),
+        "website": core.get("website", ""),
+    }
+    skills = [
+        {"category": c.get("category", "Skills"), "items": c.get("skills", [])}
+        for c in persona.get("skills", [])
+    ]
+
+    experience = []
+    for exp in persona.get("history", []):
+        end = "Present" if exp.get("is_current") else exp.get("end_date", "")
+        bullets: list[str] = []
+        ach = exp.get("achievements")
+        if isinstance(ach, list):
+            bullets.extend([a for a in ach if a])
+        elif isinstance(ach, str) and ach.strip():
+            bullets.append(ach.strip())
+        metrics = exp.get("metrics")
+        if metrics:
+            bullets.append(metrics if isinstance(metrics, str) else ", ".join(metrics))
+        if not bullets and exp.get("summary"):
+            bullets.append(exp["summary"])
+        experience.append({
+            "title": exp.get("title", ""),
+            "employer": exp.get("employer", ""),
+            "location": exp.get("location", ""),
+            "start_date": exp.get("start_date", ""),
+            "end_date": end,
+            "bullets": bullets,
+        })
+
+    education = [
+        {"degree": e.get("degree", ""), "institution": e.get("institution", ""),
+         "year": e.get("end_date", "") or e.get("year", ""), "grade": e.get("grade", "")}
+        for e in persona.get("education", [])
+    ]
+    projects = [
+        {"name": p.get("name", ""),
+         "description": p.get("problem_solved", "") or p.get("outcomes", ""),
+         "tech": p.get("technologies", []) if isinstance(p.get("technologies"), list) else [],
+         "link": p.get("url", "")}
+        for p in persona.get("projects", [])
+    ]
+    certifications = [
+        {"name": c.get("name", ""), "issuer": c.get("issuer", ""), "year": c.get("year", "")}
+        for c in persona.get("certifications", [])
+    ]
+    return {
+        "name": name,
+        "headline": experience[0]["title"] if experience else "",
+        "contact": contact,
+        "summary": persona.get("summary", ""),
+        "skills": skills,
+        "experience": experience,
+        "education": education,
+        "projects": projects,
+        "certifications": certifications,
+    }
+
+
+_CVDOC_SCHEMA = (
+    '{"name":str,"headline":str,'
+    '"contact":{"email":str,"phone":str,"location":str,"linkedin":str,"github":str,"website":str},'
+    '"summary":str,"skills":[{"category":str,"items":[str]}],'
+    '"experience":[{"title":str,"employer":str,"location":str,"start_date":str,"end_date":str,"bullets":[str]}],'
+    '"education":[{"degree":str,"institution":str,"year":str,"grade":str}],'
+    '"projects":[{"name":str,"description":str,"tech":[str],"link":str}],'
+    '"certifications":[{"name":str,"issuer":str,"year":str}]}'
+)
 
 
 _ARCHETYPE_KEYWORDS: dict[str, list[str]] = {
@@ -582,32 +685,69 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
         }[archetype]
         
         directives = persona.get("custom_directives", "")
+        core = persona.get("core_info", {})
+        full_name = f"{core.get('first_name', '')} {core.get('last_name', '')}".strip()
+
+        import datetime
+        base_letter = {
+            "candidate_name": full_name,
+            "company": job.get("company", ""),
+            "job_title": job.get("title", ""),
+            "date": datetime.date.today().strftime("%d %B %Y"),
+            "contact": {
+                "email": core.get("email", ""),
+                "phone": core.get("phone", ""),
+                "location": core.get("city", "") or core.get("location", ""),
+            },
+            "salutation": "Dear Hiring Manager,",
+            "paragraphs": [],
+            "signoff": "Sincerely,",
+            "archetype": archetype,
+        }
+
         system = (
             f"Write a {tone} cover letter. Archetype: {archetype}. {archetype_guidance} "
+            'Return ONLY a JSON object (no prose, no code fences) with this shape: '
+            '{"salutation":str,"paragraphs":[str,str,str],"signoff":str}. '
+            "'paragraphs' must be EXACTLY 3 strings: (1) a hook naming the role and why the candidate fits; "
+            "(2) specific evidence from the candidate's REAL experience using the STAR method "
+            "(Situation, Task, Action, Result); (3) an enthusiastic close with a call to action. "
             "Be specific — reference the candidate's actual experience and the job's requirements. "
-            "If citing a specific project or achievement from the persona's 'story_bank' or history, structure the paragraph using the STAR method (Situation, Task, Action, Result) to make it impactful. "
-            "3 paragraphs. No placeholders like [Your Address] or [Date] — omit address headers entirely "
-            "and start directly with 'Dear Hiring Manager,'."
+            "No placeholders like [Your Address] or [Date]. Use 'Dear Hiring Manager,' as the salutation "
+            "unless a named contact is provided. Do NOT invent facts not present in the persona."
             + (f"\n\nDirectives from user: {directives}" if directives else "")
             + (f"\n\nDifferentiation hook to weave in naturally: {hook}" if hook else "")
         )
-        letter = await _llm(
+        data = await _llm_json(
             system=system,
             user=(
-                f"Candidate Persona: {json.dumps(persona)}\n\n"
-                f"Job: {job.get('title')} at {job.get('company')}\n"
-                f"Description: {job.get('description', '')}"
+                f"CANDIDATE PERSONA (JSON): {json.dumps(persona)}\n\n"
+                f"JOB: {job.get('title')} at {job.get('company')}\n"
+                f"DESCRIPTION: {job.get('description', '')[:2500]}"
             ),
             max_tokens=1024,
         )
-        core = persona.get("core_info", {})
-        full_name = f"{core.get('first_name', '')} {core.get('last_name', '')}".strip()
+
+        letter = dict(base_letter)
+        if data:
+            if isinstance(data.get("paragraphs"), list) and data["paragraphs"]:
+                letter["paragraphs"] = [str(p) for p in data["paragraphs"] if str(p).strip()]
+            if data.get("salutation"):
+                letter["salutation"] = str(data["salutation"]).strip()
+            if data.get("signoff"):
+                letter["signoff"] = str(data["signoff"]).strip()
+        if not letter["paragraphs"]:
+            letter["paragraphs"] = [
+                persona.get("summary", "")
+                or f"I am writing to apply for the {job.get('title', '')} role at {job.get('company', '')}."
+            ]
+
         return {
             "status": "ready",
             "job_title": job.get("title", ""),
             "company": job.get("company", ""),
             "candidate_name": full_name,
-            "cover_letter": letter,
+            "letter": letter,
             "archetype": archetype,
         }
 
@@ -693,60 +833,36 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
     elif name == "generate_tailored_cv":
         job = tool_input.get("job", {})
         persona = tool_input.get("persona", {})
+        template_id = tool_input.get("template_id", "classic")
 
-        core = persona.get("core_info", {})
-        full_name = f"{core.get('first_name', '')} {core.get('last_name', '')}".strip()
-        contact_parts = filter(None, [
-            core.get("email"), core.get("phone"),
-            core.get("city"), core.get("linkedin"), core.get("github"),
-        ])
-        contact_line = " | ".join(contact_parts)
-
-        skills_str = ""
-        for cat in persona.get("skills", []):
-            skills_str += f"**{cat.get('category','Skills')}:** {', '.join(cat.get('skills',[]))}\n"
-
-        history_str = ""
-        for exp in persona.get("history", [])[:5]:
-            end = "Present" if exp.get("is_current") else exp.get("end_date", "")
-            history_str += (
-                f"**{exp.get('title','')}** — {exp.get('employer','')} "
-                f"({exp.get('start_date','')} – {end})\n"
-                f"{exp.get('summary','')}\n"
-                f"{exp.get('metrics','')}\n\n"
-            )
-
-        edu_str = ""
-        for edu in persona.get("education", []):
-            edu_str += f"**{edu.get('degree','')}** — {edu.get('institution','')} ({edu.get('grade','')})\n"
-
-        proj_str = ""
-        for proj in persona.get("projects", [])[:3]:
-            proj_str += f"**{proj.get('name','')}**: {proj.get('problem_solved','')} → {proj.get('outcomes','')}\n"
-
-        cv_text = await _llm(
+        base_cv = _persona_to_cvdoc(persona)
+        cv = await _llm_json(
             system=(
-                "You are a professional CV writer. Produce a tailored, ATS-optimised CV in clean Markdown. "
-                "Reorder and emphasise experience, skills, and projects that are most relevant to the target job. "
-                "Mirror keywords from the job description naturally. "
-                "Use this structure: Contact header, Professional Summary (3 sentences), Skills (grouped), "
-                "Experience (reverse-chronological, bullets using STAR), Education, Projects. "
-                "Do NOT add fictional information — only use what is provided. "
-                "Do NOT include placeholders. Output only the Markdown, no preamble."
+                "You are a professional CV writer. Return ONLY a JSON object (no prose, no code fences) "
+                "for a tailored, ATS-optimised CV using EXACTLY this shape: " + _CVDOC_SCHEMA + ". "
+                "Tailor to the target job: reorder and reword experience, skills and projects to emphasise "
+                "relevance and mirror the job's keywords naturally. "
+                "CONSTRAINTS (critical — the CV must fit 1–2 pages): summary <= 3 sentences; at most 4 "
+                "most-recent roles; at most 4 bullets per role; each bullet <= ~14 words, achievement-oriented "
+                "(STAR) and starting with a strong verb; at most 3 projects. "
+                "Use ONLY facts present in the provided candidate data — do NOT invent employers, dates, "
+                "metrics or skills. Keep every contact field exactly as given."
             ),
             user=(
-                f"# Target Job\n{job.get('title','')} at {job.get('company','')}\n"
-                f"Job Description:\n{job.get('description','')[:2000]}\n\n"
-                f"# Candidate\nName: {full_name}\nContact: {contact_line}\n\n"
-                f"## Skills\n{skills_str}\n"
-                f"## Experience\n{history_str}\n"
-                f"## Education\n{edu_str}\n"
-                f"## Projects\n{proj_str}\n"
-                f"Summary from persona: {persona.get('summary','')}"
+                f"TARGET JOB: {job.get('title','')} at {job.get('company','')}\n"
+                f"JOB DESCRIPTION:\n{job.get('description','')[:2500]}\n\n"
+                f"CANDIDATE DATA (JSON):\n{json.dumps(base_cv)}"
             ),
             max_tokens=2048,
         )
-        return {"cv_text": cv_text.strip()}
+
+        if not cv or not (cv.get("experience") or cv.get("summary")):
+            cv = base_cv
+        # Trust our own structured data for identity/contact — never let the model alter these.
+        cv["contact"] = base_cv["contact"]
+        if not cv.get("name"):
+            cv["name"] = base_cv["name"]
+        return {"cv": cv, "template_id": template_id}
 
     return {"error": f"Unknown tool: {name}"}
 
