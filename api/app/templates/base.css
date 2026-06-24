@@ -50,7 +50,7 @@ a { color: inherit; text-decoration: none; }
 .headline {
   margin: 1pt 0 0;
   font-size: 11pt;
-  color: #0f766e;
+  color: #333;
   font-weight: 600;
 }
 .contact {
@@ -59,73 +59,59 @@ a { color: inherit; text-decoration: none; }
   color: #555;
   font-family: Arial, "Liberation Sans", "DejaVu Sans", sans-serif;
 }
+.contact a, .letter-contact a, .letter-contact-line a { color: inherit; text-decoration: underline; }
 
 /* ── Sections ───────────────────────────────────────────────────────── */
 .section { margin-top: 11pt; }
 .section h2 {
   margin: 0 0 5pt;
   padding-bottom: 2pt;
-  font-size: 10pt;
+  font-size: 10.5pt;
   font-weight: 700;
-  letter-spacing: 1.2pt;
+  letter-spacing: 1pt;
   text-transform: uppercase;
-  color: #0f766e;
-  border-bottom: 0.7pt solid #cfcfcf;
+  color: #1a1a1a;
+  border-bottom: 0.8pt solid #555;
   break-after: avoid;
 }
 
 .summary { font-size: 10.5pt; }
 
-/* ── Experience ─────────────────────────────────────────────────────── */
+/* ── Entry lines (experience / education / projects / certifications) ── */
+/* Reference look: an uppercase, bold, pipe-separated heading line per entry
+   (ROLE | EMPLOYER | DATES), with detail beneath. Uppercasing is visual only —
+   the underlying text stays mixed-case so ATS parsers read it correctly. */
 .role { margin-bottom: 8pt; break-inside: avoid; }
 .role:last-child { margin-bottom: 0; }
-.role-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  gap: 10pt;
+.entry { margin-bottom: 6pt; break-inside: avoid; }
+
+.entry-line {
+  font-weight: 700;
+  font-size: 10pt;
+  text-transform: uppercase;
+  letter-spacing: 0.2pt;
 }
-.role-title { font-weight: 700; }
-.role-employer { font-weight: 600; color: #333; }
-.role-dates {
-  font-size: 9pt;
-  color: #666;
-  white-space: nowrap;
-  font-family: Arial, "Liberation Sans", "DejaVu Sans", sans-serif;
-}
-.role-bullets { font-size: 10pt; }
+.entry-grade { font-size: 10pt; color: #333; margin: 1pt 0 0 14pt; }
+.entry-desc { font-size: 10pt; margin-top: 1pt; }
+.tech { font-size: 9pt; color: #555; font-style: italic; margin-top: 1pt; }
+.role-bullets { font-size: 10pt; margin-top: 2pt; }
 
 /* ── Skills ─────────────────────────────────────────────────────────── */
 .skill-row { margin-bottom: 3pt; font-size: 10pt; }
 .skill-cat { font-weight: 700; }
 
-/* ── Education / Projects / Certs ───────────────────────────────────── */
-.entry { margin-bottom: 5pt; break-inside: avoid; }
-.entry-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  gap: 10pt;
-}
-.entry-title { font-weight: 700; }
-.entry-sub { color: #333; }
-.entry-meta {
-  font-size: 9pt;
-  color: #666;
-  white-space: nowrap;
-  font-family: Arial, "Liberation Sans", "DejaVu Sans", sans-serif;
-}
-.entry-desc { font-size: 10pt; margin-top: 1pt; }
-.tech { font-size: 9pt; color: #555; font-style: italic; }
-
 /* ── Cover letter ───────────────────────────────────────────────────── */
 .letter-head { margin-bottom: 14pt; }
 .letter-name { font-size: 18pt; font-weight: 700; margin: 0; }
-.letter-contact {
-  font-size: 9pt; color: #555; margin-top: 3pt;
-  font-family: Arial, "Liberation Sans", "DejaVu Sans", sans-serif;
+.letter-headline { font-size: 11pt; color: #333; font-weight: 600; margin: 1pt 0 0; }
+.letter-contact-block { margin-top: 10pt; }
+.letter-contact-label {
+  font-weight: 700; font-size: 10pt; text-transform: uppercase;
+  letter-spacing: 0.6pt; margin: 0 0 2pt;
 }
+.letter-contact-line { font-size: 10pt; margin: 0; line-height: 1.35; }
 .letter-meta { margin: 12pt 0; font-size: 10pt; color: #444; }
 .letter-body p { margin: 0 0 9pt; font-size: 10.5pt; line-height: 1.4; }
 .letter-signoff { margin-top: 14pt; }
+.letter-signoff p { margin: 0; }
 .letter-signoff .sig-name { font-weight: 700; }

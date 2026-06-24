@@ -8,17 +8,14 @@
 <body>
   <header class="letter-head">
     <h1 class="letter-name">{{ letter.candidate_name }}</h1>
-    {% if letter.contact_items %}
-      <p class="letter-contact">
-        {% for c in letter.contact_items %}{{ c }}{% if not loop.last %} &middot; {% endif %}{% endfor %}
-      </p>
+    {% if letter.headline %}<p class="letter-headline">{{ letter.headline }}</p>{% endif %}
+    {% if letter.contact_lines %}
+    <div class="letter-contact-block">
+      <p class="letter-contact-label">Contact</p>
+      {% for line in letter.contact_lines %}<p class="letter-contact-line">{% if line.href %}<a href="{{ line.href }}">{{ line.text }}</a>{% else %}{{ line.text }}{% endif %}</p>{% endfor %}
+    </div>
     {% endif %}
   </header>
-
-  <div class="letter-meta">
-    {% if letter.date %}{{ letter.date }}<br>{% endif %}
-    {% if letter.job_title and letter.company %}Re: {{ letter.job_title }} at {{ letter.company }}{% elif letter.company %}Re: Application to {{ letter.company }}{% endif %}
-  </div>
 
   <div class="letter-body">
     <p>{{ letter.salutation }}</p>

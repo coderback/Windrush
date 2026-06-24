@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import uuid
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
@@ -39,9 +40,10 @@ _env = Environment(
 _MAX_SUMMARY_CHARS = 420
 _MAX_ROLES = 4
 _MAX_BULLETS = 4
-_MAX_SKILL_GROUPS = 5
-_MAX_SKILL_ITEMS = 12
+_MAX_SKILL_GROUPS = 6
+_MAX_SKILL_ITEMS = 14
 _MAX_PROJECTS = 3
+_MAX_PROJECT_DESC_CHARS = 420
 _MAX_EDUCATION = 4
 _MAX_CERTS = 6
 _MAX_PARAGRAPHS = 4
@@ -57,10 +59,18 @@ def _truncate(text: str, limit: int) -> str:
     # prefer ending on a sentence boundary, else a word boundary
     for sep in (". ", "; "):
         idx = cut.rfind(sep)
-        if idx > limit * 0.5:
+        if idx > limit * 0.35:  # prefer ending on a whole sentence over a mid-clause '…'
             return cut[: idx + 1].strip()
     idx = cut.rfind(" ")
     return (cut[:idx] if idx > 0 else cut).strip() + "…"
+
+
+def _clean_text(text: str) -> str:
+    """Strip stray HTML (literal <br>, leftover tags) and collapse whitespace — guards
+    against verbose persona fields leaking markup into a rendered description."""
+    t = re.sub(r"(?i)<br\s*/?>", " ", text or "")
+    t = re.sub(r"<[^>]+>", " ", t)
+    return re.sub(r"\s+", " ", t).strip()
 
 
 def _short_url(url: str) -> str:
@@ -72,18 +82,56 @@ def _short_url(url: str) -> str:
     return u[4:] if u.startswith("www.") else u
 
 
-def _contact_items(contact: dict) -> list[str]:
+def _abs_url(url: str) -> str:
+    """Ensure a profile link is an absolute URL so it is clickable in the PDF."""
+    u = (url or "").strip()
+    if not u:
+        return ""
+    if u.startswith("http://") or u.startswith("https://"):
+        return u
+    return "https://" + u.lstrip("/")
+
+
+def _project_link_label(url: str) -> str:
+    """Human label for a project link, by host, so it renders as a clickable word
+    ("GitHub" / "Live Demo") instead of a long raw URL — consistent with the
+    labelled contact links."""
+    host = _short_url(url).lower()
+    if not host:
+        return ""
+    if "github.com" in host:
+        return "GitHub"
+    if "gitlab.com" in host:
+        return "GitLab"
+    if "bitbucket" in host:
+        return "Bitbucket"
+    return "Live Demo"
+
+
+def _contact_items(contact: dict) -> list[dict]:
+    """
+    Header contact entries as {text, href?} objects. Profile links render as
+    labelled, clickable hyperlinks ("LinkedIn Profile" / "GitHub" / "Website")
+    rather than long raw URLs; email/phone become mailto:/tel: links; location is
+    plain text. Order: location, phone, email, then profile links.
+    """
     if not isinstance(contact, dict):
         return []
-    items = [
-        (contact.get("email") or "").strip(),
-        (contact.get("phone") or "").strip(),
-        (contact.get("location") or "").strip(),
-        _short_url(contact.get("linkedin", "")),
-        _short_url(contact.get("github", "")),
-        _short_url(contact.get("website", "")),
-    ]
-    return [i for i in items if i]
+    items: list[dict] = []
+    loc = (contact.get("location") or "").strip()
+    phone = (contact.get("phone") or "").strip()
+    email = (contact.get("email") or "").strip()
+    if loc:
+        items.append({"text": loc})
+    if phone:
+        items.append({"text": phone, "href": "tel:" + re.sub(r"[^\d+]", "", phone)})
+    if email:
+        items.append({"text": email, "href": "mailto:" + email})
+    for key, label in (("linkedin", "LinkedIn Profile"), ("github", "GitHub"), ("website", "Website")):
+        url = _abs_url(contact.get(key, ""))
+        if url:
+            items.append({"text": label, "href": url})
+    return items
 
 
 def _role_dates(role: dict) -> str:
@@ -119,9 +167,11 @@ def build_cv_template_data(cv: dict) -> dict:
     for p in (cv.get("projects") or [])[:_MAX_PROJECTS]:
         projects.append({
             "name": (p.get("name") or "").strip(),
-            "description": (p.get("description") or "").strip(),
+            "description": _truncate(_clean_text(p.get("description", "")), _MAX_PROJECT_DESC_CHARS),
             "tech": [t for t in (p.get("tech") or []) if t],
             "link": _short_url(p.get("link", "")),
+            "link_href": _abs_url(p.get("link", "")),
+            "link_label": _project_link_label(p.get("link", "")),
         })
 
     education = []
@@ -167,18 +217,42 @@ def build_cv_template_data(cv: dict) -> dict:
     }
 
 
+def _letter_contact_lines(contact: dict) -> list[dict]:
+    """Vertical contact block for a cover letter: address, city+postcode, phone, email."""
+    if not isinstance(contact, dict):
+        return []
+    lines: list[dict] = []
+    addr = (contact.get("address_line_1") or "").strip()
+    city = (contact.get("city") or contact.get("location") or "").strip()
+    postcode = (contact.get("postcode") or "").strip()
+    phone = (contact.get("phone") or "").strip()
+    email = (contact.get("email") or "").strip()
+    if addr:
+        lines.append({"text": addr + ","})
+    city_line = " ".join(x for x in [city, postcode] if x).strip()
+    if city_line:
+        lines.append({"text": city_line + "."})
+    if phone:
+        lines.append({"text": phone, "href": "tel:" + re.sub(r"[^\d+]", "", phone)})
+    if email:
+        lines.append({"text": email, "href": "mailto:" + email})
+    return lines
+
+
 def build_letter_template_data(letter: dict) -> dict:
     letter = letter or {}
     paragraphs = [p.strip() for p in (letter.get("paragraphs") or []) if p and p.strip()][:_MAX_PARAGRAPHS]
     return {
         "candidate_name": (letter.get("candidate_name") or "").strip(),
+        "headline": (letter.get("headline") or "").strip(),
         "company": (letter.get("company") or "").strip(),
         "job_title": (letter.get("job_title") or "").strip(),
+        "company_location": (letter.get("company_location") or "").strip(),
         "date": (letter.get("date") or "").strip(),
-        "contact_items": _contact_items(letter.get("contact", {})),
+        "contact_lines": _letter_contact_lines(letter.get("contact", {})),
         "salutation": (letter.get("salutation") or "Dear Hiring Manager,").strip(),
         "paragraphs": paragraphs,
-        "signoff": (letter.get("signoff") or "Sincerely,").strip(),
+        "signoff": (letter.get("signoff") or "Yours faithfully,").strip(),
     }
 
 
@@ -215,7 +289,12 @@ def _fallback_pdf(doc_type: str, doc: dict) -> str:
     """Legacy fpdf2 path used only if WeasyPrint is unavailable/errors."""
     if doc_type == "cover_letter":
         data = build_letter_template_data(doc)
-        text = "\n\n".join([data["salutation"], *data["paragraphs"], data["signoff"], data["candidate_name"]])
+        head = [data["candidate_name"]]
+        if data["headline"]:
+            head.append(data["headline"])
+        head += [c["text"] for c in data["contact_lines"]]
+        body = [data["salutation"], *data["paragraphs"], data["signoff"], data["candidate_name"]]
+        text = "\n".join(head) + "\n\n" + "\n\n".join(body)
         meta = {"name": data["candidate_name"], "job_title": data["job_title"], "company": data["company"]}
         return pdf_generator.generate_pdf("cover_letter", text, meta)
     data = build_cv_template_data(doc)
@@ -225,7 +304,7 @@ def _fallback_pdf(doc_type: str, doc: dict) -> str:
     if data["headline"]:
         lines.append(data["headline"])
     if data["contact_items"]:
-        lines.append(" | ".join(data["contact_items"]))
+        lines.append(" | ".join(c["text"] for c in data["contact_items"]))
     if data["summary"]:
         lines += ["", "## Summary", data["summary"]]
     if data["skills"]:

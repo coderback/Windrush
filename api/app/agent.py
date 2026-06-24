@@ -313,6 +313,65 @@ async def _llm_json(system: str, user: str, max_tokens: int = 2048) -> dict | No
     return data if isinstance(data, dict) else None
 
 
+# Lead-in labels and scaffolding the candidate's verbose portfolio text tends to carry.
+_PROJ_HEADER_RE = re.compile(
+    r"(?i)^\s*(what problem did you solve(?:\s*&\s*how it works)?\s*\??|"
+    r"problem solved\s*:?|problem\s*:|overview\s*:|outcomes?\s*:?)\s*")
+_PROJ_FIRST_PERSON_RE = re.compile(
+    r"(?i)^i\s+(built|developed|created|implemented|designed|made|wrote|engineered)\b")
+# "How it works:" introduces step-by-step scaffolding (numbered lists) we don't want as
+# CV prose. (We deliberately do NOT cut on "N)" — it false-matches citation years like "2023)".)
+_PROJ_SCAFFOLD_RE = re.compile(r"(?i)\bhow it works\b")
+
+
+def _strip_markup(text: str) -> str:
+    t = re.sub(r"(?i)<br\s*/?>", " ", text or "")
+    t = re.sub(r"<[^>]+>", " ", t)
+    return re.sub(r"\s+", " ", t).strip()
+
+
+def _sentences(text: str) -> list[str]:
+    return [s.strip() for s in re.split(r"(?<=[.!?])\s+", text) if s.strip()]
+
+
+def _project_description(p: dict) -> str:
+    """
+    Build a clean ~2-sentence CV description from the candidate's verbose project text.
+    The persona's 'summary'/'technologies' fields are empty in practice, so the depth
+    lives in 'problem_solved' (+ 'outcomes') as portfolio prose with section headers,
+    <br> tags and first-person phrasing — we normalise that into CV voice deterministically
+    so every project reads with the same depth regardless of the model.
+    """
+    ps = _PROJ_HEADER_RE.sub("", _strip_markup(p.get("problem_solved", "")))
+    ps = _PROJ_FIRST_PERSON_RE.sub(lambda m: m.group(1).capitalize(), ps).strip()
+    # Drop step-by-step scaffolding ("How it works", numbered lists) before sentence-splitting.
+    ps_core = _PROJ_SCAFFOLD_RE.split(ps)[0].strip()
+    sents = _sentences(ps_core)[:2]
+    if len(sents) < 2:  # single-sentence problem statement — add the first concrete outcome
+        oc = _PROJ_HEADER_RE.sub("", _strip_markup(p.get("outcomes", "")))
+        oc_first = next(iter(_sentences(oc) or oc.split("\n")), "").strip()
+        if oc_first and oc_first.lower() not in (sents[0].lower() if sents else ""):
+            sents.append(oc_first)
+    desc = " ".join(s if s[-1:] in ".!?" else s + "." for s in sents[:2])
+    return desc or _strip_markup(p.get("summary", ""))
+
+
+def _project_tech_source(p: dict) -> str:
+    """
+    Extract the raw 'Technologies' section from a project's prose. The persona's
+    'technologies' field is empty, but the full stack is listed inside problem_solved/
+    outcomes (e.g. 'Technologies Frontend: Next.js, React Backend: FastAPI ...'). We hand
+    this to the model so it can distil clean canonical tech names — the one thing it does
+    reliably — rather than guessing from the trimmed description.
+    """
+    blob = _strip_markup((p.get("problem_solved", "") or "") + "\n" + (p.get("outcomes", "") or ""))
+    m = re.search(r"(?i)technolog\w*\s*:?", blob)
+    if not m:
+        return ""
+    seg = blob[m.end(): m.end() + 400].strip()
+    return re.split(r"(?i)\bsend message\b", seg)[0].strip()  # drop trailing copy-paste UI junk
+
+
 def _persona_to_cvdoc(persona: dict) -> dict:
     """
     Build a complete CVDoc straight from the persona — used both as the structured
@@ -326,7 +385,9 @@ def _persona_to_cvdoc(persona: dict) -> dict:
         "location": core.get("city", "") or core.get("location", ""),
         "linkedin": core.get("linkedin", ""),
         "github": core.get("github", ""),
-        "website": core.get("website", ""),
+        # core_info has both a 'website' and a 'portfolio' field; either may hold the
+        # candidate's personal site, so fall back to portfolio when website is unset.
+        "website": core.get("website", "") or core.get("portfolio", ""),
     }
     skills = [
         {"category": c.get("category", "Skills"), "items": c.get("skills", [])}
@@ -361,20 +422,21 @@ def _persona_to_cvdoc(persona: dict) -> dict:
          "year": e.get("end_date", "") or e.get("year", ""), "grade": e.get("grade", "")}
         for e in persona.get("education", [])
     ]
-    projects = [
-        {"name": p.get("name", ""),
-         "description": p.get("problem_solved", "") or p.get("outcomes", ""),
-         "tech": p.get("technologies", []) if isinstance(p.get("technologies"), list) else [],
-         "link": p.get("url", "")}
-        for p in persona.get("projects", [])
-    ]
+    projects = []
+    for p in persona.get("projects", []):
+        projects.append({
+            "name": p.get("name", ""),
+            "description": _project_description(p),
+            "tech": p.get("technologies", []) if isinstance(p.get("technologies"), list) else [],
+            "link": p.get("url", ""),
+        })
     certifications = [
         {"name": c.get("name", ""), "issuer": c.get("issuer", ""), "year": c.get("year", "")}
         for c in persona.get("certifications", [])
     ]
     return {
         "name": name,
-        "headline": experience[0]["title"] if experience else "",
+        "headline": "",
         "contact": contact,
         "summary": persona.get("summary", ""),
         "skills": skills,
@@ -383,6 +445,39 @@ def _persona_to_cvdoc(persona: dict) -> dict:
         "projects": projects,
         "certifications": certifications,
     }
+
+
+def _restore_project_depth(cv_projects: list, base_projects: list) -> list:
+    """
+    Keep the model's project *selection* (which projects are most relevant to the job),
+    but restore each project's description, tech stack and link from the persona. The
+    model picks good projects yet summarises them inconsistently (two sentences for one,
+    one for the next); the deterministic persona description (_project_description) gives
+    every project the same depth in the candidate's own words.
+    """
+    def norm(s: str) -> str:
+        return re.sub(r"[^a-z0-9]", "", (s or "").lower())
+
+    by_name = {norm(p.get("name", "")): p for p in (base_projects or []) if p.get("name")}
+    out = []
+    for p in cv_projects or []:
+        key = norm(p.get("name", ""))
+        match = by_name.get(key)
+        if not match:  # fuzzy: one name is a substring of the other (handles added subtitles)
+            for bk, bp in by_name.items():
+                if bk and key and (bk in key or key in bk):
+                    match = bp
+                    break
+        if match:
+            p = dict(p)
+            if match.get("description"):
+                p["description"] = match["description"]
+            if match.get("tech"):
+                p["tech"] = match["tech"]
+            if match.get("link"):
+                p["link"] = match["link"]
+        out.append(p)
+    return out
 
 
 def _seniority(persona: dict) -> str:
@@ -414,6 +509,29 @@ def _seniority(persona: dict) -> str:
     if span >= 4 or len(hist) >= 3:
         return "experienced"
     return "junior"
+
+
+def _headline_from_persona(persona: dict, level: str) -> str:
+    """
+    A concise professional-identity line for the cover-letter header, e.g.
+    'Computer Science Graduate'. Juniors derive it from their degree subject;
+    experienced candidates use their most recent role title. Fallback only —
+    the LLM normally supplies this.
+    """
+    edu = persona.get("education", []) or []
+    hist = persona.get("history", []) or []
+    if level == "junior" and edu:
+        deg = edu[0].get("degree", "") or ""
+        subj = re.sub(
+            r"(?i)\b(b\.?sc|b\.?a|m\.?sc|m\.?a|b\.?eng|m\.?eng|ph\.?d|bachelor(?:'s)?|"
+            r"master(?:'s)?|of|hons?|honours|honors|degree|with|in)\b", " ", deg)
+        subj = re.sub(r"[()]", " ", subj)
+        subj = re.sub(r"\s+", " ", subj).strip(" ,-")
+        if subj:
+            return f"{subj} Graduate"
+    if hist:
+        return hist[0].get("title", "")
+    return ""
 
 
 _CVDOC_SCHEMA = (
@@ -723,13 +841,18 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
         import datetime
         base_letter = {
             "candidate_name": full_name,
+            "headline": "",
             "company": job.get("company", ""),
             "job_title": job.get("title", ""),
+            "company_location": job.get("location", "") or core.get("country", ""),
             "date": datetime.date.today().strftime("%d %B %Y"),
             "contact": {
+                "address_line_1": core.get("address_line_1", ""),
+                "city": core.get("city", "") or core.get("location", ""),
+                "postcode": core.get("postcode", ""),
+                "country": core.get("country", ""),
                 "email": core.get("email", ""),
                 "phone": core.get("phone", ""),
-                "location": core.get("city", "") or core.get("location", ""),
             },
             "salutation": "Dear Hiring Manager,",
             "paragraphs": [],
@@ -741,7 +864,9 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
             f"Write a {tone}, authentically human cover letter for a {level} candidate. "
             f"Archetype: {archetype}. {archetype_guidance} "
             'Return ONLY a JSON object (no prose, no code fences) with this shape: '
-            '{"salutation":str,"paragraphs":[str,...],"signoff":str}. '
+            '{"headline":str,"salutation":str,"paragraphs":[str,...],"signoff":str}. '
+            "'headline' = the candidate's concise professional identity in 2-4 words "
+            "(e.g. 'Computer Science Graduate'); do NOT put the role being applied for. "
             "Use 3-4 short paragraphs totalling 250-400 words, in this order: "
             "(1) HOOK 60-80 words — open with a specific, researched reason for THIS company and name the exact "
             "role; NEVER begin with 'I am writing to apply for'. "
@@ -772,12 +897,16 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
 
         letter = dict(base_letter)
         if data:
+            if data.get("headline"):
+                letter["headline"] = str(data["headline"]).strip()
             if isinstance(data.get("paragraphs"), list) and data["paragraphs"]:
                 letter["paragraphs"] = [str(p) for p in data["paragraphs"] if str(p).strip()]
             if data.get("salutation"):
                 letter["salutation"] = str(data["salutation"]).strip()
             if data.get("signoff"):
                 letter["signoff"] = str(data["signoff"]).strip()
+        if not letter.get("headline"):
+            letter["headline"] = _headline_from_persona(persona, level)
         if not letter["paragraphs"]:
             letter["paragraphs"] = [
                 persona.get("summary", "")
@@ -878,6 +1007,13 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
         template_id = tool_input.get("template_id", "classic")
 
         base_cv = _persona_to_cvdoc(persona)
+        # The model distils clean tech names from each project's raw Technologies section
+        # (persona 'technologies' field is empty; the stack lives in the prose).
+        tech_source = "\n".join(
+            f"- {(p.get('name') or '').strip()}: {ts}"
+            for p in persona.get("projects", [])
+            if (p.get("name") or "").strip() and (ts := _project_tech_source(p))
+        )
         level = _seniority(persona)
         if level == "junior":
             level_guidance = (
@@ -902,15 +1038,35 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
                 "ATS RULES: use standard industry skill names and SPELL OUT acronyms next to the abbreviation, "
                 "e.g. 'Search Engine Optimization (SEO)'. Format EVERY date as 'Mon YYYY' or MM/YYYY "
                 "(never 'Summer 2025' or \"Jan '25\"). "
-                "BULLETS: 3-4 per role, each a single line of ~16-26 words, beginning with a strong, varied "
+                "BULLETS: up to 4 per role, each a single line of ~16-26 words, beginning with a strong, varied "
                 "action verb (never 'Responsible for' or 'Helped with'); follow Action + Task/Tool + quantified "
-                "Result. Quantify with scale/volume, frequency, efficiency or percentages even when revenue "
-                "metrics are absent. "
+                "Result. Quantify ONLY with metrics actually present in the candidate data; if a bullet has no "
+                "source number, convey scope/scale with concrete specifics instead — NEVER invent, estimate or "
+                "round up a percentage, count or efficiency gain. NEVER pad to a count: write only bullets backed "
+                "by a real achievement in the "
+                "source and drop a weak one rather than invent a generic catch-all (e.g. 'Collaborated with "
+                "cross-functional teams', 'Implemented a scalable data pipeline', 'delivered a seamless user "
+                "experience'). PRESERVE the source's concrete specifics verbatim — exact counts ('10-table star "
+                "schema'), named breakdowns ('macronutrients, micronutrients, and functional health tags'), tools "
+                "and metrics; do NOT generalise them away. "
                 f"{level_guidance} "
-                f"LENGTH: {summary_rule} of factual capability (no 'hardworking team player' filler); at most 4 "
-                "most-recent roles; at most 3 projects. "
-                "Avoid AI-cliché filler words (delve, testament, robust, seamless, synergy, leverage, pivotal, "
-                "intricate, elevate). "
+                "PROJECTS: select the candidate's most job-relevant projects (at most 3) and keep each 'name' "
+                "exactly as given. For each, set 'tech' to 6-10 clean, canonical technology names (languages, "
+                "frameworks, datastores, key libraries) drawn from that project's entry in PROJECT TECH SOURCE "
+                "below — omit evaluation metrics, security checks and verbose phrases, and normalise to the "
+                "common name (e.g. 'PostgreSQL', 'FastAPI', 'Next.js'). A short 'description' is fine but it will "
+                "be standardised downstream, so prioritise getting the project selection and 'tech' right. "
+                f"SUMMARY: {summary_rule} leading with a specific specialism + domain + ONE concrete strength "
+                "drawn from the candidate data. Do NOT open with a generic cliché ('Highly motivated', "
+                "'Results-driven', 'Detail-oriented', 'Passionate') and do NOT close with vague filler ('strong "
+                "problem-solving skills and attention to detail', 'hardworking team player'). Do NOT spend a "
+                "sentence naming assumed or basic tooling (e.g. Git / version control). "
+                "LENGTH: at most 4 most-recent roles; at most 3 projects. "
+                "BANNED words (recruiters flag these as AI-written — never use them in bullets, summary or "
+                "project text): delve, testament, robust, seamless, synergy, leverage, pivotal, intricate, "
+                "elevate, foster, underscore, tapestry, landscape. "
+                "Leave 'headline' EMPTY — do not add a title line or echo the target job's role under the "
+                "candidate's name. "
                 "Use ONLY facts present in the provided candidate data — do NOT invent employers, dates, "
                 "metrics or skills. Keep every contact field exactly as given."
             ),
@@ -918,14 +1074,22 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
                 f"TARGET JOB: {job.get('title','')} at {job.get('company','')}\n"
                 f"JOB DESCRIPTION:\n{job.get('description','')[:2500]}\n\n"
                 f"CANDIDATE DATA (JSON):\n{json.dumps(base_cv)}"
+                + (f"\n\nPROJECT TECH SOURCE (use to populate each selected project's 'tech'):\n{tech_source}"
+                   if tech_source else "")
             ),
             max_tokens=2048,
         )
 
         if not cv or not (cv.get("experience") or cv.get("summary")):
             cv = base_cv
-        # Trust our own structured data for identity/contact — never let the model alter these.
+        # Trust our own structured data — never let the model alter identity/contact, and keep
+        # the candidate's full skills list (the model tends to silently drop groups/items when
+        # tailoring; completeness matters more to the user than reordering).
         cv["contact"] = base_cv["contact"]
+        if base_cv.get("skills"):
+            cv["skills"] = base_cv["skills"]
+        if cv.get("projects") and base_cv.get("projects"):
+            cv["projects"] = _restore_project_depth(cv["projects"], base_cv["projects"])
         if not cv.get("name"):
             cv["name"] = base_cv["name"]
         cv["seniority"] = level  # drives section order in the renderer
