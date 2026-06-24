@@ -754,8 +754,8 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
 async def _chat(messages: list, tools: list):
     """Call LLM via OpenAI-compatible API (Ollama or Groq)."""
     all_messages = [{"role": "system", "content": SYSTEM_PROMPT}] + messages
-    # Ollama local inference can be slow on large models — use a longer timeout
-    timeout = 180.0 if _BACKEND == "ollama" else 90.0
+    # Ollama local inference can be slow on large models — use a longer timeout (600s)
+    timeout = 600.0 if _BACKEND == "ollama" else 90.0
     return await asyncio.wait_for(
         client.chat.completions.create(
             model=AGENT_MODEL,

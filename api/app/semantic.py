@@ -22,8 +22,8 @@ async def get_embedding(text: str) -> Optional[List[float]]:
         return _embedding_cache[text]
     
     try:
-        # Increased timeout to 300s to allow for model loading into GPU on limited VRAM
-        async with httpx.AsyncClient(timeout=300.0) as client:
+        # Increased timeout to 600s to allow for model loading into GPU on limited VRAM
+        async with httpx.AsyncClient(timeout=600.0) as client:
             resp = await client.post(
                 f"{_OLLAMA_HOST}/api/embeddings",
                 json={"model": _EMBEDDING_MODEL, "prompt": text}
@@ -65,8 +65,8 @@ def get_embedding_sync(text: str) -> Optional[List[float]]:
         return _embedding_cache[text]
     
     try:
-        # Increased timeout to 300s to allow for model loading into GPU on limited VRAM
-        with httpx.Client(timeout=300.0) as client:
+        # Increased timeout to 600s to allow for model loading into GPU on limited VRAM
+        with httpx.Client(timeout=600.0) as client:
             resp = client.post(
                 f"{_OLLAMA_HOST}/api/embeddings",
                 json={"model": _EMBEDDING_MODEL, "prompt": text}
