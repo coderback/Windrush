@@ -245,8 +245,12 @@ function CvForm({ cv, onChange }: { cv: CVDoc; onChange: (c: CVDoc) => void }) {
                 <textarea className={`${inputCls} resize-y`} rows={2} value={p.description ?? ""}
                   onChange={(e) => set({ projects: cv.projects.map((x, idx) => idx === i ? { ...x, description: e.target.value } : x) })} />
               </div>
-              <Field label="Tech (comma-separated)" value={(p.tech ?? []).join(", ")}
-                onChange={(v) => set({ projects: cv.projects.map((x, idx) => idx === i ? { ...x, tech: v.split(",").map((s) => s.trim()).filter(Boolean) } : x) })} />
+              <div className="grid grid-cols-2 gap-2">
+                <Field label="Tech (comma-separated)" value={(p.tech ?? []).join(", ")}
+                  onChange={(v) => set({ projects: cv.projects.map((x, idx) => idx === i ? { ...x, tech: v.split(",").map((s) => s.trim()).filter(Boolean) } : x) })} />
+                <Field label="Link" value={p.link ?? ""}
+                  onChange={(v) => set({ projects: cv.projects.map((x, idx) => idx === i ? { ...x, link: v } : x) })} />
+              </div>
             </div>
           ))}
         </div>
@@ -266,6 +270,25 @@ function CvForm({ cv, onChange }: { cv: CVDoc; onChange: (c: CVDoc) => void }) {
               <Field label="Institution" value={ed.institution} onChange={(v) => set({ education: cv.education.map((x, idx) => idx === i ? { ...x, institution: v } : x) })} />
               <Field label="Year" value={ed.year ?? ""} onChange={(v) => set({ education: cv.education.map((x, idx) => idx === i ? { ...x, year: v } : x) })} />
               <button className={removeBtn} onClick={() => set({ education: cv.education.filter((_, idx) => idx !== i) })}>remove</button>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Certifications */}
+      <div className={sectionCls}>
+        <div className="flex items-center justify-between mb-2">
+          <span className={sectionTitleCls}>Certifications</span>
+          <button className={miniBtn}
+            onClick={() => set({ certifications: [...cv.certifications, { name: "" }] })}>+ entry</button>
+        </div>
+        <div className="space-y-2">
+          {cv.certifications.map((c, i) => (
+            <div key={i} className="grid grid-cols-[2fr_2fr_1fr_auto] gap-2 items-end">
+              <Field label="Name" value={c.name} onChange={(v) => set({ certifications: cv.certifications.map((x, idx) => idx === i ? { ...x, name: v } : x) })} />
+              <Field label="Issuer" value={c.issuer ?? ""} onChange={(v) => set({ certifications: cv.certifications.map((x, idx) => idx === i ? { ...x, issuer: v } : x) })} />
+              <Field label="Year" value={c.year ?? ""} onChange={(v) => set({ certifications: cv.certifications.map((x, idx) => idx === i ? { ...x, year: v } : x) })} />
+              <button className={removeBtn} onClick={() => set({ certifications: cv.certifications.filter((_, idx) => idx !== i) })}>remove</button>
             </div>
           ))}
         </div>

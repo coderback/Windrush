@@ -339,10 +339,21 @@ async def render_pdf(doc_type: str, doc: dict, template_id: str | None = None) -
     Render a CV/cover-letter doc to a PDF and return its 32-hex doc_id.
     WeasyPrint runs in a worker thread (it is synchronous + CPU-bound). On any
     failure we degrade to the fpdf2 renderer so the feature never hard-fails.
+
+    We log a *missing-dependency* fallback at WARNING (expected in some envs) but a
+    template/render failure at ERROR with a traceback — a Jinja or template bug must
+    not slip out as a silently unstyled PDF.
     """
     try:
         html = render_html(doc_type, doc, template_id)
-        return await asyncio.to_thread(_weasyprint_pdf, html)
-    except Exception as exc:  # noqa: BLE001 — broad on purpose; we want the fallback
-        logger.warning("WeasyPrint render failed (%s); falling back to fpdf2: %s", doc_type, exc)
+    except Exception:
+        logger.exception("Template render failed (%s); falling back to fpdf2", doc_type)
         return await asyncio.to_thread(_fallback_pdf, doc_type, doc)
+
+    try:
+        return await asyncio.to_thread(_weasyprint_pdf, html)
+    except ImportError as exc:
+        logger.warning("WeasyPrint unavailable (%s); falling back to fpdf2", exc)
+    except Exception:
+        logger.exception("WeasyPrint render failed (%s); falling back to fpdf2", doc_type)
+    return await asyncio.to_thread(_fallback_pdf, doc_type, doc)

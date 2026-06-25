@@ -7,13 +7,8 @@
     <option name="selectedModelId" value="auto" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="657acfba-7aae-4604-a67f-31eee75bbb05" name="Changes" comment="feat: introduce seniority-based CV and cover letter generation">
+    <list default="true" id="657acfba-7aae-4604-a67f-31eee75bbb05" name="Changes" comment="feat: enhance project description handling and improve contact item rendering in CV and cover letter templates">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/api/app/agent.py" beforeDir="false" afterPath="$PROJECT_DIR$/api/app/agent.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/api/app/doc_render.py" beforeDir="false" afterPath="$PROJECT_DIR$/api/app/doc_render.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/api/app/templates/base.css" beforeDir="false" afterPath="$PROJECT_DIR$/api/app/templates/base.css" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/api/app/templates/classic_cv.html" beforeDir="false" afterPath="$PROJECT_DIR$/api/app/templates/classic_cv.html" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/api/app/templates/classic_letter.html" beforeDir="false" afterPath="$PROJECT_DIR$/api/app/templates/classic_letter.html" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -134,7 +129,7 @@
       <workItem from="1781779112809" duration="610000" />
       <workItem from="1782109807148" duration="6279000" />
       <workItem from="1782307323485" duration="1135000" />
-      <workItem from="1782331451013" duration="10256000" />
+      <workItem from="1782331451013" duration="14810000" />
     </task>
     <task id="LOCAL-00001" summary="initialize project configuration files">
       <option name="closed" value="true" />
@@ -512,7 +507,15 @@
       <option name="project" value="LOCAL" />
       <updated>1782322314447</updated>
     </task>
-    <option name="localTasksCounter" value="48" />
+    <task id="LOCAL-00048" summary="feat: enhance project description handling and improve contact item rendering in CV and cover letter templates">
+      <option name="closed" value="true" />
+      <created>1782342561246</created>
+      <option name="number" value="00048" />
+      <option name="presentableId" value="LOCAL-00048" />
+      <option name="project" value="LOCAL" />
+      <updated>1782342561246</updated>
+    </task>
+    <option name="localTasksCounter" value="49" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -542,7 +545,6 @@
     </option>
   </component>
   <component name="VcsManagerConfiguration">
-    <MESSAGE value="refactor next.config.mjs to add API rewrites based on environment variable" />
     <MESSAGE value="refactor Dockerfile to allow dynamic port configuration for uvicorn" />
     <MESSAGE value="refactor next.config.mjs to remove API rewrites and introduce route proxying" />
     <MESSAGE value="refactor agent.py to switch LLM backend between Ollama and Groq based on environment variable" />
@@ -567,7 +569,8 @@
     <MESSAGE value="feat: enhance document generation by adding structured JSON support for CVs and cover letters, and implement HTML rendering for live previews" />
     <MESSAGE value="feat: implement document editor for CVs and cover letters with live preview functionality" />
     <MESSAGE value="feat: introduce seniority-based CV and cover letter generation" />
-    <option name="LAST_COMMIT_MESSAGE" value="feat: introduce seniority-based CV and cover letter generation" />
+    <MESSAGE value="feat: enhance project description handling and improve contact item rendering in CV and cover letter templates" />
+    <option name="LAST_COMMIT_MESSAGE" value="feat: enhance project description handling and improve contact item rendering in CV and cover letter templates" />
   </component>
   <component name="com.intellij.coverage.CoverageDataManagerImpl">
     <SUITE FILE_PATH="coverage/Windrush$analyze_summer.coverage" NAME="analyze_summer Coverage Results" MODIFIED="1779272339042" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />

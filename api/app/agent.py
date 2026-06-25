@@ -506,7 +506,15 @@ def _seniority(persona: dict) -> str:
             if em:
                 ends.append(int(em.group(0)))
     span = (max(ends) - min(starts)) if (starts and ends) else 0
-    if span >= 4 or len(hist) >= 3:
+    # Internships / placements don't make a recent grad "experienced" — only count
+    # substantive roles when using the role-count heuristic (the graduate flow's
+    # whole point is to keep interns on the Education-first / junior track).
+    intern_kw = ("intern", "internship", "placement", "trainee", "work experience")
+    substantive = [
+        e for e in hist
+        if not any(k in (e.get("title", "") or "").lower() for k in intern_kw)
+    ]
+    if span >= 4 or len(substantive) >= 3:
         return "experienced"
     return "junior"
 
