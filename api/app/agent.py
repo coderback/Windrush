@@ -254,12 +254,13 @@ TOOLS = [
     },
     {
         "name": "generate_tailored_cv",
-        "description": "Generate a tailored CV (Markdown) for a specific job, emphasising the most relevant experience and skills from the user persona.",
+        "description": "Generate a tailored CV (structured JSON CVDoc) for a specific job, emphasising the most relevant experience and skills from the user persona.",
         "input_schema": {
             "type": "object",
             "properties": {
                 "job": {"type": "object", "description": "Target job object with title, company, description"},
                 "persona": {"type": "object", "description": "Structured User Persona"},
+                "template_id": {"type": "string", "description": "Document template id (default 'classic')"},
             },
             "required": ["job", "persona"],
         },
@@ -291,6 +292,265 @@ async def _llm(system: str, user: str, max_tokens: int = 2048) -> str:
         ],
     )
     return resp.choices[0].message.content or ""
+
+
+async def _llm_json(system: str, user: str, max_tokens: int = 2048) -> dict | None:
+    """
+    LLM call that expects a single JSON object back. Strips ```json fences and any
+    surrounding prose, then parses. Returns None on unparseable output so callers
+    can fall back to a deterministically-built document.
+    """
+    raw = await _llm(system, user, max_tokens=max_tokens)
+    text = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+    if not text.startswith("{"):
+        start, end = text.find("{"), text.rfind("}")
+        if start != -1 and end > start:
+            text = text[start:end + 1]
+    try:
+        data = json.loads(text or "")
+    except json.JSONDecodeError:
+        return None
+    return data if isinstance(data, dict) else None
+
+
+# Lead-in labels and scaffolding the candidate's verbose portfolio text tends to carry.
+_PROJ_HEADER_RE = re.compile(
+    r"(?i)^\s*(what problem did you solve(?:\s*&\s*how it works)?\s*\??|"
+    r"problem solved\s*:?|problem\s*:|overview\s*:|outcomes?\s*:?)\s*")
+_PROJ_FIRST_PERSON_RE = re.compile(
+    r"(?i)^i\s+(built|developed|created|implemented|designed|made|wrote|engineered)\b")
+# "How it works:" introduces step-by-step scaffolding (numbered lists) we don't want as
+# CV prose. (We deliberately do NOT cut on "N)" — it false-matches citation years like "2023)".)
+_PROJ_SCAFFOLD_RE = re.compile(r"(?i)\bhow it works\b")
+
+
+def _strip_markup(text: str) -> str:
+    t = re.sub(r"(?i)<br\s*/?>", " ", text or "")
+    t = re.sub(r"<[^>]+>", " ", t)
+    return re.sub(r"\s+", " ", t).strip()
+
+
+def _sentences(text: str) -> list[str]:
+    return [s.strip() for s in re.split(r"(?<=[.!?])\s+", text) if s.strip()]
+
+
+def _project_description(p: dict) -> str:
+    """
+    Build a clean ~2-sentence CV description from the candidate's verbose project text.
+    The persona's 'summary'/'technologies' fields are empty in practice, so the depth
+    lives in 'problem_solved' (+ 'outcomes') as portfolio prose with section headers,
+    <br> tags and first-person phrasing — we normalise that into CV voice deterministically
+    so every project reads with the same depth regardless of the model.
+    """
+    ps = _PROJ_HEADER_RE.sub("", _strip_markup(p.get("problem_solved", "")))
+    ps = _PROJ_FIRST_PERSON_RE.sub(lambda m: m.group(1).capitalize(), ps).strip()
+    # Drop step-by-step scaffolding ("How it works", numbered lists) before sentence-splitting.
+    ps_core = _PROJ_SCAFFOLD_RE.split(ps)[0].strip()
+    sents = _sentences(ps_core)[:2]
+    if len(sents) < 2:  # single-sentence problem statement — add the first concrete outcome
+        oc = _PROJ_HEADER_RE.sub("", _strip_markup(p.get("outcomes", "")))
+        oc_first = next(iter(_sentences(oc) or oc.split("\n")), "").strip()
+        if oc_first and oc_first.lower() not in (sents[0].lower() if sents else ""):
+            sents.append(oc_first)
+    desc = " ".join(s if s[-1:] in ".!?" else s + "." for s in sents[:2])
+    return desc or _strip_markup(p.get("summary", ""))
+
+
+def _project_tech_source(p: dict) -> str:
+    """
+    Extract the raw 'Technologies' section from a project's prose. The persona's
+    'technologies' field is empty, but the full stack is listed inside problem_solved/
+    outcomes (e.g. 'Technologies Frontend: Next.js, React Backend: FastAPI ...'). We hand
+    this to the model so it can distil clean canonical tech names — the one thing it does
+    reliably — rather than guessing from the trimmed description.
+    """
+    blob = _strip_markup((p.get("problem_solved", "") or "") + "\n" + (p.get("outcomes", "") or ""))
+    m = re.search(r"(?i)technolog\w*\s*:?", blob)
+    if not m:
+        return ""
+    seg = blob[m.end(): m.end() + 400].strip()
+    return re.split(r"(?i)\bsend message\b", seg)[0].strip()  # drop trailing copy-paste UI junk
+
+
+def _persona_to_cvdoc(persona: dict) -> dict:
+    """
+    Build a complete CVDoc straight from the persona — used both as the structured
+    context handed to the LLM and as the fallback if the model returns bad JSON.
+    """
+    core = persona.get("core_info", {})
+    name = f"{core.get('first_name', '')} {core.get('last_name', '')}".strip()
+    contact = {
+        "email": core.get("email", ""),
+        "phone": core.get("phone", ""),
+        "location": core.get("city", "") or core.get("location", ""),
+        "linkedin": core.get("linkedin", ""),
+        "github": core.get("github", ""),
+        # core_info has both a 'website' and a 'portfolio' field; either may hold the
+        # candidate's personal site, so fall back to portfolio when website is unset.
+        "website": core.get("website", "") or core.get("portfolio", ""),
+    }
+    skills = [
+        {"category": c.get("category", "Skills"), "items": c.get("skills", [])}
+        for c in persona.get("skills", [])
+    ]
+
+    experience = []
+    for exp in persona.get("history", []):
+        end = "Present" if exp.get("is_current") else exp.get("end_date", "")
+        bullets: list[str] = []
+        ach = exp.get("achievements")
+        if isinstance(ach, list):
+            bullets.extend([a for a in ach if a])
+        elif isinstance(ach, str) and ach.strip():
+            bullets.append(ach.strip())
+        metrics = exp.get("metrics")
+        if metrics:
+            bullets.append(metrics if isinstance(metrics, str) else ", ".join(metrics))
+        if not bullets and exp.get("summary"):
+            bullets.append(exp["summary"])
+        experience.append({
+            "title": exp.get("title", ""),
+            "employer": exp.get("employer", ""),
+            "location": exp.get("location", ""),
+            "start_date": exp.get("start_date", ""),
+            "end_date": end,
+            "bullets": bullets,
+        })
+
+    education = [
+        {"degree": e.get("degree", ""), "institution": e.get("institution", ""),
+         "year": e.get("end_date", "") or e.get("year", ""), "grade": e.get("grade", "")}
+        for e in persona.get("education", [])
+    ]
+    projects = []
+    for p in persona.get("projects", []):
+        projects.append({
+            "name": p.get("name", ""),
+            "description": _project_description(p),
+            "tech": p.get("technologies", []) if isinstance(p.get("technologies"), list) else [],
+            "link": p.get("url", ""),
+        })
+    certifications = [
+        {"name": c.get("name", ""), "issuer": c.get("issuer", ""), "year": c.get("year", "")}
+        for c in persona.get("certifications", [])
+    ]
+    return {
+        "name": name,
+        "headline": "",
+        "contact": contact,
+        "summary": persona.get("summary", ""),
+        "skills": skills,
+        "experience": experience,
+        "education": education,
+        "projects": projects,
+        "certifications": certifications,
+    }
+
+
+def _restore_project_depth(cv_projects: list, base_projects: list) -> list:
+    """
+    Keep the model's project *selection* (which projects are most relevant to the job),
+    but restore each project's description, tech stack and link from the persona. The
+    model picks good projects yet summarises them inconsistently (two sentences for one,
+    one for the next); the deterministic persona description (_project_description) gives
+    every project the same depth in the candidate's own words.
+    """
+    def norm(s: str) -> str:
+        return re.sub(r"[^a-z0-9]", "", (s or "").lower())
+
+    by_name = {norm(p.get("name", "")): p for p in (base_projects or []) if p.get("name")}
+    out = []
+    for p in cv_projects or []:
+        key = norm(p.get("name", ""))
+        match = by_name.get(key)
+        if not match:  # fuzzy: one name is a substring of the other (handles added subtitles)
+            for bk, bp in by_name.items():
+                if bk and key and (bk in key or key in bk):
+                    match = bp
+                    break
+        if match:
+            p = dict(p)
+            if match.get("description"):
+                p["description"] = match["description"]
+            if match.get("tech"):
+                p["tech"] = match["tech"]
+            if match.get("link"):
+                p["link"] = match["link"]
+        out.append(p)
+    return out
+
+
+def _seniority(persona: dict) -> str:
+    """
+    Classify a persona as 'junior' (recent grad / early career) or 'experienced'.
+    Drives CV section order (Education-first for juniors), length discipline, and
+    cover-letter framing — per the 2026 graduate application strategy.
+    """
+    import datetime as _dt
+    hist = persona.get("history", []) or []
+    senior_kw = ("senior", "lead", "principal", "staff", "head of",
+                 "director", "manager", " vp", "vice president", "chief")
+    if any(any(k in (e.get("title", "") or "").lower() for k in senior_kw) for e in hist):
+        return "experienced"
+
+    now = _dt.date.today().year
+    starts, ends = [], []
+    for e in hist:
+        sm = re.search(r"(19|20)\d{2}", str(e.get("start_date", "")))
+        if sm:
+            starts.append(int(sm.group(0)))
+        if e.get("is_current"):
+            ends.append(now)
+        else:
+            em = re.search(r"(19|20)\d{2}", str(e.get("end_date", "")))
+            if em:
+                ends.append(int(em.group(0)))
+    span = (max(ends) - min(starts)) if (starts and ends) else 0
+    # Internships / placements don't make a recent grad "experienced" — only count
+    # substantive roles when using the role-count heuristic (the graduate flow's
+    # whole point is to keep interns on the Education-first / junior track).
+    intern_kw = ("intern", "internship", "placement", "trainee", "work experience")
+    substantive = [
+        e for e in hist
+        if not any(k in (e.get("title", "") or "").lower() for k in intern_kw)
+    ]
+    if span >= 4 or len(substantive) >= 3:
+        return "experienced"
+    return "junior"
+
+
+def _headline_from_persona(persona: dict, level: str) -> str:
+    """
+    A concise professional-identity line for the cover-letter header, e.g.
+    'Computer Science Graduate'. Juniors derive it from their degree subject;
+    experienced candidates use their most recent role title. Fallback only —
+    the LLM normally supplies this.
+    """
+    edu = persona.get("education", []) or []
+    hist = persona.get("history", []) or []
+    if level == "junior" and edu:
+        deg = edu[0].get("degree", "") or ""
+        subj = re.sub(
+            r"(?i)\b(b\.?sc|b\.?a|m\.?sc|m\.?a|b\.?eng|m\.?eng|ph\.?d|bachelor(?:'s)?|"
+            r"master(?:'s)?|of|hons?|honours|honors|degree|with|in)\b", " ", deg)
+        subj = re.sub(r"[()]", " ", subj)
+        subj = re.sub(r"\s+", " ", subj).strip(" ,-")
+        if subj:
+            return f"{subj} Graduate"
+    if hist:
+        return hist[0].get("title", "")
+    return ""
+
+
+_CVDOC_SCHEMA = (
+    '{"name":str,"headline":str,'
+    '"contact":{"email":str,"phone":str,"location":str,"linkedin":str,"github":str,"website":str},'
+    '"summary":str,"skills":[{"category":str,"items":[str]}],'
+    '"experience":[{"title":str,"employer":str,"location":str,"start_date":str,"end_date":str,"bullets":[str]}],'
+    '"education":[{"degree":str,"institution":str,"year":str,"grade":str}],'
+    '"projects":[{"name":str,"description":str,"tech":[str],"link":str}],'
+    '"certifications":[{"name":str,"issuer":str,"year":str}]}'
+)
 
 
 _ARCHETYPE_KEYWORDS: dict[str, list[str]] = {
@@ -582,32 +842,91 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
         }[archetype]
         
         directives = persona.get("custom_directives", "")
+        core = persona.get("core_info", {})
+        full_name = f"{core.get('first_name', '')} {core.get('last_name', '')}".strip()
+        level = _seniority(persona)
+
+        import datetime
+        base_letter = {
+            "candidate_name": full_name,
+            "headline": "",
+            "company": job.get("company", ""),
+            "job_title": job.get("title", ""),
+            "company_location": job.get("location", "") or core.get("country", ""),
+            "date": datetime.date.today().strftime("%d %B %Y"),
+            "contact": {
+                "address_line_1": core.get("address_line_1", ""),
+                "city": core.get("city", "") or core.get("location", ""),
+                "postcode": core.get("postcode", ""),
+                "country": core.get("country", ""),
+                "email": core.get("email", ""),
+                "phone": core.get("phone", ""),
+            },
+            "salutation": "Dear Hiring Manager,",
+            "paragraphs": [],
+            "signoff": "Yours faithfully,",
+            "archetype": archetype,
+        }
+
         system = (
-            f"Write a {tone} cover letter. Archetype: {archetype}. {archetype_guidance} "
-            "Be specific — reference the candidate's actual experience and the job's requirements. "
-            "If citing a specific project or achievement from the persona's 'story_bank' or history, structure the paragraph using the STAR method (Situation, Task, Action, Result) to make it impactful. "
-            "3 paragraphs. No placeholders like [Your Address] or [Date] — omit address headers entirely "
-            "and start directly with 'Dear Hiring Manager,'."
+            f"Write a {tone}, authentically human cover letter for a {level} candidate. "
+            f"Archetype: {archetype}. {archetype_guidance} "
+            'Return ONLY a JSON object (no prose, no code fences) with this shape: '
+            '{"headline":str,"salutation":str,"paragraphs":[str,...],"signoff":str}. '
+            "'headline' = the candidate's concise professional identity in 2-4 words "
+            "(e.g. 'Computer Science Graduate'); do NOT put the role being applied for. "
+            "Use 3-4 short paragraphs totalling 250-400 words, in this order: "
+            "(1) HOOK 60-80 words — open with a specific, researched reason for THIS company and name the exact "
+            "role; NEVER begin with 'I am writing to apply for'. "
+            "(2) EVIDENCE 100-150 words — ONE relevant project, internship or role told as a concrete "
+            "micro-anecdote: the problem, the decision/action taken, and a quantified result. "
+            "(3) FIT 60-100 words — connect those skills to the employer's specific needs from the job "
+            "description; emphasise transferable strengths. "
+            "(4) CLOSE 30-50 words — brief, non-desperate enthusiasm and a request to talk. "
+            "AUTHENTICITY (critical — recruiters reject robotic AI text): vary sentence length and rhythm and "
+            "include at least one specific detail or metric. Do NOT use any of these words: delve, testament, "
+            "tapestry, landscape, foster, underscore, beacon, synergy, pivotal, intricate, unleash, elevate, "
+            "seamless, robust, leverage. Do NOT cluster 'Furthermore/Moreover/Additionally'. No moralistic "
+            "summary sentences, no placeholders, no invented facts. "
+            "Salutation: 'Dear Hiring Manager,' unless a named contact is provided. "
+            "Sign-off: 'Yours faithfully,' when no name is known, 'Yours sincerely,' when it is (UK convention)."
             + (f"\n\nDirectives from user: {directives}" if directives else "")
             + (f"\n\nDifferentiation hook to weave in naturally: {hook}" if hook else "")
         )
-        letter = await _llm(
+        data = await _llm_json(
             system=system,
             user=(
-                f"Candidate Persona: {json.dumps(persona)}\n\n"
-                f"Job: {job.get('title')} at {job.get('company')}\n"
-                f"Description: {job.get('description', '')}"
+                f"CANDIDATE PERSONA (JSON): {json.dumps(persona)}\n\n"
+                f"JOB: {job.get('title')} at {job.get('company')}\n"
+                f"DESCRIPTION: {job.get('description', '')[:2500]}"
             ),
             max_tokens=1024,
         )
-        core = persona.get("core_info", {})
-        full_name = f"{core.get('first_name', '')} {core.get('last_name', '')}".strip()
+
+        letter = dict(base_letter)
+        if data:
+            if data.get("headline"):
+                letter["headline"] = str(data["headline"]).strip()
+            if isinstance(data.get("paragraphs"), list) and data["paragraphs"]:
+                letter["paragraphs"] = [str(p) for p in data["paragraphs"] if str(p).strip()]
+            if data.get("salutation"):
+                letter["salutation"] = str(data["salutation"]).strip()
+            if data.get("signoff"):
+                letter["signoff"] = str(data["signoff"]).strip()
+        if not letter.get("headline"):
+            letter["headline"] = _headline_from_persona(persona, level)
+        if not letter["paragraphs"]:
+            letter["paragraphs"] = [
+                persona.get("summary", "")
+                or f"I am writing to apply for the {job.get('title', '')} role at {job.get('company', '')}."
+            ]
+
         return {
             "status": "ready",
             "job_title": job.get("title", ""),
             "company": job.get("company", ""),
             "candidate_name": full_name,
-            "cover_letter": letter,
+            "letter": letter,
             "archetype": archetype,
         }
 
@@ -693,60 +1012,96 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
     elif name == "generate_tailored_cv":
         job = tool_input.get("job", {})
         persona = tool_input.get("persona", {})
+        template_id = tool_input.get("template_id", "classic")
 
-        core = persona.get("core_info", {})
-        full_name = f"{core.get('first_name', '')} {core.get('last_name', '')}".strip()
-        contact_parts = filter(None, [
-            core.get("email"), core.get("phone"),
-            core.get("city"), core.get("linkedin"), core.get("github"),
-        ])
-        contact_line = " | ".join(contact_parts)
-
-        skills_str = ""
-        for cat in persona.get("skills", []):
-            skills_str += f"**{cat.get('category','Skills')}:** {', '.join(cat.get('skills',[]))}\n"
-
-        history_str = ""
-        for exp in persona.get("history", [])[:5]:
-            end = "Present" if exp.get("is_current") else exp.get("end_date", "")
-            history_str += (
-                f"**{exp.get('title','')}** — {exp.get('employer','')} "
-                f"({exp.get('start_date','')} – {end})\n"
-                f"{exp.get('summary','')}\n"
-                f"{exp.get('metrics','')}\n\n"
+        base_cv = _persona_to_cvdoc(persona)
+        # The model distils clean tech names from each project's raw Technologies section
+        # (persona 'technologies' field is empty; the stack lives in the prose).
+        tech_source = "\n".join(
+            f"- {(p.get('name') or '').strip()}: {ts}"
+            for p in persona.get("projects", [])
+            if (p.get("name") or "").strip() and (ts := _project_tech_source(p))
+        )
+        level = _seniority(persona)
+        if level == "junior":
+            level_guidance = (
+                "This is an early-career / graduate candidate. Treat substantial university projects, "
+                "capstones, internships and part-time (incl. retail/hospitality) roles as first-class "
+                "experience, reframing duties as transferable competencies (stakeholder management, data "
+                "analysis, operational delivery, working under pressure). The CV MUST fit a SINGLE page."
             )
+            summary_rule = "summary = 2-3 sentences"
+        else:
+            level_guidance = (
+                "This is an experienced candidate. Lead with scope of ownership, leadership and measurable "
+                "business impact. The CV should fit 1-2 pages."
+            )
+            summary_rule = "summary = 3 sentences"
 
-        edu_str = ""
-        for edu in persona.get("education", []):
-            edu_str += f"**{edu.get('degree','')}** — {edu.get('institution','')} ({edu.get('grade','')})\n"
-
-        proj_str = ""
-        for proj in persona.get("projects", [])[:3]:
-            proj_str += f"**{proj.get('name','')}**: {proj.get('problem_solved','')} → {proj.get('outcomes','')}\n"
-
-        cv_text = await _llm(
+        cv = await _llm_json(
             system=(
-                "You are a professional CV writer. Produce a tailored, ATS-optimised CV in clean Markdown. "
-                "Reorder and emphasise experience, skills, and projects that are most relevant to the target job. "
-                "Mirror keywords from the job description naturally. "
-                "Use this structure: Contact header, Professional Summary (3 sentences), Skills (grouped), "
-                "Experience (reverse-chronological, bullets using STAR), Education, Projects. "
-                "Do NOT add fictional information — only use what is provided. "
-                "Do NOT include placeholders. Output only the Markdown, no preamble."
+                "You are an expert CV writer for the 2026 ATS-driven graduate market. Return ONLY a JSON "
+                "object (no prose, no code fences) using EXACTLY this shape: " + _CVDOC_SCHEMA + ". "
+                "Tailor to the target job: reorder and reword to mirror the job's exact, conventional keywords. "
+                "ATS RULES: use standard industry skill names and SPELL OUT acronyms next to the abbreviation, "
+                "e.g. 'Search Engine Optimization (SEO)'. Format EVERY date as 'Mon YYYY' or MM/YYYY "
+                "(never 'Summer 2025' or \"Jan '25\"). "
+                "BULLETS: up to 4 per role, each a single line of ~16-26 words, beginning with a strong, varied "
+                "action verb (never 'Responsible for' or 'Helped with'); follow Action + Task/Tool + quantified "
+                "Result. Quantify ONLY with metrics actually present in the candidate data; if a bullet has no "
+                "source number, convey scope/scale with concrete specifics instead — NEVER invent, estimate or "
+                "round up a percentage, count or efficiency gain. NEVER pad to a count: write only bullets backed "
+                "by a real achievement in the "
+                "source and drop a weak one rather than invent a generic catch-all (e.g. 'Collaborated with "
+                "cross-functional teams', 'Implemented a scalable data pipeline', 'delivered a seamless user "
+                "experience'). PRESERVE the source's concrete specifics verbatim — exact counts ('10-table star "
+                "schema'), named breakdowns ('macronutrients, micronutrients, and functional health tags'), tools "
+                "and metrics; do NOT generalise them away. "
+                f"{level_guidance} "
+                "PROJECTS: select the candidate's most job-relevant projects (at most 3) and keep each 'name' "
+                "exactly as given. For each, set 'tech' to 6-10 clean, canonical technology names (languages, "
+                "frameworks, datastores, key libraries) drawn from that project's entry in PROJECT TECH SOURCE "
+                "below — omit evaluation metrics, security checks and verbose phrases, and normalise to the "
+                "common name (e.g. 'PostgreSQL', 'FastAPI', 'Next.js'). A short 'description' is fine but it will "
+                "be standardised downstream, so prioritise getting the project selection and 'tech' right. "
+                f"SUMMARY: {summary_rule} leading with a specific specialism + domain + ONE concrete strength "
+                "drawn from the candidate data. Do NOT open with a generic cliché ('Highly motivated', "
+                "'Results-driven', 'Detail-oriented', 'Passionate') and do NOT close with vague filler ('strong "
+                "problem-solving skills and attention to detail', 'hardworking team player'). Do NOT spend a "
+                "sentence naming assumed or basic tooling (e.g. Git / version control). "
+                "LENGTH: at most 4 most-recent roles; at most 3 projects. "
+                "BANNED words (recruiters flag these as AI-written — never use them in bullets, summary or "
+                "project text): delve, testament, robust, seamless, synergy, leverage, pivotal, intricate, "
+                "elevate, foster, underscore, tapestry, landscape. "
+                "Leave 'headline' EMPTY — do not add a title line or echo the target job's role under the "
+                "candidate's name. "
+                "Use ONLY facts present in the provided candidate data — do NOT invent employers, dates, "
+                "metrics or skills. Keep every contact field exactly as given."
             ),
             user=(
-                f"# Target Job\n{job.get('title','')} at {job.get('company','')}\n"
-                f"Job Description:\n{job.get('description','')[:2000]}\n\n"
-                f"# Candidate\nName: {full_name}\nContact: {contact_line}\n\n"
-                f"## Skills\n{skills_str}\n"
-                f"## Experience\n{history_str}\n"
-                f"## Education\n{edu_str}\n"
-                f"## Projects\n{proj_str}\n"
-                f"Summary from persona: {persona.get('summary','')}"
+                f"TARGET JOB: {job.get('title','')} at {job.get('company','')}\n"
+                f"JOB DESCRIPTION:\n{job.get('description','')[:2500]}\n\n"
+                f"CANDIDATE DATA (JSON):\n{json.dumps(base_cv)}"
+                + (f"\n\nPROJECT TECH SOURCE (use to populate each selected project's 'tech'):\n{tech_source}"
+                   if tech_source else "")
             ),
             max_tokens=2048,
         )
-        return {"cv_text": cv_text.strip()}
+
+        if not cv or not (cv.get("experience") or cv.get("summary")):
+            cv = base_cv
+        # Trust our own structured data — never let the model alter identity/contact, and keep
+        # the candidate's full skills list (the model tends to silently drop groups/items when
+        # tailoring; completeness matters more to the user than reordering).
+        cv["contact"] = base_cv["contact"]
+        if base_cv.get("skills"):
+            cv["skills"] = base_cv["skills"]
+        if cv.get("projects") and base_cv.get("projects"):
+            cv["projects"] = _restore_project_depth(cv["projects"], base_cv["projects"])
+        if not cv.get("name"):
+            cv["name"] = base_cv["name"]
+        cv["seniority"] = level  # drives section order in the renderer
+        return {"cv": cv, "template_id": template_id}
 
     return {"error": f"Unknown tool: {name}"}
 

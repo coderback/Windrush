@@ -1,0 +1,117 @@
+/* Windrush document base stylesheet — shared by the live preview (iframe) and the
+   WeasyPrint PDF. Tuned to keep a mid-career CV to 2 pages and a junior CV to 1.
+   Inlined into each template via a <style> block so it resolves identically in a
+   browser srcDoc preview and in WeasyPrint (no external URL needed). */
+
+@page {
+  size: A4;
+  margin: 14mm 16mm;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: #ffffff;
+  color: #1a1a1a;
+  /* Liberation/DejaVu in the container (Docker), Georgia/Times in the browser. */
+  font-family: "Liberation Serif", Georgia, "Times New Roman", serif;
+  font-size: 10.5pt;
+  line-height: 1.32;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+
+/* Preview-only: when shown in the iframe (not @page), simulate an A4 sheet. */
+@media screen {
+  body {
+    width: 210mm;
+    min-height: 297mm;
+    margin: 0 auto;
+    padding: 14mm 16mm;
+  }
+}
+
+p { margin: 0 0 4pt; }
+ul { margin: 2pt 0 0; padding: 0 0 0 14pt; }
+li { margin: 0 0 2pt; }
+a { color: inherit; text-decoration: none; }
+
+/* ── Header ─────────────────────────────────────────────────────────── */
+.head { margin-bottom: 8pt; }
+.name {
+  margin: 0;
+  font-size: 22pt;
+  font-weight: 700;
+  letter-spacing: 0.3pt;
+  line-height: 1.1;
+}
+.headline {
+  margin: 1pt 0 0;
+  font-size: 11pt;
+  color: #333;
+  font-weight: 600;
+}
+.contact {
+  margin: 4pt 0 0;
+  font-size: 9pt;
+  color: #555;
+  font-family: Arial, "Liberation Sans", "DejaVu Sans", sans-serif;
+}
+.contact a, .letter-contact a, .letter-contact-line a { color: inherit; text-decoration: underline; }
+
+/* ── Sections ───────────────────────────────────────────────────────── */
+.section { margin-top: 11pt; }
+.section h2 {
+  margin: 0 0 5pt;
+  padding-bottom: 2pt;
+  font-size: 10.5pt;
+  font-weight: 700;
+  letter-spacing: 1pt;
+  text-transform: uppercase;
+  color: #1a1a1a;
+  border-bottom: 0.8pt solid #555;
+  break-after: avoid;
+}
+
+.summary { font-size: 10.5pt; }
+
+/* ── Entry lines (experience / education / projects / certifications) ── */
+/* Reference look: an uppercase, bold, pipe-separated heading line per entry
+   (ROLE | EMPLOYER | DATES), with detail beneath. Uppercasing is visual only —
+   the underlying text stays mixed-case so ATS parsers read it correctly. */
+.role { margin-bottom: 8pt; break-inside: avoid; }
+.role:last-child { margin-bottom: 0; }
+.entry { margin-bottom: 6pt; break-inside: avoid; }
+
+.entry-line {
+  font-weight: 700;
+  font-size: 10pt;
+  text-transform: uppercase;
+  letter-spacing: 0.2pt;
+}
+.entry-grade { font-size: 10pt; color: #333; margin: 1pt 0 0 14pt; }
+.entry-desc { font-size: 10pt; margin-top: 1pt; }
+.tech { font-size: 9pt; color: #555; font-style: italic; margin-top: 1pt; }
+.role-bullets { font-size: 10pt; margin-top: 2pt; }
+
+/* ── Skills ─────────────────────────────────────────────────────────── */
+.skill-row { margin-bottom: 3pt; font-size: 10pt; }
+.skill-cat { font-weight: 700; }
+
+/* ── Cover letter ───────────────────────────────────────────────────── */
+.letter-head { margin-bottom: 14pt; }
+.letter-name { font-size: 18pt; font-weight: 700; margin: 0; }
+.letter-headline { font-size: 11pt; color: #333; font-weight: 600; margin: 1pt 0 0; }
+.letter-contact-block { margin-top: 10pt; }
+.letter-contact-label {
+  font-weight: 700; font-size: 10pt; text-transform: uppercase;
+  letter-spacing: 0.6pt; margin: 0 0 2pt;
+}
+.letter-contact-line { font-size: 10pt; margin: 0; line-height: 1.35; }
+.letter-meta { margin: 12pt 0; font-size: 10pt; color: #444; }
+.letter-body p { margin: 0 0 9pt; font-size: 10.5pt; line-height: 1.4; }
+.letter-signoff { margin-top: 14pt; }
+.letter-signoff p { margin: 0; }
+.letter-signoff .sig-name { font-weight: 700; }

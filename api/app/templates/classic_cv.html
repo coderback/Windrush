@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>{{ cv.name }} — CV</title>
+  <style>{% include "base.css" %}</style>
+</head>
+<body>
+  <header class="head">
+    <h1 class="name">{{ cv.name }}</h1>
+    {% if cv.contact_items %}
+      <p class="contact">
+        {% for c in cv.contact_items %}{% if c.href %}<a href="{{ c.href }}">{{ c.text }}</a>{% else %}{{ c.text }}{% endif %}{% if not loop.last %} | {% endif %}{% endfor %}
+      </p>
+    {% endif %}
+  </header>
+
+  {# Section order is seniority-aware and supplied by the renderer (cv.sections). #}
+  {% for sec in cv.sections %}
+
+  {% if sec == "summary" and cv.summary %}
+  <section class="section">
+    <h2>Professional Summary</h2>
+    <p class="summary">{{ cv.summary }}</p>
+  </section>
+  {% endif %}
+
+  {% if sec == "skills" and cv.skills %}
+  <section class="section">
+    <h2>Skills</h2>
+    {% for grp in cv.skills %}
+      <div class="skill-row"><span class="skill-cat">{{ grp.category }}:</span> {{ grp["items"] | join(", ") }}</div>
+    {% endfor %}
+  </section>
+  {% endif %}
+
+  {% if sec == "experience" and cv.experience %}
+  <section class="section">
+    <h2>Work Experience</h2>
+    {% for role in cv.experience %}
+      <div class="role">
+        <div class="entry-line">{{ role.title }}{% if role.employer %} | {{ role.employer }}{% endif %}{% if role.location %} | {{ role.location }}{% endif %}{% if role.dates %} | {{ role.dates }}{% endif %}</div>
+        {% if role.bullets %}
+        <ul class="role-bullets">
+          {% for b in role.bullets %}<li>{{ b }}</li>{% endfor %}
+        </ul>
+        {% endif %}
+      </div>
+    {% endfor %}
+  </section>
+  {% endif %}
+
+  {% if sec == "projects" and cv.projects %}
+  <section class="section">
+    <h2>Projects</h2>
+    {% for p in cv.projects %}
+      <div class="entry">
+        <div class="entry-line">{{ p.name }}</div>
+        {% if p.description %}<div class="entry-desc">{{ p.description }}</div>{% endif %}
+        {% if p.tech %}<div class="tech">Technologies: {{ p.tech | join(", ") }}</div>{% endif %}
+        {% if p.link_href %}<div class="tech"><a href="{{ p.link_href }}">{{ p.link_label }}</a></div>{% endif %}
+      </div>
+    {% endfor %}
+  </section>
+  {% endif %}
+
+  {% if sec == "education" and cv.education %}
+  <section class="section">
+    <h2>Education</h2>
+    {% for e in cv.education %}
+      <div class="entry">
+        <div class="entry-line">{{ e.degree }}{% if e.year %} | {{ e.year }}{% endif %}{% if e.institution %} | {{ e.institution }}{% endif %}</div>
+        {% if e.grade %}<div class="entry-grade">Grade: {{ e.grade }}</div>{% endif %}
+      </div>
+    {% endfor %}
+  </section>
+  {% endif %}
+
+  {% if sec == "certifications" and cv.certifications %}
+  <section class="section">
+    <h2>Certifications</h2>
+    {% for c in cv.certifications %}
+      <div class="entry">
+        <div class="entry-line">{{ c.name }}{% if c.issuer %} | {{ c.issuer }}{% endif %}{% if c.year %} | {{ c.year }}{% endif %}</div>
+      </div>
+    {% endfor %}
+  </section>
+  {% endif %}
+
+  {% endfor %}
+</body>
+</html>

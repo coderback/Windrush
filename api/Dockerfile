@@ -5,6 +5,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 \
     libgbm1 libasound2 libpango-1.0-0 libpangocairo-1.0-0 \
     libxshmfence1 fonts-liberation \
+    # WeasyPrint runtime deps (HTML->PDF document rendering)
+    libpangoft2-1.0-0 libgdk-pixbuf-2.0-0 libffi8 libfontconfig1 fontconfig \
+    fonts-dejavu-core \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

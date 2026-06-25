@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { authFetch } from "@/app/api";
 import { Job } from "@/components/JobCard";
 import BrowserView from "@/components/BrowserView";
+import DocEditor, { CVDoc, LetterDoc, letterToText } from "@/components/DocEditor";
 
 interface AnalysisResult {
   fit_score?: number;
@@ -72,8 +73,9 @@ export default function JobDetailPage() {
   const [analysisError, setAnalysisError] = useState<string | null>(null);
 
   const [appStep, setAppStep] = useState<AppStep>("idle");
-  const [tailoredCv, setTailoredCv] = useState("");
-  const [coverLetter, setCoverLetter] = useState("");
+  const [cvDoc, setCvDoc] = useState<CVDoc | null>(null);
+  const [letterDoc, setLetterDoc] = useState<LetterDoc | null>(null);
+  const [templateId] = useState("classic");
   const [streamingCv, setStreamingCv] = useState(false);
   const [streamingLetter, setStreamingLetter] = useState(false);
   const [cvChoice, setCvChoice] = useState<CvChoice>("tailored");
@@ -149,7 +151,7 @@ export default function JobDetailPage() {
     if (!job) return;
     setAppStep("cv");
     setStreamingCv(true);
-    setTailoredCv("");
+    setCvDoc(null);
     setCvDocId(null);
     try {
       const res = await authFetch("/api/jobs/tailored-cv", {
@@ -158,8 +160,8 @@ export default function JobDetailPage() {
         body: JSON.stringify({ job }),
       });
       if (!res.ok) throw new Error("CV generation failed");
-      await readStream(res, (chunk) => setTailoredCv((p) => p + chunk), (ev) => {
-        if (ev.type === "tailored_cv" && ev.cv_text) setTailoredCv(ev.cv_text as string);
+      await readStream(res, () => {}, (ev) => {
+        if (ev.type === "tailored_cv" && ev.cv) setCvDoc(ev.cv as CVDoc);
       });
     } catch {}
     setStreamingCv(false);
@@ -169,7 +171,7 @@ export default function JobDetailPage() {
   const generateLetter = async () => {
     setAppStep("letter");
     setStreamingLetter(true);
-    setCoverLetter("");
+    setLetterDoc(null);
     setLetterDocId(null);
     try {
       const res = await authFetch("/api/jobs/cover-letter", {
@@ -178,8 +180,8 @@ export default function JobDetailPage() {
         body: JSON.stringify({ job }),
       });
       if (!res.ok) throw new Error("Cover letter generation failed");
-      await readStream(res, (chunk) => setCoverLetter((p) => p + chunk), (ev) => {
-        if (ev.type === "cover_letter" && ev.cover_letter) setCoverLetter(ev.cover_letter as string);
+      await readStream(res, () => {}, (ev) => {
+        if (ev.type === "cover_letter" && ev.letter) setLetterDoc(ev.letter as LetterDoc);
       });
     } catch {}
     setStreamingLetter(false);
@@ -187,7 +189,7 @@ export default function JobDetailPage() {
   };
 
   const saveCvAsPdf = async (): Promise<string | null> => {
-    if (!tailoredCv) return null;
+    if (!cvDoc) return null;
     setSavingCvPdf(true);
     try {
       const res = await authFetch("/api/documents/pdf", {
@@ -195,7 +197,8 @@ export default function JobDetailPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           type: "cv",
-          text: tailoredCv,
+          doc: cvDoc,
+          template_id: templateId,
           metadata: { job_title: job?.title ?? "", company: job?.company ?? "" },
         }),
       });
@@ -212,7 +215,7 @@ export default function JobDetailPage() {
   };
 
   const saveLetterAsPdf = async () => {
-    if (!coverLetter) return;
+    if (!letterDoc) return;
     setSavingLetterPdf(true);
     try {
       const res = await authFetch("/api/documents/pdf", {
@@ -220,7 +223,8 @@ export default function JobDetailPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           type: "cover_letter",
-          text: coverLetter,
+          doc: letterDoc,
+          template_id: templateId,
           metadata: { job_title: job?.title ?? "", company: job?.company ?? "" },
         }),
       });
@@ -241,7 +245,7 @@ export default function JobDetailPage() {
 
     // If using tailored CV, ensure PDF exists first
     let effectiveCvDocId = cvDocId;
-    if (cvChoice === "tailored" && tailoredCv && !cvDocId) {
+    if (cvChoice === "tailored" && cvDoc && !cvDocId) {
       effectiveCvDocId = await saveCvAsPdf();
     }
 
@@ -251,8 +255,8 @@ export default function JobDetailPage() {
     form.append("job_title", job.title ?? "");
     form.append("company", job.company ?? "");
     form.append("location", job.location ?? "");
-    form.append("cover_letter", coverLetter);
-    form.append("tailored_cv", tailoredCv);
+    form.append("cover_letter", letterDoc ? letterToText(letterDoc) : "");
+    form.append("tailored_cv", cvDoc ? JSON.stringify(cvDoc) : "");
     form.append("cv_doc_id", cvChoice === "tailored" && effectiveCvDocId ? effectiveCvDocId : "");
     form.append("job_email", "");
     form.append("job_password", "");
@@ -464,7 +468,7 @@ export default function JobDetailPage() {
                 <span className="text-sm font-medium text-zinc-300">Tailored CV</span>
                 {streamingCv && <span className="text-xs text-zinc-500 animate-pulse">Generating…</span>}
               </div>
-              {tailoredCv && !streamingCv && (
+              {cvDoc && !streamingCv && (
                 <div className="flex items-center gap-2">
                   {cvDocId && (
                     <button
@@ -488,13 +492,12 @@ export default function JobDetailPage() {
                 </div>
               )}
             </div>
-            {(["cv", "cv_done", "letter", "letter_done", "apply"] as AppStep[]).includes(appStep) && (
-              <textarea
-                value={tailoredCv}
-                onChange={(e) => { setTailoredCv(e.target.value); setCvDocId(null); }}
-                rows={14}
-                className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-xs text-zinc-300 font-mono focus:outline-none focus:border-teal-500 resize-y transition-colors"
-                placeholder="Your tailored CV will appear here — you can edit it freely before saving."
+            {cvDoc && !streamingCv && (
+              <DocEditor
+                kind="cv"
+                templateId={templateId}
+                cv={cvDoc}
+                onCvChange={(c) => { setCvDoc(c); setCvDocId(null); }}
               />
             )}
             {appStep === "cv_done" && (
@@ -520,7 +523,7 @@ export default function JobDetailPage() {
                   <span className="text-sm font-medium text-zinc-300">Cover Letter</span>
                   {streamingLetter && <span className="text-xs text-zinc-500 animate-pulse">Generating…</span>}
                 </div>
-                {coverLetter && !streamingLetter && (
+                {letterDoc && !streamingLetter && (
                   <div className="flex items-center gap-2">
                     {letterDocId && (
                       <button
@@ -544,13 +547,14 @@ export default function JobDetailPage() {
                   </div>
                 )}
               </div>
-              <textarea
-                value={coverLetter}
-                onChange={(e) => { setCoverLetter(e.target.value); setLetterDocId(null); }}
-                rows={10}
-                className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-xs text-zinc-300 font-mono focus:outline-none focus:border-teal-500 resize-y transition-colors"
-                placeholder="Your cover letter will appear here — edit freely before applying."
-              />
+              {letterDoc && !streamingLetter && (
+                <DocEditor
+                  kind="cover_letter"
+                  templateId={templateId}
+                  letter={letterDoc}
+                  onLetterChange={(l) => { setLetterDoc(l); setLetterDocId(null); }}
+                />
+              )}
 
               {appStep === "letter_done" && (
                 <div className="space-y-4">

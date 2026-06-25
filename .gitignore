@@ -11,7 +11,18 @@ __pycache__/
 # Node
 frontend/node_modules/
 frontend/.next/
+frontend/tsconfig.tsbuildinfo
 
 # IDE
 .idea/
 *.iml
+/analyze_summer.py
+/analyze_titles.py
+/data/applications.db
+/check_expiry.py
+/extract_slugs.py
+/Graduate Application Optimization Strategy.md
+/import_grad_programmes.py
+/import_summer_internships.py
+/.claude/settings.local.json
+/test_workable.py
