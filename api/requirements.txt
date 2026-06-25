@@ -12,6 +12,8 @@ python-jose[cryptography]
 playwright>=1.45
 browser-use>=0.1
 openai>=1.30          # OpenAI-compatible client (used for both Ollama + Groq)
+anthropic>=0.69       # Native Anthropic SDK (LLM_BACKEND=claude)
+langchain-anthropic>=0.3 # Claude via LangChain (browser agent, LLM_BACKEND=claude)
 langchain-ollama>=0.2 # Ollama LangChain integration (browser agent)
 # Keep groq + langchain-groq if switching back via LLM_BACKEND=groq
 groq>=0.9

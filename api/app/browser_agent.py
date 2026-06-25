@@ -114,6 +114,18 @@ try:
                 model="llama-3.3-70b-versatile",
                 groq_api_key=os.environ.get("GROQ_API_KEY", ""),
             )
+    elif _BACKEND == "claude":
+        # Native Anthropic via LangChain (browser-use accepts a LangChain chat model,
+        # same as the Ollama path). Sonnet 4.6 by default; override with ANTHROPIC_MODEL.
+        from langchain_anthropic import ChatAnthropic as _ChatAnthropic
+
+        def _make_browser_llm():
+            return _ChatAnthropic(
+                model=os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-6"),
+                api_key=os.environ.get("ANTHROPIC_API_KEY", ""),
+                max_tokens=4096,
+                timeout=120.0,
+            )
     else:
         from langchain_ollama import ChatOllama as _ChatOllama
 

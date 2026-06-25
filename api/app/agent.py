@@ -26,11 +26,16 @@ from .guardrails import (
 logger = logging.getLogger("windrush.agent")
 
 # ── LLM backend ───────────────────────────────────────────────────────────────
-# Switch between Ollama (local) and Groq (cloud) via LLM_BACKEND env var.
-# LLM_BACKEND=ollama  → local Gemma 4 via Ollama
-# LLM_BACKEND=groq    → Groq cloud (original)
+# Switch backends via the LLM_BACKEND env var:
+#   LLM_BACKEND=ollama  → local model via Ollama (OpenAI-compat client)
+#   LLM_BACKEND=groq    → Groq cloud (OpenAI-compat client)
+#   LLM_BACKEND=claude  → Anthropic Claude via the native `anthropic` SDK
+# Embeddings always come from Ollama (nomic-embed-text) regardless of backend.
 
 _BACKEND = os.environ.get("LLM_BACKEND", "ollama").lower()
+_IS_CLAUDE = _BACKEND == "claude"
+client = None          # OpenAI-compat client (groq/ollama only)
+_anthropic = None      # native Anthropic async client (claude only)
 
 if _BACKEND == "groq":
     client = AsyncOpenAI(
@@ -43,6 +48,17 @@ if _BACKEND == "groq":
     _GROQ_MODEL = os.environ.get("GROQ_MODEL", "meta-llama/llama-4-scout-17b-16e-instruct")
     AGENT_MODEL = _GROQ_MODEL
     LLM_MODEL   = _GROQ_MODEL
+elif _BACKEND == "claude":
+    # Native Anthropic SDK (not an OpenAI-compat shim). Sonnet 4.6 by default;
+    # override with ANTHROPIC_MODEL. No Groq-style TPM wall on the standard tier.
+    import anthropic
+    _anthropic = anthropic.AsyncAnthropic(
+        api_key=os.environ.get("ANTHROPIC_API_KEY", ""),
+        timeout=120.0,
+    )
+    _CLAUDE_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-6")
+    AGENT_MODEL = _CLAUDE_MODEL
+    LLM_MODEL   = _CLAUDE_MODEL
 else:
     # Ollama — local Qwen 3.5 4B
     _OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://ollama:11434")
@@ -290,6 +306,16 @@ GROQ_TOOLS = [
 
 async def _llm(system: str, user: str, max_tokens: int = 2048) -> str:
     """Simple single-turn LLM call for internal tool use (CV parsing, cover letter, roadmap)."""
+    if _IS_CLAUDE:
+        # Native Anthropic Messages API: system is a top-level param; reply is a list
+        # of content blocks (thinking lives in separate blocks, so the text is clean).
+        resp = await _anthropic.messages.create(
+            model=LLM_MODEL,
+            max_tokens=max_tokens,
+            system=system,
+            messages=[{"role": "user", "content": user}],
+        )
+        return "".join(b.text for b in resp.content if b.type == "text")
     resp = await client.chat.completions.create(
         model=LLM_MODEL,
         max_tokens=max_tokens,
@@ -1278,20 +1304,62 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
     return {"error": f"Unknown tool: {name}"}
 
 
-async def _chat(messages: list, tools: list):
-    """Call LLM via OpenAI-compatible API (Ollama or Groq)."""
-    all_messages = [{"role": "system", "content": SYSTEM_PROMPT}] + messages
-    # Ollama local inference can be slow on large models — use a longer timeout (600s)
-    timeout = 600.0 if _BACKEND == "ollama" else 90.0
-    return await asyncio.wait_for(
-        client.chat.completions.create(
+async def _agent_complete(messages: list) -> tuple[str, list[dict], dict]:
+    """
+    One agentic turn, normalised across backends. Returns:
+      (assistant_text, tool_calls, assistant_msg_to_append)
+    where tool_calls is a list of {"id", "name", "input"(dict)} and
+    assistant_msg_to_append is the backend-shaped assistant turn to push onto `messages`.
+    """
+    if _IS_CLAUDE:
+        # Native Anthropic tool use: TOOLS are already in {name, description, input_schema}
+        # shape. System is a top-level param; the assistant content blocks (incl. any
+        # thinking/tool_use) must be echoed back verbatim on the next turn.
+        resp = await _anthropic.messages.create(
             model=AGENT_MODEL,
             max_tokens=4096,
-            messages=all_messages,
-            tools=tools,
+            system=SYSTEM_PROMPT,
+            messages=messages,
+            tools=TOOLS,
+        )
+        text = "".join(b.text for b in resp.content if b.type == "text")
+        tool_calls = [
+            {"id": b.id, "name": b.name, "input": b.input}
+            for b in resp.content if b.type == "tool_use"
+        ]
+        return text, tool_calls, {"role": "assistant", "content": resp.content}
+
+    # OpenAI-compatible (Groq / Ollama)
+    all_messages = [{"role": "system", "content": SYSTEM_PROMPT}] + messages
+    timeout = 600.0 if _BACKEND == "ollama" else 90.0   # local inference can be slow
+    resp = await asyncio.wait_for(
+        client.chat.completions.create(
+            model=AGENT_MODEL, max_tokens=4096, messages=all_messages, tools=GROQ_TOOLS,
         ),
         timeout=timeout,
     )
+    message = resp.choices[0].message
+    tool_calls = [
+        {"id": tc.id, "name": tc.function.name, "input": json.loads(tc.function.arguments)}
+        for tc in (message.tool_calls or [])
+    ]
+    assistant_msg: dict = {"role": "assistant", "content": message.content}
+    if message.tool_calls:
+        assistant_msg["tool_calls"] = [
+            {"id": tc.id, "type": "function",
+             "function": {"name": tc.function.name, "arguments": tc.function.arguments}}
+            for tc in message.tool_calls
+        ]
+    return (message.content or ""), tool_calls, assistant_msg
+
+
+def _tool_result_message(tool_call_id: str, content_str: str) -> dict:
+    """Backend-shaped message carrying a tool result back to the model."""
+    if _IS_CLAUDE:
+        return {"role": "user", "content": [
+            {"type": "tool_result", "tool_use_id": tool_call_id, "content": content_str}
+        ]}
+    return {"role": "tool", "tool_call_id": tool_call_id, "content": content_str}
 
 
 def _sse(event_type: str, data: dict) -> str:
@@ -1323,36 +1391,22 @@ async def run_pipeline(user_id: str, cv_text: str, location: str = "London") -> 
 
     while True:
         try:
-            response = await _chat(messages, GROQ_TOOLS)
+            text, tool_calls, assistant_msg = await _agent_complete(messages)
         except asyncio.TimeoutError:
             yield _sse("done", {"message": "Request timed out — please try again."})
             return
 
-        message = response.choices[0].message
-        finish_reason = response.choices[0].finish_reason
-
         # Emit any text content
-        if message.content and message.content.strip():
-            yield _sse("text", {"text": message.content})
+        if text and text.strip():
+            yield _sse("text", {"text": text})
 
-        tool_calls = message.tool_calls or []
-
-        # Append assistant turn (must include tool_calls if present)
-        assistant_msg: dict = {"role": "assistant", "content": message.content}
-        if tool_calls:
-            assistant_msg["tool_calls"] = [
-                {
-                    "id": tc.id,
-                    "type": "function",
-                    "function": {"name": tc.function.name, "arguments": tc.function.arguments},
-                }
-                for tc in tool_calls
-            ]
+        # Append assistant turn (backend-shaped; includes tool_use/tool_calls if present)
         messages.append(assistant_msg)
 
         for tc in tool_calls:
-            tool_name = tc.function.name
-            tool_input = json.loads(tc.function.arguments)
+            tool_name = tc["name"]
+            tool_input = tc["input"]
+            tool_id = tc["id"]
 
             sse_input, _ = redact_credentials_from_input(tool_name, tool_input)
             sse_input, _ = redact_pii_from_input(tool_name, sse_input)
@@ -1364,7 +1418,7 @@ async def run_pipeline(user_id: str, cv_text: str, location: str = "London") -> 
                 yield _sse("guardrail", {"check": e.check, "detail": e.detail, "tool_name": tool_name, "fired": True})
                 result = {"error": f"Guardrail blocked this tool call: {e.detail}"}
                 yield _sse("tool_result", {"tool_name": tool_name, "result": result})
-                messages.append({"role": "tool", "tool_call_id": tc.id, "content": json.dumps(result)})
+                messages.append(_tool_result_message(tool_id, json.dumps(result)))
                 continue
 
             result = await execute_tool(tool_name, safe_input)
@@ -1380,7 +1434,7 @@ async def run_pipeline(user_id: str, cv_text: str, location: str = "London") -> 
                 )
                 result["correction"] = correction
                 yield _sse("tool_result", {"tool_name": tool_name, "result": result})
-                messages.append({"role": "tool", "tool_call_id": tc.id, "content": json.dumps(result)})
+                messages.append(_tool_result_message(tool_id, json.dumps(result)))
                 continue
 
             sse_result, pii_fired = redact_pii_from_result(tool_name, result)
@@ -1388,14 +1442,14 @@ async def run_pipeline(user_id: str, cv_text: str, location: str = "London") -> 
                 yield _sse("guardrail", {"check": "pii_redact", "tool_name": tool_name, "fired": True, "detail": "PII removed from display"})
             yield _sse("tool_result", {"tool_name": tool_name, "result": sse_result})
 
-            messages.append({"role": "tool", "tool_call_id": tc.id, "content": json.dumps(result)})
+            messages.append(_tool_result_message(tool_id, json.dumps(result)))
 
             if tool_name == "generate_cover_letter":
                 _cover_letter_done = True
                 yield _sse("done", {"message": "Pipeline complete"})
                 return
 
-        if finish_reason == "stop" or not tool_calls:
+        if not tool_calls:
             if not _cover_letter_done and _nudge_count < _MAX_NUDGES:
                 # Model stopped before completing the pipeline — nudge it to continue
                 _nudge_count += 1
