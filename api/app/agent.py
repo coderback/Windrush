@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 import os
 import re
 import time
@@ -22,6 +23,8 @@ from .guardrails import (
     GuardrailViolation,
 )
 
+logger = logging.getLogger("windrush.agent")
+
 # ── LLM backend ───────────────────────────────────────────────────────────────
 # Switch between Ollama (local) and Groq (cloud) via LLM_BACKEND env var.
 # LLM_BACKEND=ollama  → local Gemma 4 via Ollama
@@ -34,8 +37,12 @@ if _BACKEND == "groq":
         api_key=os.environ.get("GROQ_API_KEY", ""),
         base_url="https://api.groq.com/openai/v1",
     )
-    AGENT_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"
-    LLM_MODEL   = "meta-llama/llama-4-scout-17b-16e-instruct"
+    # Overridable via GROQ_MODEL. NOTE: reasoning models (e.g. qwen3.x) emit
+    # <think>…</think> in content and need think-stripping + higher max_tokens, and
+    # smaller-tier models may have low TPM limits that reject full-persona payloads.
+    _GROQ_MODEL = os.environ.get("GROQ_MODEL", "meta-llama/llama-4-scout-17b-16e-instruct")
+    AGENT_MODEL = _GROQ_MODEL
+    LLM_MODEL   = _GROQ_MODEL
 else:
     # Ollama — local Qwen 3.5 4B
     _OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://ollama:11434")
@@ -294,23 +301,39 @@ async def _llm(system: str, user: str, max_tokens: int = 2048) -> str:
     return resp.choices[0].message.content or ""
 
 
-async def _llm_json(system: str, user: str, max_tokens: int = 2048) -> dict | None:
+async def _llm_json(system: str, user: str, max_tokens: int = 2048, label: str = "") -> dict | None:
     """
     LLM call that expects a single JSON object back. Strips ```json fences and any
     surrounding prose, then parses. Returns None on unparseable output so callers
     can fall back to a deterministically-built document.
+
+    Logs the parse outcome (tagged with `label`) so we can measure how often the
+    bad-JSON fallback path fires in real generations. Fallback cases are logged at
+    WARNING (reliably visible); a clean parse at INFO.
     """
+    tag = label or "?"
     raw = await _llm(system, user, max_tokens=max_tokens)
     text = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
     if not text.startswith("{"):
         start, end = text.find("{"), text.rfind("}")
         if start != -1 and end > start:
             text = text[start:end + 1]
-    try:
-        data = json.loads(text or "")
-    except json.JSONDecodeError:
+    if not text:
+        logger.warning("llm_json[%s]: empty response (raw=%d chars) — fallback", tag, len(raw))
         return None
-    return data if isinstance(data, dict) else None
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as exc:
+        logger.warning(
+            "llm_json[%s]: JSON decode failed (%s) — fallback | raw=%d chars, head=%r",
+            tag, exc, len(raw), raw[:120],
+        )
+        return None
+    if not isinstance(data, dict):
+        logger.warning("llm_json[%s]: parsed non-dict %s — fallback", tag, type(data).__name__)
+        return None
+    logger.info("llm_json[%s]: parsed OK (%d top-level keys)", tag, len(data))
+    return data
 
 
 # Lead-in labels and scaffolding the candidate's verbose portfolio text tends to carry.
@@ -372,6 +395,21 @@ def _project_tech_source(p: dict) -> str:
     return re.split(r"(?i)\bsend message\b", seg)[0].strip()  # drop trailing copy-paste UI junk
 
 
+def _recency_key(entry: dict) -> tuple[int, int]:
+    """Sort key (year, month) for reverse-chronological ordering; current/ongoing first."""
+    if entry.get("is_current") or entry.get("is_currently_enrolled"):
+        return (9999, 13)
+    raw = str(entry.get("end_date") or entry.get("year") or entry.get("start_date") or "")
+    if raw.strip().lower() in ("present", "current", "ongoing", "now"):
+        return (9999, 13)
+    ym = re.search(r"(19|20)\d{2}", raw)
+    year = int(ym.group(0)) if ym else 0
+    m1 = re.search(r"\b(0?[1-9]|1[0-2])[/-](?:19|20)\d{2}", raw)   # MM/YYYY
+    m2 = re.search(r"(?:19|20)\d{2}[-/](0?[1-9]|1[0-2])\b", raw)   # YYYY-MM
+    month = int(m1.group(1)) if m1 else (int(m2.group(1)) if m2 else 0)
+    return (year, month)
+
+
 def _persona_to_cvdoc(persona: dict) -> dict:
     """
     Build a complete CVDoc straight from the persona — used both as the structured
@@ -395,7 +433,7 @@ def _persona_to_cvdoc(persona: dict) -> dict:
     ]
 
     experience = []
-    for exp in persona.get("history", []):
+    for exp in sorted(persona.get("history", []), key=_recency_key, reverse=True):
         end = "Present" if exp.get("is_current") else exp.get("end_date", "")
         bullets: list[str] = []
         ach = exp.get("achievements")
@@ -420,7 +458,7 @@ def _persona_to_cvdoc(persona: dict) -> dict:
     education = [
         {"degree": e.get("degree", ""), "institution": e.get("institution", ""),
          "year": e.get("end_date", "") or e.get("year", ""), "grade": e.get("grade", "")}
-        for e in persona.get("education", [])
+        for e in sorted(persona.get("education", []), key=_recency_key, reverse=True)
     ]
     projects = []
     for p in persona.get("projects", []):
@@ -447,13 +485,81 @@ def _persona_to_cvdoc(persona: dict) -> dict:
     }
 
 
+def _persona_projects_for_llm(persona: dict) -> list[dict]:
+    """
+    Rich, model-facing view of each project taken straight from the persona twin: the
+    full problem statement, the quantified outcomes (the metrics live here) and the raw
+    technologies section. This replaces the thin 2-sentence projection in the tailored-CV
+    context so the writer can SELECT by relevance and DESCRIBE with real numbers, rather
+    than choosing blind. Empty-named entries are skipped.
+    """
+    out: list[dict] = []
+    for p in persona.get("projects", []) or []:
+        name = (p.get("name") or "").strip()
+        if not name:
+            continue
+        techs = p.get("technologies")
+        out.append({
+            "name": name,
+            "problem_solved": _strip_markup(p.get("problem_solved", ""))[:700],
+            "outcomes": _strip_markup(p.get("outcomes", ""))[:700],
+            "technologies": techs if isinstance(techs, list) else [],
+            "tech_source": _project_tech_source(p),
+            "link": p.get("url", ""),
+        })
+    return out
+
+
+_RELEVANCE_STOP = frozenset({
+    "the", "and", "for", "with", "you", "your", "our", "this", "that", "will", "are",
+    "from", "have", "has", "an", "to", "of", "in", "on", "as", "is", "be", "or", "we",
+    "at", "by", "role", "team", "work", "working", "experience", "skills", "strong",
+    "using", "into", "across", "within", "including", "etc", "via", "per", "new", "use",
+    "used", "build", "building", "built", "develop", "developed", "developing", "design",
+    "designing", "designed", "candidate", "company", "join", "looking", "passionate",
+})
+
+
+def _relevance_tokens(text: str) -> set[str]:
+    return {
+        w for w in re.split(r"[^a-z0-9+#]+", (text or "").lower())
+        if len(w) > 2 and w not in _RELEVANCE_STOP
+    }
+
+
+def _rank_projects_by_relevance(job: dict, projects: list[dict]) -> list[dict]:
+    """
+    Order projects by how well they match THIS job's domain and responsibilities, using
+    content-word overlap between the job (title weighted higher) and each project's
+    name/problem/outcomes/technologies. Deterministic — no extra LLM call. Stable for
+    ties, so equal-scoring projects keep their original order. This combats the model's
+    tendency to pick on tech-stack alone and ignore domain fit (e.g. a RegTech role
+    should surface a compliance/financial-disclosure project, not a generic web app).
+    """
+    title_tokens = _relevance_tokens(job.get("title", ""))
+    desc_tokens = _relevance_tokens(job.get("description", ""))
+    if not (title_tokens or desc_tokens):
+        return projects
+    scored = []
+    for i, p in enumerate(projects):
+        blob = " ".join([
+            p.get("name", ""), p.get("problem_solved", ""), p.get("outcomes", ""),
+            " ".join(p.get("technologies") or []), p.get("tech_source", ""),
+        ])
+        pt = _relevance_tokens(blob)
+        score = 2 * len(title_tokens & pt) + len(desc_tokens & pt)
+        scored.append((score, i, p))
+    scored.sort(key=lambda x: (-x[0], x[1]))
+    return [p for _, _, p in scored]
+
+
 def _restore_project_depth(cv_projects: list, base_projects: list) -> list:
     """
-    Keep the model's project *selection* (which projects are most relevant to the job),
-    but restore each project's description, tech stack and link from the persona. The
-    model picks good projects yet summarises them inconsistently (two sentences for one,
-    one for the next); the deterministic persona description (_project_description) gives
-    every project the same depth in the candidate's own words.
+    Keep the model's tailored project selection AND its now role-specific description
+    (grounded in the persona twin's real problem/outcomes, which the model is given).
+    We only restore the canonical link from the persona so URLs can't be dropped or
+    mangled, and backfill the tech list when the model returned none — identity-safe
+    touch-ups, not a wholesale overwrite of the model's tailoring.
     """
     def norm(s: str) -> str:
         return re.sub(r"[^a-z0-9]", "", (s or "").lower())
@@ -470,12 +576,10 @@ def _restore_project_depth(cv_projects: list, base_projects: list) -> list:
                     break
         if match:
             p = dict(p)
-            if match.get("description"):
-                p["description"] = match["description"]
-            if match.get("tech"):
-                p["tech"] = match["tech"]
             if match.get("link"):
                 p["link"] = match["link"]
+            if not p.get("tech") and match.get("tech"):
+                p["tech"] = match["tech"]
         out.append(p)
     return out
 
@@ -675,6 +779,32 @@ async def _ddg_search(query: str, max_results: int = 15) -> list[dict]:
         return []
 
 
+async def _research_company(company: str, role: str = "") -> str:
+    """
+    Pull a few public facts about the employer (mission, product, what they do) via the
+    DuckDuckGo Lite tool so the cover letter's "Why them?" paragraph can be grounded in
+    real, company-specific detail rather than restating the job description. Best-effort:
+    returns "" on failure so the letter still generates.
+    """
+    company = (company or "").strip()
+    if not company:
+        return ""
+    try:
+        results = await _ddg_search(f"{company} company mission what they do product", max_results=6)
+    except Exception:
+        return ""
+    lines = []
+    for r in results:
+        snip = (r.get("snippet") or "").strip()
+        if snip and len(snip) > 30:
+            lines.append(f"- {snip}")
+        if len(lines) >= 5:
+            break
+    research = "\n".join(lines)
+    logger.info("cover_letter: company_research for %r -> %d facts", company[:40], len(lines))
+    return research
+
+
 async def execute_tool(name: str, tool_input: dict) -> dict:
     if name == "extract_cv_profile":
         cv_text = tool_input.get("cv_text", "")
@@ -822,19 +952,6 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
         tone = tool_input.get("tone", "professional")
         archetype = _detect_archetype(job.get("title", ""), job.get("description", ""))
         
-        # Use history from persona for differentiation hook
-        history = persona.get("history", [])
-        hook = ""
-        jd_lower = job.get("description", "").lower()
-        for exp in history:
-            summary = exp.get("summary", "") + " " + exp.get("employer", "")
-            tokens = [w.strip(".,();") for w in summary.split() if len(w) > 3 and w[0].isupper()]
-            for token in tokens:
-                if token.lower() not in jd_lower and len(token) > 4:
-                    hook = f"Notable experience with {token} that directly applies to this role."
-                    break
-            if hook: break
-
         archetype_guidance = {
             "SoftwareEngineer": "Emphasise technical depth, system design decisions, and production reliability.",
             "DataML": "Emphasise model performance, pipeline scale, evaluation rigour, and research grounding.",
@@ -845,6 +962,12 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
         core = persona.get("core_info", {})
         full_name = f"{core.get('first_name', '')} {core.get('last_name', '')}".strip()
         level = _seniority(persona)
+        # Surface the most domain-relevant projects so the EVIDENCE paragraph can anchor on
+        # the best-fitting project (not always the internship) when one fits the role better.
+        ranked_projects = _rank_projects_by_relevance(job, _persona_projects_for_llm(persona))
+        top_project_names = [p["name"] for p in ranked_projects[:3]]
+        # Live company research grounds the "Why them?" paragraph (best-effort; "" on failure).
+        company_research = await _research_company(job.get("company", ""), job.get("title", ""))
 
         import datetime
         base_letter = {
@@ -869,29 +992,41 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
         }
 
         system = (
-            f"Write a {tone}, authentically human cover letter for a {level} candidate. "
+            f"Write a {tone}, authentically human, UK-English cover letter for a {level} candidate, framed "
+            "around the EMPLOYER'S needs (not a list of your own achievements). "
             f"Archetype: {archetype}. {archetype_guidance} "
             'Return ONLY a JSON object (no prose, no code fences) with this shape: '
             '{"headline":str,"salutation":str,"paragraphs":[str,...],"signoff":str}. '
             "'headline' = the candidate's concise professional identity in 2-4 words "
             "(e.g. 'Computer Science Graduate'); do NOT put the role being applied for. "
-            "Use 3-4 short paragraphs totalling 250-400 words, in this order: "
-            "(1) HOOK 60-80 words — open with a specific, researched reason for THIS company and name the exact "
-            "role; NEVER begin with 'I am writing to apply for'. "
-            "(2) EVIDENCE 100-150 words — ONE relevant project, internship or role told as a concrete "
-            "micro-anecdote: the problem, the decision/action taken, and a quantified result. "
-            "(3) FIT 60-100 words — connect those skills to the employer's specific needs from the job "
-            "description; emphasise transferable strengths. "
-            "(4) CLOSE 30-50 words — brief, non-desperate enthusiasm and a request to talk. "
-            "AUTHENTICITY (critical — recruiters reject robotic AI text): vary sentence length and rhythm and "
-            "include at least one specific detail or metric. Do NOT use any of these words: delve, testament, "
-            "tapestry, landscape, foster, underscore, beacon, synergy, pivotal, intricate, unleash, elevate, "
-            "seamless, robust, leverage. Do NOT cluster 'Furthermore/Moreover/Additionally'. No moralistic "
-            "summary sentences, no placeholders, no invented facts. "
+            "Write EXACTLY 4 short paragraphs, one page total (~300-380 words), in this order: "
+            "(1) INTRODUCTION ~60 words — name the EXACT role and open with a specific hook about YOU that ties to "
+            "this employer (e.g. why you chose your specialism / what draws you to their problem), then a one-line "
+            "summary of what you bring. NEVER begin with 'I am writing to apply for'. "
+            "(2) WHY THEM ~80 words — give specific, researched reasons for wanting THIS company/sector/role, drawn "
+            "from the COMPANY RESEARCH and job description, and explain WHY those facts connect to YOU (your "
+            "experience, goals or values). Do NOT restate their website or tell them what they already know. It "
+            "MUST fail the 'swap-the-company-name' test: if another employer's name could replace theirs and the "
+            "paragraph still reads fine, it is too generic — rewrite it. "
+            "(3) WHY ME ~140 words — choose 2-3 skills/requirements taken DIRECTLY from the job's requirements / "
+            "person specification and prove EACH with a concrete, quantified example, leading with the most "
+            "domain-relevant NAMED project or internship. Mirror the employer's EXACT terminology from the posting "
+            "(their tool, framework and skill names). Link each example forward to how it lets you deliver in THIS "
+            "role. "
+            "(4) ENDING ~40 words — short and specific; reiterate interest by referencing a concrete point you "
+            "made, and state availability if requested. Do NOT mention or praise perks, benefits, salary, "
+            "holiday, working hours or well-being; avoid generic lines like 'it would be a privilege'. "
+            "LANGUAGE (employers judge your writing here): active voice; sound confident — NO hedging qualifiers "
+            "('I feel that', 'I believe I could', 'I think'); NO vague quantity words (various, some, many, "
+            "several, lots); quantify ONLY with real numbers present in the candidate data — never invent, "
+            "estimate or round; frame any skill gap positively (how you would build it) — never 'lacking' or "
+            "'unfortunately'; no slang or abbreviations (write 'undergraduate', not 'undergrad'); no clichés or "
+            "buzzwords. Do NOT use any of these words: delve, testament, tapestry, landscape, foster, underscore, "
+            "beacon, synergy, pivotal, intricate, unleash, elevate, seamless, robust, leverage. Do NOT cluster "
+            "'Furthermore/Moreover/Additionally'. No placeholders, no invented facts. "
             "Salutation: 'Dear Hiring Manager,' unless a named contact is provided. "
             "Sign-off: 'Yours faithfully,' when no name is known, 'Yours sincerely,' when it is (UK convention)."
             + (f"\n\nDirectives from user: {directives}" if directives else "")
-            + (f"\n\nDifferentiation hook to weave in naturally: {hook}" if hook else "")
         )
         data = await _llm_json(
             system=system,
@@ -899,8 +1034,13 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
                 f"CANDIDATE PERSONA (JSON): {json.dumps(persona)}\n\n"
                 f"JOB: {job.get('title')} at {job.get('company')}\n"
                 f"DESCRIPTION: {job.get('description', '')[:2500]}"
+                + (f"\n\nMOST DOMAIN-RELEVANT PROJECTS for this role (use the best fit as your main 'Why me' "
+                   f"evidence, in priority order): {', '.join(top_project_names)}" if top_project_names else "")
+                + (f"\n\nCOMPANY RESEARCH (ground your 'Why them' in this; explain why it connects to you — do "
+                   f"NOT restate it):\n{company_research}" if company_research else "")
             ),
             max_tokens=1024,
+            label="cover_letter",
         )
 
         letter = dict(base_letter)
@@ -920,6 +1060,24 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
                 persona.get("summary", "")
                 or f"I am writing to apply for the {job.get('title', '')} role at {job.get('company', '')}."
             ]
+
+        # Deterministic UK sign-off guard: 'Yours faithfully' for a generic salutation,
+        # 'Yours sincerely' only when a specific person is named. The model gets this wrong
+        # intermittently (e.g. 'Dear Hiring Manager,' + 'Yours sincerely,').
+        _salu = letter.get("salutation", "").lower()
+        _generic_salutation = (not _salu) or any(
+            g in _salu for g in (
+                "hiring manager", "madam", "sir", "to whom it may concern",
+                "team", "recruiter", "recruitment",
+            )
+        )
+        letter["signoff"] = "Yours faithfully," if _generic_salutation else "Yours sincerely,"
+
+        (logger.warning if data is None else logger.info)(
+            "cover_letter: llm_used=%s, paragraphs=%d, archetype=%s, level=%s | job=%r",
+            data is not None, len(letter["paragraphs"]), archetype, level,
+            (job.get("title") or "")[:60],
+        )
 
         return {
             "status": "ready",
@@ -1015,13 +1173,10 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
         template_id = tool_input.get("template_id", "classic")
 
         base_cv = _persona_to_cvdoc(persona)
-        # The model distils clean tech names from each project's raw Technologies section
-        # (persona 'technologies' field is empty; the stack lives in the prose).
-        tech_source = "\n".join(
-            f"- {(p.get('name') or '').strip()}: {ts}"
-            for p in persona.get("projects", [])
-            if (p.get("name") or "").strip() and (ts := _project_tech_source(p))
-        )
+        # Feed the model the persona twin's FULL project data (problem statement,
+        # quantified outcomes and technologies) instead of the thin 2-sentence
+        # projection, so it can both SELECT by relevance and DESCRIBE with real metrics.
+        llm_cv = {**base_cv, "projects": _rank_projects_by_relevance(job, _persona_projects_for_llm(persona))}
         level = _seniority(persona)
         if level == "junior":
             level_guidance = (
@@ -1058,14 +1213,20 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
                 "schema'), named breakdowns ('macronutrients, micronutrients, and functional health tags'), tools "
                 "and metrics; do NOT generalise them away. "
                 f"{level_guidance} "
-                "PROJECTS: select the candidate's most job-relevant projects (at most 3) and keep each 'name' "
-                "exactly as given. For each, set 'tech' to 6-10 clean, canonical technology names (languages, "
-                "frameworks, datastores, key libraries) drawn from that project's entry in PROJECT TECH SOURCE "
-                "below — omit evaluation metrics, security checks and verbose phrases, and normalise to the "
-                "common name (e.g. 'PostgreSQL', 'FastAPI', 'Next.js'). A short 'description' is fine but it will "
-                "be standardised downstream, so prioritise getting the project selection and 'tech' right. "
+                "PROJECTS: the candidate's full project list is provided (ALREADY ORDERED by relevance to this "
+                "job), each with its problem, quantified 'outcomes' and 'technologies'/'tech_source'. SELECT the "
+                "3 most relevant to THIS job's domain and responsibilities and keep each 'name' exactly as given. "
+                "Write a tailored 'description' of AT LEAST TWO full sentences: sentence 1 states what the "
+                "project is and what it achieves (include ONE real quantified outcome from its 'outcomes' when "
+                "available — never invent, estimate or round a number); sentence 2 explains HOW IT WORKS — its "
+                "architecture, core approach or key technique. Set 'tech' to 6-10 clean, canonical technology "
+                "names (languages, frameworks, datastores, key libraries) drawn from that project's "
+                "'technologies'/'tech_source', omitting evaluation metrics and verbose phrases and normalising to "
+                "the common name (e.g. 'PostgreSQL', 'FastAPI', 'Next.js'). "
                 f"SUMMARY: {summary_rule} leading with a specific specialism + domain + ONE concrete strength "
-                "drawn from the candidate data. Do NOT open with a generic cliché ('Highly motivated', "
+                "drawn from the candidate data. Write it in an implied-subject style with NO pronouns at all — "
+                "no 'I', 'me', 'my', 'we', and no 'he', 'she', 'they' (e.g. 'Computer Science graduate "
+                "specialising in…'). Do NOT open with a generic cliché ('Highly motivated', "
                 "'Results-driven', 'Detail-oriented', 'Passionate') and do NOT close with vague filler ('strong "
                 "problem-solving skills and attention to detail', 'hardworking team player'). Do NOT spend a "
                 "sentence naming assumed or basic tooling (e.g. Git / version control). "
@@ -1081,14 +1242,16 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
             user=(
                 f"TARGET JOB: {job.get('title','')} at {job.get('company','')}\n"
                 f"JOB DESCRIPTION:\n{job.get('description','')[:2500]}\n\n"
-                f"CANDIDATE DATA (JSON):\n{json.dumps(base_cv)}"
-                + (f"\n\nPROJECT TECH SOURCE (use to populate each selected project's 'tech'):\n{tech_source}"
-                   if tech_source else "")
+                f"CANDIDATE DATA (JSON):\n{json.dumps(llm_cv, ensure_ascii=False)}"
             ),
             max_tokens=2048,
+            label="tailored_cv",
         )
 
-        if not cv or not (cv.get("experience") or cv.get("summary")):
+        base_proj_n = len(base_cv.get("projects") or [])
+        model_proj_n = len((cv or {}).get("projects") or [])
+        used_fallback = not cv or not (cv.get("experience") or cv.get("summary"))
+        if used_fallback:
             cv = base_cv
         # Trust our own structured data — never let the model alter identity/contact, and keep
         # the candidate's full skills list (the model tends to silently drop groups/items when
@@ -1101,6 +1264,15 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
         if not cv.get("name"):
             cv["name"] = base_cv["name"]
         cv["seniority"] = level  # drives section order in the renderer
+
+        # Diagnostic: confirms how often the bad-JSON fallback fires AND whether the
+        # same projects recur across roles (the model is meant to tailor the selection).
+        final_proj_names = [(p.get("name") or "")[:40] for p in (cv.get("projects") or [])][:5]
+        (logger.warning if used_fallback else logger.info)(
+            "tailored_cv: fallback=%s, level=%s, projects base=%d model=%d final=%d %s | job=%r",
+            used_fallback, level, base_proj_n, model_proj_n, len(cv.get("projects") or []),
+            final_proj_names, (job.get("title") or "")[:60],
+        )
         return {"cv": cv, "template_id": template_id}
 
     return {"error": f"Unknown tool: {name}"}

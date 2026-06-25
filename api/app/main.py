@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 import pathlib
 import tempfile
 import uuid
@@ -26,6 +27,13 @@ from .models import Persona
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     import os
+    # Ensure app-level INFO/WARNING logs reach container stdout. Uvicorn configures
+    # its own loggers but leaves the root logger without a handler, so without this
+    # our "windrush.*" diagnostics would be filtered out (lastResort = WARNING-only).
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
     data_dir = os.environ.get("APP_DATA_PATH", "/tmp")
     tracker.init_db()
     jobs_db.init_db()

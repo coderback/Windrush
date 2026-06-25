@@ -43,7 +43,7 @@ _MAX_BULLETS = 4
 _MAX_SKILL_GROUPS = 6
 _MAX_SKILL_ITEMS = 14
 _MAX_PROJECTS = 3
-_MAX_PROJECT_DESC_CHARS = 420
+_MAX_PROJECT_DESC_CHARS = 520  # room for 2 full sentences (what it is/does + how it works)
 _MAX_EDUCATION = 4
 _MAX_CERTS = 6
 _MAX_PARAGRAPHS = 4
@@ -63,6 +63,50 @@ def _truncate(text: str, limit: int) -> str:
             return cut[: idx + 1].strip()
     idx = cut.rfind(" ")
     return (cut[:idx] if idx > 0 else cut).strip() + "…"
+
+
+def _render_recency(entry: dict) -> tuple[int, int]:
+    """Reverse-chronological sort key (year, month); current/ongoing entries rank first.
+    Mirrors agent._recency_key but works on rendered CVDoc fields (end_date / year)."""
+    end = str(entry.get("end_date") or entry.get("year") or entry.get("start_date") or "").strip().lower()
+    if entry.get("is_current") or end in ("present", "current", "ongoing", "now"):
+        return (9999, 13)
+    ym = re.search(r"(19|20)\d{2}", end)
+    year = int(ym.group(0)) if ym else 0
+    m1 = re.search(r"\b(0?[1-9]|1[0-2])[/-](?:19|20)\d{2}", end)
+    m2 = re.search(r"(?:19|20)\d{2}[-/](0?[1-9]|1[0-2])\b", end)
+    month = int(m1.group(1)) if m1 else (int(m2.group(1)) if m2 else 0)
+    return (year, month)
+
+
+# Leading "I am a / I'm an / He is a / She is / They are …" subject+verb opener.
+_LEAD_SUBJECT_RE = re.compile(
+    r"(?i)^\s*(i\s*['’]?\s*a?m|he\s+is|he['’]?s|she\s+is|she['’]?s|they\s+are|they['’]?re)\s+(an?\s+)?")
+# Trailing pronoun-bearing aspirational filler clause ("…, seeking a role where I can …").
+# Tolerates a trailing period so the final '.' doesn't defeat the end anchor.
+_FILLER_CLAUSE_RE = re.compile(
+    r"(?i)[;,]\s*(seeking|looking|hoping|aiming|eager|wanting|keen)\b[^.]*\b(i|my|me|we|our)\b[^.]*\.?\s*$")
+
+
+def _depersonalise(text: str) -> str:
+    """
+    Strip personal pronouns from a CV summary (LSE guidance: avoid pronouns entirely).
+    Conservative — handles the common cases without mangling grammar: removes a leading
+    'I am a / He is a …' subject opener and drops a trailing pronoun-bearing aspirational
+    filler clause (e.g. '…, seeking a role where I can apply my skills'). Other wording is
+    left intact (the prompt is the primary guard; this is the safety net).
+    """
+    t = (text or "").strip()
+    if not t:
+        return t
+    t = _LEAD_SUBJECT_RE.sub("", t)
+    t = _FILLER_CLAUSE_RE.sub("", t).strip()
+    if t and t[0].islower():
+        t = t[0].upper() + t[1:]
+    t = t.rstrip(" ,;")
+    if t and t[-1] not in ".!?":
+        t += "."
+    return t
 
 
 def _clean_text(text: str) -> str:
@@ -153,7 +197,7 @@ def build_cv_template_data(cv: dict) -> dict:
             skills.append({"category": (grp.get("category") or "Skills").strip(), "items": items})
 
     experience = []
-    for role in (cv.get("experience") or [])[:_MAX_ROLES]:
+    for role in sorted(cv.get("experience") or [], key=_render_recency, reverse=True)[:_MAX_ROLES]:
         bullets = [b.strip() for b in (role.get("bullets") or []) if b and b.strip()][:_MAX_BULLETS]
         experience.append({
             "title": (role.get("title") or "").strip(),
@@ -175,7 +219,7 @@ def build_cv_template_data(cv: dict) -> dict:
         })
 
     education = []
-    for e in (cv.get("education") or [])[:_MAX_EDUCATION]:
+    for e in sorted(cv.get("education") or [], key=_render_recency, reverse=True)[:_MAX_EDUCATION]:
         education.append({
             "degree": (e.get("degree") or "").strip(),
             "institution": (e.get("institution") or "").strip(),
@@ -206,7 +250,7 @@ def build_cv_template_data(cv: dict) -> dict:
         "name": (cv.get("name") or "").strip(),
         "headline": (cv.get("headline") or "").strip(),
         "contact_items": _contact_items(cv.get("contact", {})),
-        "summary": _truncate(cv.get("summary", ""), _MAX_SUMMARY_CHARS),
+        "summary": _truncate(_depersonalise(cv.get("summary", "")), _MAX_SUMMARY_CHARS),
         "skills": skills,
         "experience": experience,
         "projects": projects,
