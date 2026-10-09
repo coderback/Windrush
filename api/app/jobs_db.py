@@ -119,26 +119,83 @@ def _extract_tags(job: dict) -> str:
 
 from . import semantic
 
+# Tags recognised in the `tags` filter (must match what _extract_tags writes). Role tags are
+# OR'd ("ml or data"); domain tags are AND'd ("fintech and sponsorship"). Any other tag is
+# free text — the search box sends typed terms as tags — and must appear in the job's
+# title, company or description.
+ROLE_TAGS = frozenset({"software", "ml", "ai", "data", "backend", "frontend", "fullstack",
+                       "devops", "security", "analyst", "engineer", "developer"})
+DOMAIN_TAGS = frozenset({"fintech", "startup", "sponsorship", "remote"})
+
+# Most-recent matching rows that are ranked per request. Bounds per-request work (rows,
+# vector BLOBs, numpy) as the table grows; matches older than this aren't reachable.
+_CANDIDATE_POOL = 2000
+
+# Country-level location aliases. SQL uses them as a LIKE superset; the precise check is a
+# word-boundary regex in Python (so 'us' matches "Austin, TX, US" but not "Australia").
+_LOCATION_ALIASES = {
+    "uk": ["uk", "united kingdom", "england", "scotland", "wales", "northern ireland", "london", "bristol",
+           "manchester", "birmingham", "leeds", "edinburgh", "glasgow", "cardiff", "belfast"],
+    "us": ["us", "usa", "united states", "new york", "san francisco", "california", "seattle"],
+}
+_LOCATION_ALIAS_KEYS = {"uk": "uk", "united kingdom": "uk", "gb": "uk", "great britain": "uk",
+                        "us": "us", "usa": "us", "united states": "us", "america": "us"}
+_REMOTE_TERMS = ["remote", "anywhere", "telecommute"]
+
+
+def _job_key(job: dict) -> tuple[str, str, str]:
+    """The jobs table's dedup key (idx_dedup_jobs)."""
+    return (_normalize_company(job.get("company", "")), (job.get("title") or "").lower(),
+            (job.get("location") or "").lower())
+
+
+def _job_text(job: dict) -> str:
+    return f"{job.get('title', '')} {job.get('description', '')}"
+
+
 def add_jobs(jobs: list[dict]) -> tuple[int, int]:
-    """Insert a list of jobs into the DB, ignoring duplicates."""
-    added = 0
-    updated = 0
+    """
+    Upsert jobs: insert new ones, refresh updated_at/tags on existing ones. Embeddings are only
+    computed for rows that need one (new, or stored without a vector), in batched Ollama calls,
+    and with no DB connection held — so a slow embedder never holds the write lock.
+    Blocking: call via asyncio.to_thread() from async code.
+    """
     if not _DB_PATH:
         init_db()
-    
+
+    # 1. Classify against what's stored (read-only).
     con = sqlite3.connect(_DB_PATH)
+    new_jobs: list[dict] = []
+    existing: list[tuple[str, dict, bool]] = []  # (row id, job, needs_vector)
+    seen: set[tuple[str, str, str]] = set()
     for job in jobs:
-        now_str = _now()
-        normalized_co = _normalize_company(job.get("company", ""))
-        tags_json = _extract_tags(job)
-        
-        # Calculate semantic vector for the job (title + desc)
-        job_text = f"{job.get('title', '')} {job.get('description', '')}"
-        embedding = semantic.get_embedding_sync(job_text)
-        vector_blob = None
-        if embedding:
-            vector_blob = np.array(embedding, dtype=np.float32).tobytes()
-        
+        key = _job_key(job)
+        if key in seen:  # duplicate within this batch
+            continue
+        seen.add(key)
+        row = con.execute(
+            "SELECT id, semantic_vector IS NULL FROM jobs "
+            "WHERE lower(normalized_company)=? AND lower(title)=? AND lower(location)=?", key,
+        ).fetchone()
+        if row:
+            existing.append((row[0], job, bool(row[1])))
+        else:
+            new_jobs.append(job)
+    con.close()
+
+    # 2. Embed only what needs it (no DB handle open).
+    to_embed = new_jobs + [job for _, job, needs in existing if needs]
+    vectors = semantic.get_embeddings_sync([_job_text(j) for j in to_embed]) if to_embed else []
+    blob_for = {
+        id(j): (np.array(v, dtype=np.float32).tobytes() if v else None)
+        for j, v in zip(to_embed, vectors)
+    }
+
+    # 3. Write.
+    added = updated = 0
+    now_str = _now()
+    con = sqlite3.connect(_DB_PATH)
+    for job in new_jobs:
         try:
             con.execute(
                 """INSERT INTO jobs
@@ -146,41 +203,29 @@ def add_jobs(jobs: list[dict]) -> tuple[int, int]:
                     salary_min, salary_max, exposure_score, level, source, tags, semantic_vector, created_at, updated_at, expires_at)
                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
-                    uuid.uuid4().hex,
-                    str(job.get("job_id", "")),
-                    job.get("title", ""),
-                    job.get("company", ""),
-                    normalized_co,
-                    job.get("location", ""),
-                    job.get("description", ""),
-                    job.get("url", ""),
-                    job.get("salary_min"),
-                    job.get("salary_max"),
-                    job.get("exposure_score"),
-                    job.get("level", "mid"),
-                    job.get("source", "unknown"),
-                    tags_json,
-                    vector_blob,
-                    now_str,
-                    now_str,
-                    job.get("expires_at"),
+                    uuid.uuid4().hex, str(job.get("job_id", "")), job.get("title", ""), job.get("company", ""),
+                    _normalize_company(job.get("company", "")), job.get("location", ""), job.get("description", ""),
+                    job.get("url", ""), job.get("salary_min"), job.get("salary_max"), job.get("exposure_score"),
+                    job.get("level", "mid"), job.get("source", "unknown"), _extract_tags(job), blob_for.get(id(job)),
+                    now_str, now_str, job.get("expires_at"),
                 ),
             )
             added += 1
-        except sqlite3.IntegrityError:
-            con.execute(
-                """UPDATE jobs SET updated_at = ?, tags = ?, 
-                   semantic_vector = COALESCE(semantic_vector, ?) 
-                   WHERE lower(normalized_company)=? AND lower(title)=lower(?) AND lower(location)=lower(?)""",
-                (now_str, tags_json, vector_blob, normalized_co, job.get("title", ""), job.get("location", ""))
-            )
-            updated += 1
+        except sqlite3.IntegrityError:  # inserted concurrently since step 1 — refresh instead
+            existing.append(("", job, False))
         except Exception as exc:
             logger.error("Failed to insert job %s: %s", job.get("title"), exc)
-    
+    for row_id, job, _ in existing:
+        con.execute(
+            """UPDATE jobs SET updated_at = ?, tags = ?, semantic_vector = COALESCE(semantic_vector, ?)
+               WHERE lower(normalized_company)=? AND lower(title)=? AND lower(location)=?""",
+            (now_str, _extract_tags(job), blob_for.get(id(job)), *_job_key(job)),
+        )
+        updated += 1
     con.commit()
     con.close()
     return added, updated
+
 
 def purge_expired_jobs(sync_start: str) -> None:
     if not _DB_PATH: return
@@ -192,6 +237,30 @@ def purge_expired_jobs(sync_start: str) -> None:
     if deleted > 0:
         logger.info("Purged %d expired jobs that were removed from their source ATS.", deleted)
 
+
+def _like(term: str) -> str:
+    """LIKE pattern for a user-supplied term with %, _ and the escape char escaped (ESCAPE '\\')."""
+    return "%" + term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+
+
+def _location_matcher(location: str):
+    """(sql_terms, precise_regex) for a location filter."""
+    loc = location.lower().strip()
+    terms = _LOCATION_ALIASES.get(_LOCATION_ALIAS_KEYS.get(loc, ""), [loc])
+    regex = re.compile(r"(?<![a-z])(" + "|".join(re.escape(t) for t in terms) + r")(?![a-z])")
+    return terms, regex
+
+
+def _parse_tags(tags: list[str]) -> tuple[list[str], list[str], list[str]]:
+    roles, domains, text = [], [], []
+    for t in tags or []:
+        t = t.strip().lower()
+        if not t:
+            continue
+        (roles if t in ROLE_TAGS else domains if t in DOMAIN_TAGS else text).append(t)
+    return roles, domains, text
+
+
 def get_jobs(
     query: str = "",
     location: str = "",
@@ -201,91 +270,135 @@ def get_jobs(
     tags: list[str] = None,
     persona_vector: list[float] = None,
     limit: int = 20,
-    offset: int = 0
-) -> list[dict]:
+    offset: int = 0,
+    exclude: set[tuple[str, str]] | None = None,
+) -> tuple[list[dict], bool]:
+    """
+    Filter in SQL, then rank (semantic similarity to `persona_vector` when given, else
+    recency) and paginate. `query`, `category` and free-text `tags` are hard filters; role
+    tags are OR'd, domain tags AND'd. `exclude` holds (lower company, lower title) pairs to
+    drop *before* pagination (jobs the user already applied to / discarded), so pages stay
+    full. Returns (jobs, has_more). Blocking: call via asyncio.to_thread() from async code.
+    """
     if not _DB_PATH:
         init_db()
-    
+
+    roles, domains, text_terms = _parse_tags(list(tags or []) + ([category] if category else []))
+    text_terms += [w for w in re.split(r"[\s,]+", (query or "").lower()) if len(w) > 1]
+
+    where = ["(expires_at IS NULL OR expires_at > ?)"]
+    params: list = [_now()]
+
+    if level:
+        where.append("lower(level) = ?")
+        params.append(level.lower())
+
+    for term in text_terms:
+        where.append("(lower(title) LIKE ? ESCAPE '\\' OR lower(company) LIKE ? ESCAPE '\\' "
+                     "OR lower(description) LIKE ? ESCAPE '\\')")
+        params += [_like(term)] * 3
+    if roles:
+        where.append("(" + " OR ".join("tags LIKE ?" for _ in roles) + ")")
+        params += [f'%"{r}"%' for r in roles]
+    for d in domains:
+        where.append("tags LIKE ?")
+        params.append(f'%"{d}"%')
+
+    loc_regex = None
+    loc_lower = location.lower().strip()
+    remote_only = remote or loc_lower == "remote"
+    remote_sql = "(" + " OR ".join("lower(location) LIKE ?" for _ in _REMOTE_TERMS) + ")"
+    if remote_only and not (location and loc_lower != "remote"):
+        where.append(remote_sql)
+        params += [f"%{t}%" for t in _REMOTE_TERMS]
+    elif location:
+        terms, loc_regex = _location_matcher(location)
+        loc_sql = "(" + " OR ".join("lower(location) LIKE ? ESCAPE '\\'" for _ in terms) + ")"
+        if remote:  # "in <location>, or remote"
+            where.append(f"({loc_sql} OR {remote_sql})")
+            params += [_like(t) for t in terms] + [f"%{t}%" for t in _REMOTE_TERMS]
+        else:
+            where.append(loc_sql)
+            params += [_like(t) for t in terms]
+        # "London" (or the UK alias, which includes it) means London, England — unless the
+        # user is explicitly searching for the Canadian / US ones.
+        if ("london" in terms) and not any(x in loc_lower for x in ("ontario", "new london", "canada")):
+            where.append("lower(location) NOT LIKE '%ontario%' AND lower(location) NOT LIKE '%new london%'")
+
+    columns = "*" if persona_vector else (
+        "id, job_id, title, company, normalized_company, location, description, url, salary_min, salary_max, "
+        "exposure_score, level, source, tags, created_at, updated_at, expires_at")
+    sql = (f"SELECT {columns} FROM jobs WHERE {' AND '.join(where)} "
+           f"ORDER BY coalesce(updated_at, created_at) DESC LIMIT {_CANDIDATE_POOL}")
+
     con = sqlite3.connect(_DB_PATH)
     con.row_factory = sqlite3.Row
-    
-    # Categorise tags for Collection (OR) logic within Role group
-    # Level is now handled by the separate dropdown, not by tags.
-    s_roles = {"software", "ml", "ai", "data", "backend", "frontend", "fullstack", "devops", "security", "analyst", "engineer", "developer"}
-    
-    active_roles = []
-    active_others = []
-    
-    if tags:
-        for t in tags:
-            t_low = t.lower()
-            if t_low in s_roles: active_roles.append(t_low)
-            else: active_others.append(t_low)
-
-    sql = "SELECT * FROM jobs WHERE 1=1"
-    params = []
-    sql += " AND (expires_at IS NULL OR expires_at > ?)"
-    params.append(_now())
-
-    # LEVEL and LOCATION remain strict "Hard Filters" (Deal-breakers)
-    if level:
-        sql += " AND lower(level) = ?"
-        params.append(level.lower())
-    
-    if location:
-        loc_lower = location.lower().strip()
-        if "london" in loc_lower and "uk" in loc_lower:
-            sql += " AND lower(location) NOT LIKE '%ontario%' AND lower(location) NOT LIKE '%new london%'"
-        
-        if loc_lower == "remote" or remote:
-            sql += " AND (lower(location) LIKE '%remote%' OR lower(location) LIKE '%anywhere%' OR lower(location) LIKE '%telecommute%')"
-        else:
-            loc_clause = ""
-            if loc_lower in ["uk", "united kingdom", "gb", "great britain"]:
-                loc_clause = "(lower(location) LIKE '%uk%' OR lower(location) LIKE '%united kingdom%' OR lower(location) LIKE '%england%' OR lower(location) LIKE '%london%' OR lower(location) LIKE '%bristol%' OR lower(location) LIKE '%manchester%' OR lower(location) LIKE '%birmingham%' OR lower(location) LIKE '%leeds%' OR lower(location) LIKE '%scotland%' OR lower(location) LIKE '%edinburgh%' OR lower(location) LIKE '%glasgow%' OR lower(location) LIKE '%wales%' OR lower(location) LIKE '%cardiff%' OR lower(location) LIKE '%northern ireland%' OR lower(location) LIKE '%belfast%')"
-            elif loc_lower in ["us", "usa", "united states", "america"]:
-                loc_clause = "(lower(location) LIKE '%us%' OR lower(location) LIKE '%usa%' OR lower(location) LIKE '%united states%' OR lower(location) LIKE '%new york%' OR lower(location) LIKE '%san francisco%' OR lower(location) LIKE '%california%' OR lower(location) LIKE '%seattle%')"
-            else:
-                loc_clause = "(lower(location) LIKE ?)"
-                params.append(f"%{loc_lower}%")
-            
-            if remote:
-                sql += f" AND ({loc_clause} OR lower(location) LIKE '%remote%')"
-            else:
-                sql += f" AND {loc_clause}"
-
-    # Roles and Domains are now "Semantic Interests" handled in Python ranking,
-    # so we no longer apply them in SQL.
-
-    # To keep semantic search snappy but accurate, we pull more than the limit 
-    # then rank and return the page. Capping at 500 for performance.
-    fetch_limit = 500 if persona_vector else limit + offset
-    sql += f" LIMIT {fetch_limit}"
-
-    rows = con.execute(sql, params).fetchall()
+    rows = [dict(r) for r in con.execute(sql, params).fetchall()]
     con.close()
-    
+
+    exclude = exclude or set()
     candidates = []
-    for row in rows:
-        job = dict(row)
-        sim = 0.0
-        if persona_vector and job.get("semantic_vector"):
-            try:
-                job_v = np.frombuffer(job["semantic_vector"], dtype=np.float32).tolist()
-                sim = semantic.cosine_similarity(persona_vector, job_v)
-            except: pass
-            
-        job.pop("semantic_vector", None)
-        job["semantic_score"] = round(sim, 3)
+    for job in rows:
+        if exclude and ((job.get("company") or "").lower(), (job.get("title") or "").lower()) in exclude:
+            continue
+        loc = (job.get("location") or "").lower()
+        if loc_regex is not None and not loc_regex.search(loc):
+            if not (remote and any(t in loc for t in _REMOTE_TERMS)):
+                continue
         candidates.append(job)
 
-    # Sort and Limit
     if persona_vector:
-        candidates.sort(key=lambda x: x.get("semantic_score", 0), reverse=True)
+        _rank_semantically(candidates, persona_vector)
+        candidates.sort(key=lambda j: j["semantic_score"], reverse=True)  # stable: ties stay newest-first
     else:
-        candidates.sort(key=lambda x: x.get("created_at", ""), reverse=True)
-        
-    return candidates[offset : offset + limit]
+        for job in candidates:
+            job["semantic_score"] = 0.0
+
+    page = candidates[offset: offset + limit]
+    return page, len(candidates) > offset + limit
+
+
+def _rank_semantically(jobs: list[dict], persona_vector: list[float]) -> None:
+    """Set job['semantic_score'] = cosine(job vector, persona vector), vectorised with numpy."""
+    p = np.asarray(persona_vector, dtype=np.float32)
+    p_norm = float(np.linalg.norm(p)) or 1.0
+    idx, vecs = [], []
+    for i, job in enumerate(jobs):
+        blob = job.pop("semantic_vector", None)
+        job["semantic_score"] = 0.0
+        if blob:
+            v = np.frombuffer(blob, dtype=np.float32)
+            if v.shape == p.shape:  # skip vectors from a different embedding model
+                idx.append(i)
+                vecs.append(v)
+    if not vecs:
+        return
+    m = np.vstack(vecs)
+    norms = np.linalg.norm(m, axis=1)
+    norms[norms == 0] = 1.0
+    sims = (m @ p) / (norms * p_norm)
+    for i, s in zip(idx, sims):
+        jobs[i]["semantic_score"] = round(float(s), 3)
+
+
+def get_job(job_db_id: str) -> dict | None:
+    """Return the stored job row (without its embedding) by primary key, or None."""
+    if not _DB_PATH:
+        init_db()
+    try:
+        con = sqlite3.connect(_DB_PATH)
+        con.row_factory = sqlite3.Row
+        row = con.execute("SELECT * FROM jobs WHERE id = ?", (job_db_id,)).fetchone()
+        con.close()
+    except Exception as exc:
+        logger.error("Failed to load job %s: %s", job_db_id, exc)
+        return None
+    if not row:
+        return None
+    job = dict(row)
+    job.pop("semantic_vector", None)
+    return job
+
 
 def update_description(job_db_id: str, description: str) -> None:
     """Persist a freshly-fetched full description back onto a stored job row."""

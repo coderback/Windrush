@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback, useRef } from "react";
+import { useRouter } from "next/navigation";
 import { authFetch } from "../api";
 import JobCard, { Job } from "@/components/JobCard";
 
@@ -17,6 +18,7 @@ const ROLE_TAGS = {
 };
 
 export default function JobsPage() {
+  const router = useRouter();
   const [jobs, setJobs] = useState<Job[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -38,12 +40,23 @@ export default function JobsPage() {
   const [level, setLevel] = useState("");
   const [remote, setRemote] = useState(false);
 
+  // Paste-your-own-link state
+  const [linkOpen, setLinkOpen] = useState(false);
+  const [linkUrl, setLinkUrl] = useState("");
+  const [linkLoading, setLinkLoading] = useState(false);
+  const [linkError, setLinkError] = useState<string | null>(null);
+
+  // Live discovery runs server-side in the background when the feed is thin; while it does,
+  // re-poll page 1 quietly so new matches appear without a manual refresh.
+  const [discovering, setDiscovering] = useState(false);
+  const discoveryPolls = useRef(0);
+
   const observerRef = useRef<HTMLDivElement | null>(null);
 
   const fetchJobs = useCallback(
-    async (pageNum: number, append = false) => {
+    async (pageNum: number, append = false, silent = false) => {
       if (pageNum === 1) {
-        setLoading(true);
+        if (!silent) setLoading(true);
       } else {
         setLoadingMore(true);
       }
@@ -64,6 +77,7 @@ export default function JobsPage() {
         const data = await res.json();
         const incoming: Job[] = data.jobs ?? [];
         setHasMore(data.has_more ?? incoming.length === 20);
+        if (pageNum === 1) setDiscovering(!!data.discovering);
 
         if (append) {
           setJobs((prev) => [...prev, ...incoming]);
@@ -83,8 +97,20 @@ export default function JobsPage() {
   // Fetch when committed search params or filters change
   useEffect(() => {
     setPage(1);
+    discoveryPolls.current = 0;
     fetchJobs(1);
   }, [fetchJobs]);
+
+  // While discovery is running, refresh page 1 every 15s (up to ~2 min). Skipped once the user
+  // has scrolled past page 1 so a refresh can't wipe the pages they've loaded.
+  useEffect(() => {
+    if (!discovering || page !== 1 || discoveryPolls.current >= 8) return;
+    const t = setTimeout(() => {
+      discoveryPolls.current += 1;
+      fetchJobs(1, false, true);
+    }, 15000);
+    return () => clearTimeout(t);
+  }, [discovering, page, jobs, fetchJobs]);
 
   // Infinite scroll observer
   useEffect(() => {
@@ -119,6 +145,38 @@ export default function JobsPage() {
     setPage(1);
   };
 
+  const handleAnalyzeLink = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const url = linkUrl.trim();
+    if (!url) return;
+    if (!/^https?:\/\//i.test(url)) {
+      setLinkError("Please paste a full link starting with http(s)://");
+      return;
+    }
+    setLinkLoading(true);
+    setLinkError(null);
+    try {
+      const res = await authFetch("/api/jobs/from-url", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data?.detail || "Couldn't read that listing");
+      }
+      const job: Job = data.job;
+      const jobId = job.id ?? job.job_id;
+      if (!jobId) throw new Error("Scraped job was missing an id");
+      sessionStorage.setItem(`job_${jobId}`, JSON.stringify(job));
+      router.push(`/jobs/${encodeURIComponent(jobId)}`);
+    } catch (err: any) {
+      setLinkError(err?.message || "Couldn't read that listing — try a direct job-posting link.");
+    } finally {
+      setLinkLoading(false);
+    }
+  };
+
   const addTag = (tag: string) => {
     if (!selectedTags.includes(tag)) {
       setSelectedTags(prev => [...prev, tag]);
@@ -145,19 +203,53 @@ export default function JobsPage() {
   return (
     <div className="p-8 max-w-5xl mx-auto">
       {/* Header */}
-      <div className="mb-6">
-        <h1
-          className="text-2xl font-bold text-zinc-100"
-          style={{ fontFamily: "Playfair Display, serif" }}
+      <div className="mb-6 flex items-start justify-between gap-4">
+        <div>
+          <h1
+            className="text-2xl font-bold text-zinc-100"
+            style={{ fontFamily: "Playfair Display, serif" }}
+          >
+            Job Feed
+          </h1>
+          <p className="text-zinc-500 text-sm mt-1">
+            {committedQuery || selectedTags.length > 0 || committedLocation || level
+              ? "Precision search results"
+              : "AI-ranked opportunities for your profile"}
+          </p>
+        </div>
+        <button
+          onClick={() => { setLinkOpen(o => !o); setLinkError(null); }}
+          className="shrink-0 px-4 py-2 border border-teal-600/40 text-teal-300 text-sm font-bold rounded-lg hover:bg-teal-500/10 transition-colors"
         >
-          Job Feed
-        </h1>
-        <p className="text-zinc-500 text-sm mt-1">
-          {committedQuery || selectedTags.length > 0 || committedLocation || level
-            ? "Precision search results"
-            : "AI-ranked opportunities for your profile"}
-        </p>
+          + Analyze a link
+        </button>
       </div>
+
+      {/* Paste-your-own-link panel */}
+      {linkOpen && (
+        <div className="mb-6 p-4 bg-zinc-900/60 border border-teal-600/30 rounded-xl">
+          <p className="text-sm text-zinc-300 mb-2 font-bold">Paste a job-posting URL</p>
+          <p className="text-xs text-zinc-500 mb-3">
+            We&apos;ll read the listing and run the same fit analysis, tailored CV, and apply flow as feed jobs.
+          </p>
+          <form onSubmit={handleAnalyzeLink} className="flex gap-2">
+            <input
+              value={linkUrl}
+              onChange={(e) => setLinkUrl(e.target.value)}
+              placeholder="https://boards.greenhouse.io/acme/jobs/123…"
+              className="flex-1 bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2.5 text-sm text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:border-teal-500 transition-colors"
+            />
+            <button
+              type="submit"
+              disabled={linkLoading}
+              className="px-5 py-2.5 bg-white text-black text-sm font-bold rounded-lg hover:bg-zinc-200 transition-colors shrink-0 disabled:opacity-50"
+            >
+              {linkLoading ? "Reading…" : "Analyze"}
+            </button>
+          </form>
+          {linkError && <p className="mt-2 text-xs text-red-400">{linkError}</p>}
+        </div>
+      )}
 
       {/* Tokenized Search Bar */}
       <div className="relative mb-4">
@@ -289,15 +381,28 @@ export default function JobsPage() {
         </div>
       ) : jobs.length === 0 ? (
         <div className="text-center py-16 text-zinc-600">
-          <p className="text-sm">
-            No jobs found. Try adjusting your search or filters.
-          </p>
+          {discovering ? (
+            <p className="text-sm flex items-center justify-center gap-2">
+              <span className="w-4 h-4 border-2 border-zinc-700 border-t-teal-500 rounded-full animate-spin" />
+              Searching live job boards for matches — new roles will appear here shortly…
+            </p>
+          ) : (
+            <p className="text-sm">
+              No jobs found. Try adjusting your search or filters.
+            </p>
+          )}
         </div>
       ) : (
         <>
-          <p className="text-xs text-zinc-600 mb-4">
+          <p className="text-xs text-zinc-600 mb-4 flex items-center gap-2">
             {jobs.length} job{jobs.length !== 1 ? "s" : ""}
             {hasMore ? "+" : ""}
+            {discovering && (
+              <span className="flex items-center gap-1.5 text-zinc-500">
+                <span className="w-3 h-3 border-2 border-zinc-700 border-t-teal-500 rounded-full animate-spin" />
+                searching live job boards for more…
+              </span>
+            )}
           </p>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {jobs.map((job, i) => (

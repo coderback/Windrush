@@ -150,6 +150,8 @@ export default function ProfilePage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [downloadOpen, setDownloadOpen] = useState(false);
+  const [downloading, setDownloading] = useState(false);
 
   useEffect(() => {
     const fetchPersona = async () => {
@@ -185,6 +187,27 @@ export default function ProfilePage() {
     }
   };
 
+  const downloadPersona = async (format: "json" | "pdf" | "md") => {
+    setDownloadOpen(false);
+    setDownloading(true);
+    setError(null);
+    try {
+      const res = await authFetch(`/api/persona/export?format=${format}`);
+      if (!res.ok) throw new Error("Download failed");
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `windrush_persona.${format}`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setError("Couldn't download persona");
+    } finally {
+      setDownloading(false);
+    }
+  };
+
   const handleChange = (section: keyof Persona, field: string, value: any) => {
     if (!persona) return;
     setPersona(prev => {
@@ -212,7 +235,36 @@ export default function ProfilePage() {
         <div className="flex items-center gap-4">
           {saving && <span className="text-xs text-teal-400 animate-pulse">Syncing...</span>}
           {error && <span className="text-xs text-red-500">{error}</span>}
-          <button 
+          <div className="relative">
+            <button
+              onClick={() => setDownloadOpen(o => !o)}
+              disabled={downloading}
+              className="px-4 py-1.5 border border-zinc-700 text-zinc-200 text-sm font-bold rounded-lg hover:bg-zinc-800 transition-colors disabled:opacity-50"
+            >
+              {downloading ? "Preparing…" : "Download Twin ▾"}
+            </button>
+            {downloadOpen && (
+              <>
+                <div className="fixed inset-0 z-30" onClick={() => setDownloadOpen(false)} />
+                <div className="absolute right-0 mt-2 w-44 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl z-40 overflow-hidden">
+                  {([
+                    ["json", "JSON (data backup)"],
+                    ["pdf", "PDF (CV document)"],
+                    ["md", "Markdown"],
+                  ] as const).map(([fmt, label]) => (
+                    <button
+                      key={fmt}
+                      onClick={() => downloadPersona(fmt)}
+                      className="w-full text-left px-4 py-2 text-sm text-zinc-300 hover:bg-zinc-800 hover:text-teal-400 transition-colors"
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+          <button
             onClick={() => savePersona(persona)}
             disabled={saving}
             className="px-4 py-1.5 bg-white text-black text-sm font-bold rounded-lg hover:bg-zinc-200 transition-colors disabled:opacity-50"

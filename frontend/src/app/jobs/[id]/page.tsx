@@ -260,7 +260,6 @@ export default function JobDetailPage() {
     form.append("cv_doc_id", cvChoice === "tailored" && effectiveCvDocId ? effectiveCvDocId : "");
     form.append("job_email", "");
     form.append("job_password", "");
-    form.append("cv_session_id", "");
     form.append("cv_profile", JSON.stringify({}));
     form.append("skill_risks", JSON.stringify([]));
     if (analysis?.fit_score != null) form.append("fit_score", String(analysis.fit_score));

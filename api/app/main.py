@@ -1,10 +1,11 @@
 import asyncio
 import json
 import logging
+import os
 import pathlib
-import tempfile
+import re
 import uuid
-from contextlib import asynccontextmanager
+from contextlib import aclosing, asynccontextmanager
 from typing import Optional, Annotated
 
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Query, Depends, status
@@ -13,14 +14,14 @@ from fastapi.responses import StreamingResponse
 from fastapi.security import OAuth2PasswordRequestForm
 
 from .cv_parser import extract_text
-from .agent import run_pipeline, run_apply, execute_tool
-from .guardrails import check_cv_for_injection, get_audit_log, GuardrailViolation
-from .job_proxy import search_jobs
+from .agent import run_apply, execute_tool
+from .guardrails import check_cv_for_injection, GuardrailViolation
 from . import tracker
 from . import auth
 from . import pdf_generator
 from . import doc_render
 from . import jobs_db
+from . import net_guard
 from .models import Persona
 
 
@@ -39,6 +40,8 @@ async def lifespan(app: FastAPI):
     jobs_db.init_db()
     pdf_generator.init_pdf_dir(data_dir)
     yield
+    from . import discovery
+    discovery.shutdown()
 
 
 app = FastAPI(title="Windrush API", lifespan=lifespan)
@@ -50,11 +53,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Session registries (now also keyed by user_id for better isolation)
+# Live browser-apply sessions
 _browser_queues: dict[str, asyncio.Queue] = {}   # session_id → instruction queue
 _browser_frames: dict[str, asyncio.Queue] = {}   # session_id → CDP screencast frame queue
-_cv_files: dict[str, str] = {}                   # cv_session_id → temp file path
-_cv_texts: dict[str, str] = {}                   # cv_session_id → extracted text
+
+
+def _original_cv_path(user_id: str) -> pathlib.Path:
+    """The user's most recently uploaded CV — one file per user, overwritten on re-upload."""
+    return pathlib.Path(os.environ.get("APP_DATA_PATH", "/tmp")) / "cvs" / f"{user_id}.pdf"
 
 
 # ── Auth Endpoints ────────────────────────────────────────────────────────────
@@ -88,10 +94,17 @@ async def login(form_data: Annotated[OAuth2PasswordRequestForm, Depends()]):
 
 # ── Persona Endpoints ─────────────────────────────────────────────────────────
 
+# The job-site password is stored encrypted outside the persona and never sent back to the
+# browser. GET returns this placeholder when one is saved; PUT treats it as "keep as-is",
+# '' as "clear", and anything else as a new password.
+JOB_PASSWORD_MASK = "••••••••"
+
+
 @app.get("/persona", response_model=Persona)
 async def get_persona(current_user: Annotated[auth.User, Depends(auth.get_current_user)]):
-    data = tracker.get_user_persona(current_user.id)
-    return Persona(**data)
+    persona = Persona(**tracker.get_user_persona(current_user.id))
+    persona.core_info.job_password = JOB_PASSWORD_MASK if tracker.has_job_password(current_user.id) else ""
+    return persona
 
 
 @app.put("/persona")
@@ -99,10 +112,53 @@ async def update_persona(
     persona: Persona,
     current_user: Annotated[auth.User, Depends(auth.get_current_user)],
 ):
+    password = persona.core_info.job_password
+    if password != JOB_PASSWORD_MASK:
+        tracker.set_job_password(current_user.id, password)
+    persona.core_info.job_password = ""
     ok = tracker.update_user_persona(current_user.id, persona.model_dump())
     if not ok:
         raise HTTPException(status_code=500, detail="Failed to update persona")
     return {"message": "Persona updated"}
+
+
+@app.get("/persona/export")
+async def export_persona(
+    current_user: Annotated[auth.User, Depends(auth.get_current_user)],
+    format: str = Query("json", pattern="^(json|md|pdf)$"),
+):
+    """Download the user's persona twin as JSON, Markdown, or a formatted CV PDF."""
+    from fastapi.responses import JSONResponse, Response
+    from .persona_export import persona_to_markdown
+    from .agent import _persona_to_cvdoc
+
+    persona = tracker.get_user_persona(current_user.id)
+
+    if format == "json":
+        return JSONResponse(
+            content=persona,
+            headers={"Content-Disposition": 'attachment; filename="windrush_persona.json"'},
+        )
+
+    if format == "md":
+        return Response(
+            content=persona_to_markdown(persona),
+            media_type="text/markdown; charset=utf-8",
+            headers={"Content-Disposition": 'attachment; filename="windrush_persona.md"'},
+        )
+
+    # format == "pdf" — render the persona through the existing CV pipeline.
+    cvdoc = _persona_to_cvdoc(persona)
+    try:
+        doc_id = await doc_render.render_pdf("cv", cvdoc, "classic")
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"PDF render failed: {exc}")
+    path = pdf_generator.get_pdf_path(doc_id)
+    return FileResponse(
+        path,
+        media_type="application/pdf",
+        headers={"Content-Disposition": 'attachment; filename="windrush_persona.pdf"'},
+    )
 
 
 # ── Protected Endpoints ───────────────────────────────────────────────────────
@@ -112,17 +168,12 @@ async def health():
     return {"status": "ok"}
 
 
-@app.get("/guardrails/audit")
-async def guardrails_audit(current_user: Annotated[auth.User, Depends(auth.get_current_user)]):
-    return get_audit_log()
-
-
 @app.post("/upload")
 async def upload_cv(
     file: UploadFile = File(...),
     current_user: Annotated[auth.User, Depends(auth.get_current_user)] = None,
 ):
-    """Parse CV, merge into Persona, and return a cv_session_id for the pipeline."""
+    """Parse a CV PDF, merge what it contains into the Persona, and keep the PDF for applications."""
     pdf_bytes = await file.read()
     try:
         cv_text = extract_text(pdf_bytes)
@@ -135,7 +186,6 @@ async def upload_cv(
         raise HTTPException(status_code=422, detail=f"GUARDRAIL: {e.detail}")
 
     # Extract structured data from CV
-    from .agent import execute_tool
     cv_data = await execute_tool("extract_cv_profile", {"cv_text": cv_text})
 
     # Merge into existing Persona
@@ -225,48 +275,12 @@ async def upload_cv(
 
     tracker.update_user_persona(current_user.id, persona.model_dump())
 
-    cv_session_id = uuid.uuid4().hex
-    cv_path = pathlib.Path(tempfile.gettempdir()) / f"cv_{cv_session_id}.pdf"
-    cv_path.write_bytes(pdf_bytes)
-    _cv_files[cv_session_id] = str(cv_path)
-    _cv_texts[cv_session_id] = cv_text
+    # Keep the original PDF so the apply flow can upload it when no tailored CV is chosen.
+    cv_file = _original_cv_path(current_user.id)
+    cv_file.parent.mkdir(parents=True, exist_ok=True)
+    cv_file.write_bytes(pdf_bytes)
 
-    return {"cv_session_id": cv_session_id, "persona": persona}
-
-
-@app.post("/stream")
-async def pipeline_stream(
-    cv_session_id: str = Form(...),
-    location: str = Form(default="London"),
-    current_user: Annotated[auth.User, Depends(auth.get_current_user)] = None,
-):
-    cv_text = _cv_texts.get(cv_session_id)
-    if not cv_text:
-        raise HTTPException(status_code=404, detail="CV session not found or expired — please re-upload")
-
-    cv_path_str = _cv_files.get(cv_session_id, "")
-
-    async def pipeline_with_cv_session():
-        import time
-        try:
-            yield f"data: {json.dumps({'type': 'cv_session', 'cv_session_id': cv_session_id, 'timestamp': time.time()})}\n\n"
-            async for chunk in run_pipeline(current_user.id, cv_text, location):
-                yield chunk
-        finally:
-            if cv_path_str:
-                pathlib.Path(cv_path_str).unlink(missing_ok=True)
-            _cv_files.pop(cv_session_id, None)
-            _cv_texts.pop(cv_session_id, None)
-
-    return StreamingResponse(
-        pipeline_with_cv_session(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",
-            "Connection": "keep-alive",
-        },
-    )
+    return {"persona": persona}
 
 
 @app.post("/apply")
@@ -278,7 +292,6 @@ async def apply(
     skill_risks: str = Form(default="[]"),
     job_email: str = Form(default=""),
     job_password: str = Form(default=""),
-    cv_session_id: str = Form(default=""),
     tailored_cv: str = Form(default=""),
     cv_doc_id: str = Form(default=""),
     job_title: str = Form(default=""),
@@ -304,19 +317,26 @@ async def apply(
     except json.JSONDecodeError:
         gaps = []
 
+    # The browser agent navigates here from inside our network — refuse internal targets.
+    if job_url:
+        try:
+            await net_guard.assert_public_url(job_url)
+        except net_guard.UnsafeURLError as exc:
+            raise HTTPException(status_code=400, detail=f"Job URL not allowed: {exc}")
+
     # Fall back to persona credentials if not provided in form
     persona = tracker.get_user_persona(current_user.id)
     core = persona.get("core_info", {})
     effective_email = job_email or core.get("job_email", "")
-    effective_password = job_password or core.get("job_password", "")
+    effective_password = job_password or tracker.get_job_password(current_user.id)
 
-    # Tailored CV PDF takes precedence over original upload if the user chose it
-    if cv_doc_id:
-        tailored_path = pdf_generator.get_pdf_path(cv_doc_id)
-        import os as _os2
-        cv_path = tailored_path if _os2.path.exists(tailored_path) else _cv_files.get(cv_session_id, "")
+    # Tailored CV PDF (if the user chose it) takes precedence over their uploaded original.
+    original_cv = _original_cv_path(current_user.id)
+    tailored_path = pdf_generator.get_pdf_path(cv_doc_id) if re.fullmatch(r"[a-f0-9]{32}", cv_doc_id) else ""
+    if tailored_path and os.path.exists(tailored_path):
+        cv_path = tailored_path
     else:
-        cv_path = _cv_files.get(cv_session_id, "")
+        cv_path = str(original_cv) if original_cv.exists() else ""
     session_id = str(uuid.uuid4())
 
     job_dict = {
@@ -335,7 +355,7 @@ async def apply(
     }
     app_id = tracker.add_application(
         current_user.id, job_dict, profile, cover_letter, score_data, tailored_cv=tailored_cv
-    )
+    ) or tracker.find_application_id(current_user.id, company, job_title)  # already saved/tracked
 
     q: asyncio.Queue = asyncio.Queue()
     fq: asyncio.Queue = asyncio.Queue(maxsize=8)
@@ -345,22 +365,24 @@ async def apply(
     async def cleanup_gen():
         user_confirmed = False
         try:
-            async for chunk in run_apply(
+            # aclosing: if the client disconnects, close run_apply (and the browser beneath it) now
+            async with aclosing(run_apply(
                 current_user.id, job_id, job_url, cover_letter, risks, session_id, q, fq,
                 job_email=effective_email, job_password=effective_password, cv_path=cv_path,
-            ):
-                try:
-                    payload = json.loads(chunk.removeprefix("data: ").strip())
-                    if payload.get("type") == "done":
-                        user_confirmed = True
-                except Exception:
-                    pass
-                yield chunk
+            )) as chunks:
+                async for chunk in chunks:
+                    try:
+                        payload = json.loads(chunk.removeprefix("data: ").strip())
+                        if payload.get("type") == "done" and payload.get("submitted") is True:
+                            user_confirmed = True
+                    except Exception:
+                        pass
+                    yield chunk
         finally:
             _browser_queues.pop(session_id, None)
             _browser_frames.pop(session_id, None)
             if app_id and user_confirmed:
-                tracker.update_status(app_id, "Applied")
+                tracker.update_status(app_id, "Applied", user_id=current_user.id)
 
     return StreamingResponse(
         cleanup_gen(),
@@ -448,9 +470,11 @@ async def update_application_status(
 ):
     status = body.get("status", "")
     notes = body.get("notes")
-    ok = tracker.update_status(app_id, status, notes)
-    if not ok:
+    if status not in tracker.VALID_STATUSES:
         raise HTTPException(status_code=400, detail=f"Invalid status: {status!r}")
+    if not tracker.update_status(app_id, status, notes, user_id=current_user.id):
+        # Unknown id, or another user's application — indistinguishable to the caller by design.
+        raise HTTPException(status_code=404, detail="Application not found")
     return {"id": app_id, "status": status, "updated": True}
 
 
@@ -501,6 +525,16 @@ async def onboarding_complete(current_user: Annotated[auth.User, Depends(auth.ge
 # ── Job Feed ──────────────────────────────────────────────────────────────────
 
 from . import semantic
+from . import discovery
+
+# Live discovery kicks in (in the background) when page 1 has fewer matches than this.
+_THIN_FEED = 5
+# Request-path embedding budget: past this the feed falls back to recency ranking rather than
+# making the user wait on Ollama loading the model (background work still allows 600s).
+_FEED_EMBED_TIMEOUT_S = 20.0
+# Tracker statuses that hide a job from the feed.
+_HIDE_STATUSES = {"Applied", "Responded", "Interview", "Offer", "Rejected", "Discarded"}
+
 
 @app.get("/jobs")
 async def get_jobs(
@@ -514,118 +548,57 @@ async def get_jobs(
     limit: int = Query(default=20, ge=1, le=100),
     current_user: Annotated[auth.User, Depends(auth.get_current_user)] = None,
 ):
-    """Return job listings for the job feed with pagination and filtering."""
-    tag_list = [t.strip() for t in tags.split(",")] if tags else []
+    """
+    Job feed. Explicit filters (query, tags, category, level, location, remote) are applied in
+    SQL; the persona only *ranks* (semantic similarity) and supplies a default location. If page
+    1 comes back thin, live discovery starts in the background and `discovering` tells the
+    client to re-poll — the request itself never waits on scraping or embedding.
+    """
+    tag_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else []
 
-    # Always pull the persona to get preferences and for semantic search
     persona_data = tracker.get_user_persona(current_user.id)
-    
-    effective_query = query
-    effective_location = location
+    prefs = persona_data.get("preferences", {}) or {}
+    titles = prefs.get("target_titles", []) or []
+    locs = prefs.get("preferred_locations", []) or []
+    effective_location = location or (locs[0] if locs else "")
 
-    if not effective_query:
-        prefs = persona_data.get("preferences", {})
-        titles = prefs.get("target_titles", [])
-        # Join multiple target titles for a broader default search
-        effective_query = " ".join(titles) if titles else ""
-        
-        locs = prefs.get("preferred_locations", [])
-        if not effective_location:
-            effective_location = locs[0] if locs else ""
-
-    # Generate semantic vector that combines Persona + current search query/tags
-    # This "Interest-Weighted" vector ensures the AI prioritizes both who you are AND what you want.
+    # "Interest-weighted" ranking vector: who you are (persona) + what you're searching for now.
     persona_text = semantic.vectorize_persona(persona_data)
-    
-    # Merge explicit keywords and tags into a single semantic intent block
-    intent_parts = []
-    if query: intent_parts.append(query)
-    if tag_list: intent_parts.extend(tag_list)
-    
+    intent_parts = ([query] if query else []) + tag_list
     if intent_parts:
         intent_str = ", ".join(intent_parts)
-        # Boost the query by repeating it in the text
         persona_text = f"Current user interest: {intent_str}. Specific focus: {intent_str}. {persona_text}"
-    
-    persona_vector = await semantic.get_embedding(persona_text)
+    persona_vector = await semantic.get_embedding(persona_text, timeout=_FEED_EMBED_TIMEOUT_S)
 
-    # ── Clean Feed Logic ──
-    # Fetch user's active pipeline statuses to filter/badge the feed
     status_map = tracker.get_user_application_statuses(current_user.id)
-    # Statuses that trigger hiding from the feed
-    HIDE_STATUSES = {"Applied", "Responded", "Interview", "Offer", "Rejected", "Discarded"}
+    hidden = {key for key, status in status_map.items() if status in _HIDE_STATUSES}
 
-    def process_clean_feed(raw_jobs: list[dict]) -> list[dict]:
-        clean = []
-        for job in raw_jobs:
-            key = (job.get("company", "").lower(), job.get("title", "").lower())
-            status = status_map.get(key)
-            
-            if status in HIDE_STATUSES:
-                continue
-            
-            if status == "Saved":
-                job["tracker_status"] = "Saved"
-            elif status:
-                # Catch-all for other statuses (e.g. Evaluated, Pending Review)
-                job["tracker_status"] = status
-                
-            clean.append(job)
-        return clean
-
-    offset = (page - 1) * limit
-
-    # Query the local jobs database first
-    raw_jobs = jobs_db.get_jobs(
-        query=effective_query,
-        location=effective_location,
-        level=level,
-        category=category,
-        remote=remote,
-        tags=tag_list,
-        persona_vector=persona_vector,
-        limit=limit,
-        offset=offset,
+    jobs, has_more = await asyncio.to_thread(
+        jobs_db.get_jobs,
+        query=query, location=effective_location, level=level, category=category, remote=remote,
+        tags=tag_list, persona_vector=persona_vector, limit=limit, offset=(page - 1) * limit,
+        exclude=hidden,
     )
-    jobs = process_clean_feed(raw_jobs)
+    for job in jobs:
+        status = status_map.get(((job.get("company") or "").lower(), (job.get("title") or "").lower()))
+        if status:
+            job["tracker_status"] = status
 
-    # Proactive Infinite Discovery: If we don't have enough local matches for this 
-    # specific location/query, trigger a live discovery across external APIs.
-    if (not jobs or len(jobs) < 5):
-        # Use only the first title or the specific user query for live search
-        live_query = query if query else (titles[0] if persona_data.get("preferences", {}).get("target_titles") else "software engineer")
-        
-        # Don't trigger if the query is just a single character (e.g. typing)
-        if len(live_query) > 2:
-            live_jobs = await search_jobs(live_query, effective_location or "London")
-            if live_jobs:
-                # Persist them for future queries
-                for j in live_jobs:
-                    j["source"] = j.get("source", "live")
-                    j["level"] = _infer_level(j.get("title", ""))
-                jobs_db.add_jobs(live_jobs)
-                
-                # Re-query and re-filter
-                refreshed_raw = jobs_db.get_jobs(
-                    query=effective_query,
-                    location=effective_location,
-                    level=level,
-                    category=category,
-                    remote=remote,
-                    tags=tag_list,
-                    persona_vector=persona_vector,
-                    limit=limit,
-                    offset=offset,
-                )
-                jobs = process_clean_feed(refreshed_raw)
+    discovering = False
+    if page == 1 and len(jobs) < _THIN_FEED:
+        free_text = [t for t in tag_list if t.lower() not in jobs_db.ROLE_TAGS | jobs_db.DOMAIN_TAGS]
+        live_query = query or (free_text[0] if free_text else "") or (titles[0] if titles else "software engineer")
+        if len(live_query) > 2:  # don't fire on a stray character
+            discovering = discovery.ensure(live_query, effective_location or "London")
 
     return {
         "jobs": jobs,
-        "query": effective_query,
+        "query": query,
         "location": effective_location,
         "page": page,
         "limit": limit,
-        "has_more": len(jobs) == limit,
+        "has_more": has_more,
+        "discovering": discovering,
     }
 
 
@@ -654,19 +627,61 @@ async def _ensure_full_description(job: dict) -> dict:
     are only a web snippet), so anything that short is re-fetched from the live
     listing page. The result is persisted back to the DB so re-runs and revisits
     are instant.
+
+    The jobs table is shared by all users, so the client-supplied job is never
+    trusted for the write: we only persist when the id matches a stored row, and
+    then we fetch that row's *stored* URL — never the URL from the request body.
     """
     desc = (job.get("description") or "").strip()
     if len(desc) > 600:          # already a full description (e.g. previously fetched)
         return job
 
     from .job_searcher import fetch_full_description
+    db_id = str(job.get("id") or "")
+    stored = jobs_db.get_job(db_id) if db_id else None
+    if stored:
+        stored_desc = (stored.get("description") or "").strip()
+        if len(stored_desc) > 600:   # another request already fetched it
+            return {**job, "description": stored_desc}
+        full = await fetch_full_description(stored.get("url") or "")
+        if full and len(full) > len(stored_desc):
+            jobs_db.update_description(db_id, full)
+            return {**job, "description": full}
+        return job
+
+    # Not a stored job (e.g. pasted via /jobs/from-url): enrich this request only.
     full = await fetch_full_description(job.get("url", ""))
     if full and len(full) > len(desc):
         job = {**job, "description": full}
-        db_id = job.get("id")
-        if db_id:
-            jobs_db.update_description(str(db_id), full)
     return job
+
+
+@app.post("/jobs/from-url")
+async def job_from_url(
+    body: dict,
+    current_user: Annotated[auth.User, Depends(auth.get_current_user)],
+):
+    """
+    Scrape a user-pasted job-posting URL into a full Job object for analysis.
+
+    The job is returned (not persisted) — the frontend keeps it in sessionStorage
+    and runs the normal detail-page flow; it only enters the DB if the user Saves.
+    """
+    from .job_searcher import scrape_job_from_url
+
+    url = (body.get("url") or "").strip()
+    if not url.startswith("http"):
+        raise HTTPException(status_code=400, detail="Please paste a valid http(s) link.")
+    try:
+        job = await scrape_job_from_url(url)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Could not fetch that listing: {exc}")
+
+    job["level"] = _infer_level(job.get("title", ""))
+    job["tags"] = jobs_db._extract_tags(job)
+    return {"job": job}
 
 
 @app.post("/jobs/analyze")

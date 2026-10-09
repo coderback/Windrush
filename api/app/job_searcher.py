@@ -20,6 +20,8 @@ import json
 
 import httpx
 
+from . import http_client
+from . import net_guard
 from .risk_scorer import occupation_exposure
 
 logger = logging.getLogger("windrush.job_searcher")
@@ -53,6 +55,7 @@ _TITLE_SEP = re.compile(r"(.+?)(?:\s*[@|—–-]\s*|\s+at\s+)(.+?)$", re.I)
 def _load_fixture() -> list[dict]:
     jobs = json.loads(_FIXTURE_PATH.read_text())
     for job in jobs:
+        job["source"] = "fixture"  # mock data: shown as a fallback, never persisted (see discovery.py)
         if "exposure_score" not in job:
             job["exposure_score"] = round(occupation_exposure(job["title"]), 3)
     return jobs
@@ -109,8 +112,8 @@ def _html_to_text(raw: str) -> str:
     return text.strip()
 
 
-def _extract_jsonld_jobposting(raw_html: str) -> str:
-    """Return the description from a JSON-LD JobPosting block, if present."""
+def _find_jsonld_jobposting(raw_html: str) -> dict:
+    """Return the first JSON-LD JobPosting object on the page, or {} if none."""
     for m in re.finditer(
         r'(?is)<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>',
         raw_html,
@@ -123,10 +126,15 @@ def _extract_jsonld_jobposting(raw_html: str) -> str:
             t = obj.get("@type", "")
             types = t if isinstance(t, list) else [t]
             if any("JobPosting" in str(x) for x in types):
-                desc = obj.get("description", "")
-                if desc:
-                    return _html_to_text(desc)
-    return ""
+                return obj
+    return {}
+
+
+def _extract_jsonld_jobposting(raw_html: str) -> str:
+    """Return the description from a JSON-LD JobPosting block, if present."""
+    obj = _find_jsonld_jobposting(raw_html)
+    desc = obj.get("description", "") if obj else ""
+    return _html_to_text(desc) if desc else ""
 
 
 _BROWSER_HEADERS = {
@@ -149,7 +157,7 @@ async def _ats_full_description(url: str) -> str:
     host = parsed.netloc.lower()
     path = parsed.path
 
-    async with httpx.AsyncClient(follow_redirects=True, timeout=12.0) as client:
+    async with http_client.async_client(follow_redirects=True, timeout=12.0) as client:
         # Greenhouse — boards(-api).greenhouse.io/{slug}/jobs/{id}
         if "greenhouse.io" in host:
             m = re.search(r"/([^/]+)/jobs/(\d+)", path)
@@ -197,10 +205,10 @@ async def fetch_full_description(url: str, max_chars: int = 8000) -> str:
         logger.debug("ATS description fetch failed for %s: %s", url[:80], exc)
 
     try:
-        async with httpx.AsyncClient(
-            headers=_BROWSER_HEADERS, follow_redirects=True, timeout=15.0,
+        async with http_client.async_client(
+            headers=_BROWSER_HEADERS, timeout=15.0,
         ) as client:
-            resp = await client.get(url)
+            resp = await net_guard.safe_get(client, url)  # user-influenced URL: no internal hosts
             resp.raise_for_status()
             raw_html = resp.text
         jd = _extract_jsonld_jobposting(raw_html)
@@ -210,6 +218,152 @@ async def fetch_full_description(url: str, max_chars: int = 8000) -> str:
         logger.debug("JSON-LD description fetch failed for %s: %s", url[:80], exc)
 
     return ""
+
+
+# ── User-pasted-URL scraping (build a full Job from an arbitrary listing) ──────
+
+def _meta_content(raw_html: str, prop: str) -> str:
+    """Return the content of a <meta property|name="prop"> tag, if present."""
+    for attr in ("property", "name"):
+        m = re.search(
+            rf'(?is)<meta[^>]+{attr}=["\']{re.escape(prop)}["\'][^>]*>',
+            raw_html,
+        )
+        if m:
+            c = re.search(r'(?is)content=["\'](.*?)["\']', m.group(0))
+            if c:
+                return _html.unescape(c.group(1)).strip()
+    return ""
+
+
+def _first_tag_text(raw_html: str, tag: str) -> str:
+    m = re.search(rf"(?is)<{tag}[^>]*>(.*?)</{tag}>", raw_html)
+    return _html_to_text(m.group(1)) if m else ""
+
+
+def _jsonld_org_name(obj: dict) -> str:
+    org = obj.get("hiringOrganization")
+    if isinstance(org, dict):
+        return str(org.get("name", "")).strip()
+    if isinstance(org, str):
+        return org.strip()
+    return ""
+
+
+def _jsonld_location(obj: dict) -> str:
+    loc = obj.get("jobLocation")
+    if isinstance(loc, list):
+        loc = loc[0] if loc else {}
+    if isinstance(loc, dict):
+        addr = loc.get("address", loc)
+        if isinstance(addr, dict):
+            parts = [
+                addr.get("addressLocality", ""),
+                addr.get("addressRegion", ""),
+                addr.get("addressCountry", "")
+                    if isinstance(addr.get("addressCountry"), str)
+                    else (addr.get("addressCountry") or {}).get("name", ""),
+            ]
+            return ", ".join(p for p in parts if p)
+    if obj.get("jobLocationType") == "TELECOMMUTE":
+        return "Remote"
+    return ""
+
+
+def _jsonld_salary(obj: dict) -> tuple[float | None, float | None]:
+    base = obj.get("baseSalary")
+    if not isinstance(base, dict):
+        return None, None
+    value = base.get("value", base)
+    if not isinstance(value, dict):
+        return None, None
+
+    def _num(x):
+        try:
+            return float(x)
+        except (TypeError, ValueError):
+            return None
+
+    lo = _num(value.get("minValue")) or _num(value.get("value"))
+    hi = _num(value.get("maxValue")) or lo
+    return lo, hi
+
+
+async def scrape_job_from_url(url: str) -> dict:
+    """
+    Scrape an arbitrary job-posting URL into a full Job dict ready for analysis.
+
+    Reuses the ATS/JSON-LD description fetcher and adds structured-metadata
+    extraction (title, company, location, salary) from the page's JSON-LD
+    JobPosting block, falling back to OpenGraph / <title> / <h1> tags. Raises
+    ValueError if the page yields neither a usable title nor a description, so
+    the caller can surface a clear "couldn't read that listing" message.
+    """
+    import uuid
+    from urllib.parse import urlparse
+
+    if not url or not url.startswith("http"):
+        raise ValueError("Please paste a valid http(s) job-posting link.")
+    # Fail loudly (400) rather than as a generic "couldn't read" — UnsafeURLError is a ValueError.
+    await net_guard.assert_public_url(url)
+
+    description = await fetch_full_description(url)
+
+    raw_html = ""
+    try:
+        async with http_client.async_client(
+            headers=_BROWSER_HEADERS, timeout=15.0,
+        ) as client:
+            resp = await net_guard.safe_get(client, url)  # user-influenced URL: no internal hosts
+            resp.raise_for_status()
+            raw_html = resp.text
+    except Exception as exc:
+        logger.debug("Page fetch failed for %s: %s", url[:80], exc)
+
+    posting = _find_jsonld_jobposting(raw_html) if raw_html else {}
+
+    title = str(posting.get("title", "")).strip()
+    company = _jsonld_org_name(posting)
+    location = _jsonld_location(posting)
+    salary_min, salary_max = _jsonld_salary(posting)
+
+    # Description fallback: JSON-LD object may carry it even when the ATS/standalone
+    # fetcher returned "" (e.g. it was < 200 chars there).
+    if not description and posting.get("description"):
+        description = _html_to_text(posting["description"])[:_DESC_MAX].strip()
+
+    # OpenGraph / HTML fallbacks for missing metadata.
+    if not title:
+        title = _meta_content(raw_html, "og:title") or _first_tag_text(raw_html, "h1")
+        if not title:
+            page_title = _first_tag_text(raw_html, "title")
+            title = re.split(r"\s+[|\-–—]\s+", page_title)[0].strip() if page_title else ""
+    if not company:
+        company = _meta_content(raw_html, "og:site_name")
+    if not company:
+        company = urlparse(url).netloc.replace("www.", "")
+
+    title = title.strip()
+    if not title and not description:
+        raise ValueError(
+            "Couldn't read that listing — try a direct job-posting link "
+            "(e.g. a Greenhouse, Lever, or a page with a standard job schema)."
+        )
+
+    job: dict = {
+        "id": uuid.uuid4().hex,
+        "job_id": uuid.uuid4().hex[:12],
+        "title": title or "Job posting",
+        "company": company or "Unknown",
+        "location": location,
+        "description": description,
+        "url": url,
+        "salary_min": salary_min,
+        "salary_max": salary_max,
+        "source": "user-url",
+    }
+    job["exposure_score"] = round(occupation_exposure(job["title"]), 3)
+    return job
 
 
 # ── Title filter (from career-ops/portals.yml) ────────────────────────────────
@@ -556,36 +710,42 @@ async def _fetch_greenhouse(slug: str, company: str, keywords: list[str]) -> lis
     try:
         # content=true is required — without it the API omits the JD entirely.
         url = f"https://boards-api.greenhouse.io/v1/boards/{slug}/jobs?content=true"
-        async with httpx.AsyncClient(timeout=8.0) as client:
+        async with http_client.async_client(timeout=8.0) as client:
             resp = await client.get(url)
             resp.raise_for_status()
-            data = resp.json()
-        jobs = []
-        for item in data.get("jobs", []):
-            title = item.get("title", "")
-            if not _title_matches_query(title, keywords):
-                continue
-            location = item.get("location", {}).get("name", "")
-            jobs.append({
-                "job_id": f"gh-{item.get('id', '')}",
-                "title": title,
-                "company": company,
-                "location": location or "Remote",
-                "description": _html_to_text(item.get("content") or "")[:_DESC_MAX],
-                "url": item.get("absolute_url", ""),
-                "salary_min": None,
-                "salary_max": None,
-                "exposure_score": round(occupation_exposure(title), 3),
-            })
-        return jobs
+        # Big boards return every posting's full HTML (several MB); decoding + HTML-to-text +
+        # exposure scoring is ~1s of CPU, so do it off the event loop.
+        return await asyncio.to_thread(_greenhouse_jobs, resp.content, company, keywords)
     except Exception:
         return []
+
+
+def _greenhouse_jobs(raw: bytes, company: str, keywords: list[str]) -> list[dict]:
+    data = json.loads(raw)
+    jobs = []
+    for item in data.get("jobs", []):
+        title = item.get("title", "")
+        if not _title_matches_query(title, keywords):
+            continue
+        location = item.get("location", {}).get("name", "")
+        jobs.append({
+            "job_id": f"gh-{item.get('id', '')}",
+            "title": title,
+            "company": company,
+            "location": location or "Remote",
+            "description": _html_to_text(item.get("content") or "")[:_DESC_MAX],
+            "url": item.get("absolute_url", ""),
+            "salary_min": None,
+            "salary_max": None,
+            "exposure_score": round(occupation_exposure(title), 3),
+        })
+    return jobs
 
 
 async def _fetch_ashby(slug: str, company: str, keywords: list[str]) -> list[dict]:
     try:
         url = f"https://api.ashbyhq.com/posting-api/job-board/{slug}"
-        async with httpx.AsyncClient(timeout=8.0) as client:
+        async with http_client.async_client(timeout=8.0) as client:
             resp = await client.get(url)
             resp.raise_for_status()
             data = resp.json()
@@ -620,7 +780,7 @@ async def _fetch_ashby(slug: str, company: str, keywords: list[str]) -> list[dic
 async def _fetch_lever(slug: str, company: str, keywords: list[str]) -> list[dict]:
     try:
         url = f"https://api.lever.co/v0/postings/{slug}?mode=json"
-        async with httpx.AsyncClient(timeout=8.0) as client:
+        async with http_client.async_client(timeout=8.0) as client:
             resp = await client.get(url)
             resp.raise_for_status()
             data = resp.json()
@@ -649,7 +809,7 @@ async def _fetch_lever(slug: str, company: str, keywords: list[str]) -> list[dic
 async def _fetch_workable(slug: str, company: str, keywords: list[str]) -> list[dict]:
     try:
         url = f"https://apply.workable.com/api/v1/widget/accounts/{slug}?details=true"
-        async with httpx.AsyncClient(timeout=8.0) as client:
+        async with http_client.async_client(timeout=8.0) as client:
             resp = await client.get(url)
             resp.raise_for_status()
             data = resp.json()
@@ -689,7 +849,7 @@ async def _fetch_smartrecruiters(slug: str, company: str, keywords: list[str]) -
         jobs: list[dict] = []
         limit = 100
         offset = 0
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with http_client.async_client(timeout=10.0) as client:
             while offset < 200:  # cap at 200 to avoid hammering
                 url = (
                     f"https://api.smartrecruiters.com/v1/companies/{slug}/postings"
@@ -949,7 +1109,7 @@ async def _search_level3_websearch() -> list[dict]:
         logger.debug("Level 3: BRAVE_SEARCH_API_KEY not set, skipping")
         return []
 
-    async with httpx.AsyncClient() as client:
+    async with http_client.async_client() as client:
         results = await asyncio.gather(
             *[_brave_search_one(client, q) for q in _SEARCH_QUERIES],
             return_exceptions=True,
@@ -977,7 +1137,7 @@ async def _search_level4_workable(query: str, location: str) -> list[dict]:
         q = urllib.parse.quote(query)
         loc = urllib.parse.quote(location)
         url = f"https://jobs.workable.com/api/v1/jobs?query={q}&location={loc}"
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with http_client.async_client(timeout=10.0) as client:
             resp = await client.get(url)
             resp.raise_for_status()
             data = resp.json()
@@ -1017,14 +1177,17 @@ async def _search_level4_adzuna(query: str, location: str) -> list[dict]:
         return []
 
     # Map location to country code
+    # Whole-word matching: a substring test sent "Australia" (contains "us") to the US index.
     country = "gb"
     loc_lower = location.lower()
-    if any(x in loc_lower for x in ["usa", "us", "san francisco", "new york", "seattle"]):
-        country = "us"
-    elif any(x in loc_lower for x in ["canada", "toronto", "vancouver"]):
-        country = "ca"
-    elif any(x in loc_lower for x in ["australia", "sydney"]):
+    def _mentions(*names: str) -> bool:
+        return any(re.search(rf"(?<![a-z]){re.escape(n)}(?![a-z])", loc_lower) for n in names)
+    if _mentions("australia", "sydney", "melbourne"):
         country = "au"
+    elif _mentions("canada", "toronto", "vancouver"):
+        country = "ca"
+    elif _mentions("usa", "us", "united states", "san francisco", "new york", "seattle"):
+        country = "us"
 
     base_url = f"https://api.adzuna.com/v1/api/jobs/{country}/search/1"
     query = re.sub(r"\s+", " ", _BOOLEAN_OPS.sub(" ", query)).strip()
@@ -1038,7 +1201,7 @@ async def _search_level4_adzuna(query: str, location: str) -> list[dict]:
             "results_per_page": 20,
             "sort_by": "relevance",
         }
-        async with httpx.AsyncClient(timeout=12.0) as client:
+        async with http_client.async_client(timeout=12.0) as client:
             resp = await client.get(base_url, params=params)
             resp.raise_for_status()
             data = resp.json()
@@ -1102,7 +1265,7 @@ async def search_jobs_multi(query: str, location: str) -> list[dict]:
 
     l1, l2, l3, l4 = await asyncio.gather(
         _search_level1_playwright(keywords),
-        _search_level2_ats_apis(query),
+        _search_level2_ats_apis([query]),
         _search_level3_websearch(),
         _search_level4_adzuna(query, location),
     )
@@ -1112,7 +1275,7 @@ async def search_jobs_multi(query: str, location: str) -> list[dict]:
 
     if not deduped:
         logger.warning("All live sources returned 0 results — falling back to fixture")
-        return _FIXTURE
+        return [dict(j) for j in _FIXTURE]  # copies: callers mutate jobs
 
     # Apply title filter — fall back to unfiltered if filter removes everything
     filtered = [j for j in deduped if _passes_title_filter(j["title"])]

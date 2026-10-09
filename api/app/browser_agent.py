@@ -1,142 +1,92 @@
+"""
+Autonomous job-application filling with browser-use (pinned to 0.11.x — see requirements.txt).
+
+Flow: the agent fills the form and STOPS before the final submit → the user reviews it in the
+live view (and can take over with clicks / typing) → 'submit' has a short follow-up agent click
+the final button, 'done' means the user submitted it themselves, 'skip' abandons it.
+
+browser-use 0.11 is CDP-native (no Playwright, no LangChain): LLMs must be its own
+`browser_use` Chat* wrappers, and everything here talks to Chrome through the session's CDP client.
+"""
 import asyncio
 import base64
 import json
+import logging
 import os
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Awaitable, Callable
 
-from playwright.async_api import Page
+logger = logging.getLogger("windrush.browser_agent")
 
 _BACKEND = os.environ.get("LLM_BACKEND", "ollama").lower()
 _OLLAMA_HOST  = os.environ.get("OLLAMA_HOST",  "http://ollama:11434")
-_OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen3.5:9b")
+_OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen3.5:4b")
+
+# Viewport the agent browses at. BrowserView.tsx maps clicks on the live frame onto these
+# exact dimensions (BROWSER_W / BROWSER_H) — keep the two in sync.
+VIEWPORT = {"width": 1280, "height": 800}
+
+# browser-use defaults to 500 steps; cap the LLM spend per application.
+_MAX_FILL_STEPS = 40
+_MAX_SUBMIT_STEPS = 4
+
+# Navigation the agent's browser must never reach: it runs inside the api container, next to
+# the internal services. Raw-IP URLs are blocked separately (BrowserProfile.block_ip_addresses).
+# 'http*://' because browser-use patterns without a scheme only match https.
+_BLOCK_IP_ADDRESSES = True
+_PROHIBITED_HOSTS = [
+    f"http*://{h}" for h in (
+        "localhost", "*.localhost", "host.docker.internal", "metadata.google.internal",
+        # docker-compose service names (see docker-compose.yml)
+        "api", "frontend", "nginx", "ollama",
+    )
+]
+
+# How long the review / takeover phase waits for the user's next command. Must stay under
+# nginx's proxy_read_timeout (600s) for /api/apply, which sees no bytes while we wait.
+_INPUT_TIMEOUT_S = 300
 
 try:
-    from browser_use import Agent, BrowserSession, BrowserProfile
-
-    if _BACKEND == "groq":
-        import json as _json
-        import re as _re
-        import typing as _typing
-        from langchain_groq import ChatGroq as _BaseChatGroq
-        from langchain_core.messages import (
-            SystemMessage as _SystemMessage,
-            HumanMessage as _HumanMessage,
-            AIMessage as _AIMessage,
-        )
-
-        def _to_lc_messages(messages):
-            """Convert browser_use message types to standard LangChain messages."""
-            result = []
-            for msg in messages:
-                cls_name = type(msg).__name__
-                content = getattr(msg, "content", "")
-                if cls_name == "SystemMessage":
-                    result.append(_SystemMessage(content=content))
-                elif cls_name == "HumanMessage":
-                    result.append(_HumanMessage(content=content))
-                elif cls_name == "AIMessage":
-                    result.append(_AIMessage(content=content))
-                else:
-                    role = getattr(msg, "role", "user")
-                    if role == "system":
-                        result.append(_SystemMessage(content=content))
-                    elif role == "assistant":
-                        result.append(_AIMessage(content=content))
-                    else:
-                        result.append(_HumanMessage(content=content))
-            return result
-
-        def _parse_with_defaults(model_class, text: str):
-            """
-            Extract JSON from LLM text and fill in defaults for any missing fields
-            before constructing the pydantic model.  Handles the case where the
-            model omits required string fields (evaluation_previous_goal, etc.).
-            """
-            m = _re.search(r'\{.*\}', text, _re.DOTALL)
-            data = _json.loads(m.group()) if m else {}
-
-            for name, fi in model_class.model_fields.items():
-                if name in data:
-                    continue
-                ann = fi.annotation
-                origin = getattr(ann, '__origin__', None)
-                if origin is list or ann is list:
-                    data[name] = []
-                elif ann is str or ann == type(""):
-                    data[name] = ""
-                elif ann is int:
-                    data[name] = 0
-                elif ann is bool:
-                    data[name] = False
-                else:
-                    data[name] = None
-
-            return model_class.model_validate(data)
-
-        class _BrowserLLM:
-            """
-            Plain adapter around ChatGroq for browser-use 0.11.x.
-
-            browser-use calls:
-              response = await llm.ainvoke(messages, output_format=AgentOutput)
-              parsed   = response.completion
-
-            We use Groq's json_object mode (no tool-call schema validation) and
-            fill in sensible defaults for any fields the model omits.
-            """
-
-            provider = "groq"
-
-            def __init__(self, model: str, groq_api_key: str):
-                self.model = model
-                self._inner = _BaseChatGroq(model=model, groq_api_key=groq_api_key)
-
-            async def ainvoke(self, messages, output_format=None, **kwargs):
-                kwargs.pop("session_id", None)
-                lc_messages = _to_lc_messages(messages)
-
-                if output_format is not None:
-                    # json_object mode: Groq validates JSON syntax only, not schema.
-                    # The model already knows the expected structure from the system prompt.
-                    llm = self._inner.bind(response_format={"type": "json_object"})
-                    response = await llm.ainvoke(lc_messages)
-                    content = getattr(response, "content", str(response))
-                    completion = _parse_with_defaults(output_format, content)
-                    return type("_Resp", (), {"completion": completion})()
-
-                return await self._inner.ainvoke(lc_messages, **kwargs)
-
-            def __getattr__(self, name: str):
-                return getattr(self._inner, name)
-
-        def _make_browser_llm():
-            return _BrowserLLM(
-                model="llama-3.3-70b-versatile",
-                groq_api_key=os.environ.get("GROQ_API_KEY", ""),
-            )
-    else:
-        from langchain_ollama import ChatOllama as _ChatOllama
-
-        def _make_browser_llm():
-            return _ChatOllama(
-                model=_OLLAMA_MODEL,
-                base_url=_OLLAMA_HOST,
-            )
+    from browser_use import Agent, BrowserProfile, BrowserSession
+    from browser_use.actor.page import Page as _ActorPage
 
     BROWSER_USE_AVAILABLE = True
 except ImportError:
     BROWSER_USE_AVAILABLE = False
 
-    def _make_browser_llm():  # noqa: F811
-        return None
+
+def _make_browser_llm():
+    """The browser-use chat model for the configured backend (its own wrappers, not LangChain)."""
+    if _BACKEND == "groq":
+        from browser_use import ChatGroq
+        # Same model as the main agent. browser-use drives Groq via json_schema output, so this
+        # must be a model listed in browser_use.llm.groq.chat.JsonSchemaModels (llama-4-scout is).
+        return ChatGroq(
+            model=os.environ.get("GROQ_MODEL", "meta-llama/llama-4-scout-17b-16e-instruct"),
+            api_key=os.environ.get("GROQ_API_KEY", ""),
+        )
+    if _BACKEND == "claude":
+        from browser_use import ChatAnthropic
+        return ChatAnthropic(
+            model=os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-6"),
+            api_key=os.environ.get("ANTHROPIC_API_KEY", ""),
+            max_tokens=4096,
+            timeout=120.0,
+        )
+    from browser_use import ChatOllama
+    return ChatOllama(model=_OLLAMA_MODEL, host=_OLLAMA_HOST)
 
 
-async def _screenshot_b64(page: Page) -> str:
+async def _screenshot_b64(browser_session) -> str:
+    """JPEG of the agent-focused tab, base64-encoded ('' if the browser isn't available)."""
     try:
-        jpeg = await page.screenshot(full_page=False, type="jpeg", quality=60)
+        jpeg = await browser_session.take_screenshot(format="jpeg", quality=60)
         return base64.b64encode(jpeg).decode()
     except Exception:
         return ""
+
+
+def _has_page(browser_session) -> bool:
+    return bool(getattr(browser_session, "agent_focus_target_id", None))
 
 
 def _push_frame(frame_queue: asyncio.Queue, frame_b64: str):
@@ -152,93 +102,130 @@ def _push_frame(frame_queue: asyncio.Queue, frame_b64: str):
         pass
 
 
-async def _cdp_screenshotter(browser_session, frame_queue: asyncio.Queue):
+async def _cdp_screencaster(browser_session, frame_queue: asyncio.Queue):
     """
-    Attach a CDP Page.startScreencast session to the active Playwright page.
-    Chrome pushes JPEG frames at up to ~30fps without us having to poll.
-    Re-attaches automatically when the agent navigates to a new tab.
+    Stream CDP Page.screencast frames from whichever tab currently has agent focus.
+    Chrome pushes JPEGs (no screenshot polling); we only poll cached session state to
+    notice focus changes and move the screencast to the new tab. Mirrors browser-use's own
+    RecordingWatchdog, which is inactive here because we don't enable video recording.
     """
-    active: dict = {}  # {"page": Page, "client": CDPSession}
+    current: dict = {"session_id": None}
+    registered = False
+    ack_tasks: set[asyncio.Task] = set()
 
-    async def _attach(page):
-        # Tear down previous session
-        old_client = active.get("client")
-        if old_client:
-            try:
-                await old_client.send("Page.stopScreencast")
-            except Exception:
-                pass
-            try:
-                await old_client.detach()
-            except Exception:
-                pass
-        active.clear()
-
+    async def _ack(frame_session_id: int, session_id: str | None):
         try:
-            client = await page.context.new_cdp_session(page)
-        except Exception:
-            return
-
-        active["page"] = page
-        active["client"] = client
-
-        async def on_frame(data):
-            frame_b64 = data.get("data", "")
-            if frame_b64:
-                _push_frame(frame_queue, frame_b64)
-            # Ack is required — Chrome stops sending frames without it
-            try:
-                await client.send("Page.screencastFrameAck", {"sessionId": data["sessionId"]})
-            except Exception:
-                pass
-
-        client.on("Page.screencastFrame", on_frame)
-        try:
-            await client.send("Page.startScreencast", {
-                "format": "jpeg",
-                "quality": 60,
-                "maxWidth": 1280,
-                "maxHeight": 800,
-                "everyNthFrame": 1,
-            })
+            await browser_session.cdp_client.send.Page.screencastFrameAck(
+                params={"sessionId": frame_session_id}, session_id=session_id,
+            )
         except Exception:
             pass
 
-    last_page = None
-    while True:
-        try:
-            context = getattr(browser_session, "context", None)
-            if context and context.pages:
-                page = context.pages[-1]
-                if page is not last_page:
-                    last_page = page
-                    await _attach(page)
-        except Exception:
-            pass
-        await asyncio.sleep(0.3)  # Only need to poll for page-change events
+    def on_frame(event, session_id):
+        # Synchronous: the CDP reader awaits handlers inline, so the ack runs as its own task.
+        if session_id == current["session_id"] and event.get("data"):
+            _push_frame(frame_queue, event["data"])
+        task = asyncio.create_task(_ack(event["sessionId"], session_id))
+        ack_tasks.add(task)
+        task.add_done_callback(ack_tasks.discard)
+
+    try:
+        while True:
+            try:
+                if _has_page(browser_session):
+                    if not registered:
+                        browser_session.cdp_client.register.Page.screencastFrame(on_frame)
+                        registered = True
+                    cdp_session = await browser_session.get_or_create_cdp_session(focus=False)
+                    if cdp_session.session_id != current["session_id"]:
+                        old = current["session_id"]
+                        current["session_id"] = cdp_session.session_id
+                        if old:
+                            try:
+                                await browser_session.cdp_client.send.Page.stopScreencast(session_id=old)
+                            except Exception:
+                                pass  # the old tab may already be gone
+                        await cdp_session.cdp_client.send.Page.startScreencast(
+                            params={"format": "jpeg", "quality": 60,
+                                    "maxWidth": VIEWPORT["width"], "maxHeight": VIEWPORT["height"],
+                                    "everyNthFrame": 1},
+                            session_id=cdp_session.session_id,
+                        )
+            except Exception as exc:
+                logger.debug("screencast attach failed: %s", exc)
+                current["session_id"] = None  # retry on the next tick
+            await asyncio.sleep(0.5)
+    finally:
+        if current["session_id"]:
+            try:
+                await browser_session.cdp_client.send.Page.stopScreencast(session_id=current["session_id"])
+            except Exception:
+                pass
 
 
 DONE_COMMANDS = {"submit", "done", "skip", "cancel", "abort"}
+# Subset of DONE_COMMANDS that mean "the application went in" (vs. abandoned).
+SUBMIT_COMMANDS = {"submit", "done"}
 
 
-async def _interactive_session(page: Page, instruction_queue: asyncio.Queue, context=None) -> AsyncGenerator[dict, None]:
+async def _focused_page(browser_session):
+    """Actor Page for the agent-focused tab, reusing its existing CDP session."""
+    cdp_session = await browser_session.get_or_create_cdp_session(focus=False)
+    return _ActorPage(browser_session, cdp_session.target_id, session_id=cdp_session.session_id), cdp_session
+
+
+async def _run_user_command(browser_session, cmd: dict) -> None:
+    """Replay one takeover input (from BrowserView.tsx) onto the focused tab via CDP."""
+    page, cdp_session = await _focused_page(browser_session)
+    kind = cmd.get("type", "")
+    if kind == "click":
+        tabs_before = len(browser_session.get_page_targets())
+        await (await page.mouse).click(int(float(cmd["x"])), int(float(cmd["y"])))
+        await asyncio.sleep(0.8)
+        # Follow a tab the click opened (e.g. "Apply on company site").
+        if len(browser_session.get_page_targets()) > tabs_before:
+            new_tab = await browser_session.get_most_recently_opened_target_id()
+            await browser_session.get_or_create_cdp_session(new_tab, focus=True)
+    elif kind == "type":
+        await _insert_text(browser_session, cdp_session, str(cmd.get("text", "")))
+    elif kind == "key":
+        await page.press(str(cmd.get("key", "Enter")))
+        await asyncio.sleep(0.4)
+    elif kind == "scroll":
+        await (await page.mouse).scroll(delta_y=int(float(cmd.get("delta", 300))))
+        await asyncio.sleep(0.3)
+
+
+async def _insert_text(browser_session, cdp_session, text: str) -> None:
+    await browser_session.cdp_client.send.Input.insertText(params={"text": text}, session_id=cdp_session.session_id)
+    await asyncio.sleep(0.2)
+
+
+async def _interactive_session(
+    browser_session,
+    instruction_queue: asyncio.Queue,
+    intro_action: str,
+    intro_reason: str,
+    on_submit: Callable[[], Awaitable[tuple[bool, str]]],
+) -> AsyncGenerator[dict, None]:
     """
-    Hand control to the user. Loops processing commands from instruction_queue.
-    Automatically follows new tabs opened by clicks.
+    Hand control to the user until they finish. Commands (from BrowserView.tsx):
+      JSON {type: click|type|key|scroll} → replayed onto the page via CDP
+      'submit' → a short agent clicks the final submit button (submitted if it confirms)
+      'done'   → the user submitted it themselves
+      'skip' / 'cancel' / 'abort' → abandon (not submitted)
+      any other text → typed into the focused field
     """
-    screenshot = await _screenshot_b64(page)
-    yield {
-        "action": "You have control — click the screenshot or type below",
-        "screenshot": screenshot or None,
-        "blocked": True,
-        "reason": "Click anywhere on the screenshot to interact, type in the box, or type 'submit' / 'skip'.",
-        "done": False,
-        "interactive": True,
-    }
+    def interactive(action: str, reason: str, screenshot: str) -> dict:
+        return {"action": action, "screenshot": screenshot or None, "blocked": True,
+                "reason": reason, "done": False, "interactive": True}
+
+    yield interactive(intro_action, intro_reason, await _screenshot_b64(browser_session))
+    again = "Click the screenshot or type below. 'submit' sends it, 'done' if you submitted it yourself, 'skip' cancels."
 
     while True:
         try:
-            raw = await asyncio.wait_for(instruction_queue.get(), timeout=120)
+            raw = await asyncio.wait_for(instruction_queue.get(), timeout=_INPUT_TIMEOUT_S)
         except asyncio.TimeoutError:
             yield {"action": "Session timed out", "screenshot": None, "blocked": False, "reason": None, "done": True}
             return
@@ -250,69 +237,54 @@ async def _interactive_session(page: Page, instruction_queue: asyncio.Queue, con
                 cmd = parsed
         except (json.JSONDecodeError, TypeError):
             pass
+        word = (cmd.get("type", "") if cmd else str(raw)).strip().lower()
 
-        if cmd:
-            kind = cmd.get("type", "")
-            if kind == "click":
-                pages_before = list(context.pages) if context else []
-                await page.mouse.click(float(cmd["x"]), float(cmd["y"]))
-                await page.wait_for_timeout(800)
-                if context and len(context.pages) > len(pages_before):
-                    new_page = context.pages[-1]
-                    try:
-                        await new_page.wait_for_load_state("domcontentloaded", timeout=10000)
-                        page = new_page
-                    except Exception:
-                        pass
-            elif kind == "type":
-                await page.keyboard.type(str(cmd.get("text", "")))
-                await page.wait_for_timeout(200)
-            elif kind == "key":
-                await page.keyboard.press(str(cmd.get("key", "Enter")))
-                await page.wait_for_timeout(400)
-            elif kind == "scroll":
-                await page.mouse.wheel(0, float(cmd.get("delta", 300)))
-                await page.wait_for_timeout(300)
-            elif kind in DONE_COMMANDS or cmd.get("type") in DONE_COMMANDS:
-                yield {"action": f"User ended session: {kind}", "screenshot": None, "blocked": False, "reason": None, "done": True}
+        if word == "submit":
+            yield {"action": "Submitting the application…", "screenshot": None, "blocked": False,
+                   "reason": None, "done": False}
+            ok, detail = await on_submit()
+            if ok:
+                yield {"action": f"Application submitted{': ' + detail if detail else ''}",
+                       "screenshot": await _screenshot_b64(browser_session) or None,
+                       "blocked": False, "reason": None, "done": True, "submitted": True}
                 return
+            yield interactive(
+                f"Couldn't confirm the submission{': ' + detail if detail else ''}",
+                "Click the submit button on the screenshot yourself, then type 'done' — or 'skip' to cancel.",
+                await _screenshot_b64(browser_session),
+            )
+            continue
 
-            screenshot = await _screenshot_b64(page)
-            yield {
-                "action": f"Executed: {kind}",
-                "screenshot": screenshot or None,
-                "blocked": True,
-                "reason": "Click the screenshot or type below. Type 'submit' when done.",
-                "done": False,
-                "interactive": True,
-            }
+        if word in DONE_COMMANDS:
+            if word in SUBMIT_COMMANDS:
+                yield {"action": "Marked as submitted by you", "screenshot": None, "blocked": False,
+                       "reason": None, "done": True, "submitted": True}
+            else:
+                yield {"action": "Cancelled by user", "screenshot": None, "blocked": False, "reason": None, "done": True}
+            return
 
-        else:
-            text = str(raw).strip().lower()
-            if text in DONE_COMMANDS:
-                if text in ("skip", "cancel", "abort"):
-                    yield {"action": "Cancelled by user", "screenshot": None, "blocked": False, "reason": None, "done": True}
-                else:
-                    yield {"action": "User confirmed — proceeding", "screenshot": None, "blocked": False, "reason": None, "done": True}
-                return
-            await page.keyboard.type(str(raw))
-            await page.wait_for_timeout(200)
-            screenshot = await _screenshot_b64(page)
-            yield {
-                "action": f"Typed: {raw[:40]}",
-                "screenshot": screenshot or None,
-                "blocked": True,
-                "reason": "Click the screenshot or type below. Type 'submit' when done.",
-                "done": False,
-                "interactive": True,
-            }
+        try:
+            if cmd:
+                await _run_user_command(browser_session, cmd)
+                label = f"Executed: {word}"
+            else:
+                _, cdp_session = await _focused_page(browser_session)
+                await _insert_text(browser_session, cdp_session, str(raw))
+                label = f"Typed: {str(raw)[:40]}"
+        except Exception as exc:
+            logger.warning("takeover command %r failed: %s", word, exc)
+            label = f"That didn't work ({exc}) — try again"
+        yield interactive(label, again, await _screenshot_b64(browser_session))
 
 
 def _build_task(job_url: str, persona: dict, cover_letter: str,
                 job_email: str, job_password: str, cv_path: str) -> str:
     lines = []
     if job_email:
-        lines.append(f"If asked to log in, use: email={job_email}, password={job_password}")
+        # The real password is never in the prompt: browser-use substitutes the placeholder at
+        # input time (Agent sensitive_data, scoped to the job site — see _credential_scope).
+        password_hint = " password=<secret>job_password</secret>" if job_password else ""
+        lines.append(f"If asked to log in, use: email={job_email}{password_hint}")
     if cv_path:
         lines.append(f"If asked to upload a CV/resume, upload the file at: {cv_path}")
 
@@ -451,8 +423,74 @@ def _build_task(job_url: str, persona: dict, cover_letter: str,
         task += f"\n\nCustom Directives to follow: {persona['custom_directives']}"
 
     task += f"\n\nFull cover letter to paste into any cover letter field:\n{cover_letter}"
-    task += "\n\nComplete and submit the application. Fill every required field. If a field is optional and you don't have the answer, leave it blank."
+    task += (
+        "\n\nFill in the application completely: every required field, plus optional ones you have an answer for "
+        "(leave optional fields blank if you don't). Logging in, creating an account, uploading the CV and moving "
+        "between steps of a multi-page form with 'Next'/'Continue' are all fine."
+        "\n\nIMPORTANT — DO NOT SUBMIT. Never click the FINAL button that sends the application "
+        "(e.g. 'Submit', 'Submit application', 'Apply', 'Send application', 'Finish'). The candidate reviews the "
+        "filled form and submits it themselves. As soon as the only thing left is that final submission, stop and "
+        "call done with success=true, summarising what you filled and anything you were unsure about. If you cannot "
+        "fill the form (blocked, missing information, page errors), call done with success=false and say why."
+    )
     return task
+
+
+_SUBMIT_TASK = (
+    "The job application form on the current page has already been filled in and the candidate has reviewed "
+    "and approved it. Click the button that submits the application (e.g. 'Submit', 'Submit application', "
+    "'Apply', 'Send'). Do NOT change any field and do NOT navigate elsewhere. After clicking, check the page: "
+    "call done with success=true only if it confirms the application was received/submitted; otherwise call done "
+    "with success=false and quote any error or validation message shown."
+)
+
+
+def _browser_profile() -> "BrowserProfile":
+    return BrowserProfile(
+        headless=True,
+        keep_alive=True,  # keep the browser after agent.run() for review / takeover / submit
+        viewport=VIEWPORT,
+        device_scale_factor=1,
+        block_ip_addresses=_BLOCK_IP_ADDRESSES,
+        prohibited_domains=_PROHIBITED_HOSTS,
+        enable_default_extensions=False,
+        args=[
+            "--no-sandbox",
+            "--disable-dev-shm-usage",
+            "--disable-blink-features=AutomationControlled",
+            "--disable-extensions",
+            # Hardware / performance
+            "--disable-gpu",
+            "--js-flags=--max-old-space-size=512",
+        ],
+    )
+
+
+def _credential_scope(job_url: str) -> str | None:
+    """
+    browser-use domain pattern the job-site password may be typed into: the job URL's host and
+    its subdomains, HTTPS only. A login on a different domain (e.g. an external ATS) won't get
+    the secret — the agent hands over and the user types it — which is the point: a
+    prompt-injected page elsewhere can't get it typed into an attacker's form.
+    """
+    from urllib.parse import urlparse
+    host = (urlparse(job_url).hostname or "").lower()
+    host = host.removeprefix("www.")
+    return f"https://*.{host}" if host else None
+
+
+async def _submit_with_agent(llm, browser_session) -> tuple[bool, str]:
+    """Run a tiny follow-up agent on the same (kept-alive) browser to click the final submit."""
+    try:
+        agent = Agent(
+            task=_SUBMIT_TASK, llm=llm, browser_session=browser_session,
+            use_vision=False, use_judge=False, directly_open_url=False,
+        )
+        history = await agent.run(max_steps=_MAX_SUBMIT_STEPS)
+        return bool(history.is_successful()), (history.final_result() or "")[:200]
+    except Exception as exc:
+        logger.warning("submit agent failed: %s", exc)
+        return False, str(exc)[:200]
 
 
 async def apply_with_browser(
@@ -466,9 +504,11 @@ async def apply_with_browser(
     cv_path: str = "",
 ) -> AsyncGenerator[dict, None]:
     """
-    Async generator — uses browser-use LLM agent to autonomously complete a job application.
-    Falls back to interactive session if the agent fails.
-    Yields dicts: { action, screenshot (base64|None), blocked (bool), reason (str|None), done (bool) }
+    Async generator: the browser-use agent fills the application, then the user reviews it and
+    decides whether to submit (see module docstring). Yields dicts:
+      { action, screenshot (base64|None), blocked (bool), reason (str|None), done (bool),
+        interactive (bool, optional), submitted (bool, only on the final done event) }
+    The browser is always killed on exit — including when the client disconnects mid-run.
     """
     if not BROWSER_USE_AVAILABLE:
         yield {
@@ -481,32 +521,15 @@ async def apply_with_browser(
 
     yield {"action": "Browser agent starting…", "screenshot": None, "blocked": False, "reason": None, "done": False}
 
-    browser_profile = BrowserProfile(
-        headless=True,
-        disable_security=True,
-        enable_default_extensions=False,
-        args=[
-            "--no-sandbox",
-            "--disable-dev-shm-usage",
-            "--disable-blink-features=AutomationControlled",
-            "--window-size=1280,800",
-            "--disable-extensions",
-            # Hardware / performance
-            "--disable-gpu",
-            "--js-flags=--max-old-space-size=512",
-        ],
-    )
-    browser_session = BrowserSession(browser_profile=browser_profile)
+    llm = _make_browser_llm()
+    browser_session = BrowserSession(browser_profile=_browser_profile())
 
     step_queue: asyncio.Queue = asyncio.Queue()
 
     async def on_step(browser_state, agent_output, step_number):
-        screenshot = browser_state.screenshot  # already base64 JPEG
+        screenshot = getattr(browser_state, "screenshot", None)  # base64; None when use_vision=False
         if frame_queue is not None and screenshot:
-            try:
-                frame_queue.put_nowait(screenshot)
-            except asyncio.QueueFull:
-                pass
+            _push_frame(frame_queue, screenshot)
         goal = getattr(agent_output, "next_goal", "") or ""
         actions = getattr(agent_output, "action", None) or []
         action_str = str(goal or (actions[0] if actions else agent_output))[:120]
@@ -518,106 +541,86 @@ async def apply_with_browser(
             "done": False,
         })
 
-    llm = _make_browser_llm()
+    scope = _credential_scope(job_url)
+    sensitive_data = {scope: {"job_password": job_password}} if (job_password and scope) else None
 
-    agent = Agent(
-        task=task,
-        llm=llm,
-        browser_session=browser_session,
-        register_new_step_callback=on_step,
-        use_vision=False,
-        available_file_paths=[cv_path] if cv_path else [],
-    )
-    agent_task = asyncio.create_task(agent.run())
-    screenshotter_task = (
-        asyncio.create_task(_cdp_screenshotter(browser_session, frame_queue))
-        if frame_queue is not None else None
-    )
-
-    # Stream step events while agent runs
-    while not agent_task.done():
-        try:
-            event = await asyncio.wait_for(step_queue.get(), timeout=1.0)
-            yield event
-        except asyncio.TimeoutError:
-            pass
-
-    # Stop continuous screenshotter
-    if screenshotter_task:
-        screenshotter_task.cancel()
-        try:
-            await screenshotter_task
-        except asyncio.CancelledError:
-            pass
-
-    # Drain any remaining buffered events
-    while not step_queue.empty():
-        yield await step_queue.get()
-
-    # Check agent result
-    agent_error = None
+    agent_task: asyncio.Task | None = None
+    screencast_task: asyncio.Task | None = None
     try:
-        result = agent_task.result()
-        result_str = str(result)[:200] if result else "Done"
-        yield {"action": f"Agent finished: {result_str}", "screenshot": None, "blocked": False, "reason": None, "done": False}
-    except Exception as e:
-        agent_error = e
+        agent = Agent(
+            task=task,
+            llm=llm,
+            browser_session=browser_session,
+            register_new_step_callback=on_step,
+            use_vision=False,
+            available_file_paths=[cv_path] if cv_path else [],
+            sensitive_data=sensitive_data,
+            # The judge LLM call grades the run from the RAW step history, which browser-use does not
+            # redact — e.g. an evaluate() that reads the form back carries the typed password. We
+            # rely on the agent's own is_successful(), so the judge only costs a call and leaks.
+            use_judge=False,
+            # Open the job page before step 1. browser-use's own directly_open_url guesses the URL
+            # from the task text and gives up when it sees more than one URL-like string — which a
+            # persona's LinkedIn/GitHub links or a cover letter mentioning "ASP.NET" always trigger.
+            initial_actions=[{"navigate": {"url": job_url, "new_tab": False}}],
+        )
+        agent_task = asyncio.create_task(agent.run(max_steps=_MAX_FILL_STEPS))
+        if frame_queue is not None:
+            screencast_task = asyncio.create_task(_cdp_screencaster(browser_session, frame_queue))
 
-    # Get current Playwright page via browser_session.context
-    page = None
-    pw_context = None
-    try:
-        pw_context = getattr(browser_session, "context", None)
-        if pw_context and pw_context.pages:
-            page = pw_context.pages[-1]
-    except Exception:
-        pass
+        # Stream step events while the agent fills the form
+        while not agent_task.done():
+            try:
+                yield await asyncio.wait_for(step_queue.get(), timeout=1.0)
+            except asyncio.TimeoutError:
+                pass
+        while not step_queue.empty():
+            yield step_queue.get_nowait()
 
-    if agent_error and page:
-        screenshot = await _screenshot_b64(page)
-        yield {
-            "action": f"Agent encountered an issue — handing control to you ({agent_error})",
-            "screenshot": screenshot or None,
-            "blocked": True,
-            "reason": "Take over to complete the application, then type 'submit'.",
-            "done": False,
-            "interactive": True,
-        }
-        async for step in _interactive_session(page, instruction_queue, pw_context):
+        agent_error: Exception | None = None
+        ready = False
+        summary = ""
+        try:
+            history = agent_task.result()
+            ready = bool(history.is_successful())  # agent's own verdict: "form filled, ready to submit"
+            summary = (history.final_result() or "")[:300]
+        except Exception as exc:
+            agent_error = exc
+            logger.warning("browser agent failed: %s", exc)
+
+        if not _has_page(browser_session):
+            yield {"action": f"Browser error: {agent_error or 'no page was opened'}", "screenshot": None,
+                   "blocked": False, "reason": None, "done": True}
+            return
+
+        if agent_error:
+            intro = f"The agent hit a problem — handing control to you ({agent_error})"
+            reason = "Finish the form yourself, then type 'submit' (or 'done' if you submitted it), or 'skip'."
+        elif ready:
+            intro = "Form filled — review it before anything is sent" + (f". Agent notes: {summary}" if summary else "")
+            reason = "Type 'submit' to send it, click/type to fix anything first, or 'skip' to cancel."
+        else:
+            intro = "The agent couldn't finish the form" + (f": {summary}" if summary else "")
+            reason = "Take over by clicking/typing, then 'submit' (or 'done' if you submitted it), or 'skip'."
+
+        async for step in _interactive_session(
+            browser_session, instruction_queue, intro, reason,
+            on_submit=lambda: _submit_with_agent(llm, browser_session),
+        ):
             yield step
             if step.get("done"):
-                try:
-                    await browser_session.close()
-                except Exception:
-                    pass
                 return
-    elif agent_error:
-        yield {"action": f"Browser error: {agent_error}", "screenshot": None, "blocked": False, "reason": None, "done": True}
+    finally:
+        # Runs on normal completion AND when the client disconnects (generator closed):
+        # stop background work and kill Chromium so no browser process is leaked.
+        for t in (agent_task, screencast_task):
+            if t and not t.done():
+                t.cancel()
+                try:
+                    await t
+                except BaseException:
+                    pass
         try:
-            await browser_session.close()
-        except Exception:
-            pass
-        return
-
-    # Final interactive review before submit
-    if page:
-        screenshot = await _screenshot_b64(page)
-        yield {
-            "action": "Review the filled form — type 'submit' to submit or 'skip' to skip",
-            "screenshot": screenshot or None,
-            "blocked": True,
-            "reason": "Check the form looks correct before submitting.",
-            "done": False,
-            "interactive": True,
-        }
-        async for step in _interactive_session(page, instruction_queue, pw_context):
-            yield step
-            if step.get("done"):
-                break
-    else:
-        yield {"action": "Application complete", "screenshot": None, "blocked": False, "reason": None, "done": True}
-
-    try:
-        await browser_session.close()
-    except Exception:
-        pass
+            await browser_session.kill()
+        except Exception as exc:
+            logger.debug("browser kill failed: %s", exc)
