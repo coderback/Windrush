@@ -4,7 +4,7 @@ import logging
 import pathlib
 import tempfile
 import uuid
-from contextlib import asynccontextmanager
+from contextlib import aclosing, asynccontextmanager
 from typing import Optional, Annotated
 
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Query, Depends, status
@@ -384,17 +384,19 @@ async def apply(
     async def cleanup_gen():
         user_confirmed = False
         try:
-            async for chunk in run_apply(
+            # aclosing: if the client disconnects, close run_apply (and the browser beneath it) now
+            async with aclosing(run_apply(
                 current_user.id, job_id, job_url, cover_letter, risks, session_id, q, fq,
                 job_email=effective_email, job_password=effective_password, cv_path=cv_path,
-            ):
-                try:
-                    payload = json.loads(chunk.removeprefix("data: ").strip())
-                    if payload.get("type") == "done" and payload.get("submitted") is True:
-                        user_confirmed = True
-                except Exception:
-                    pass
-                yield chunk
+            )) as chunks:
+                async for chunk in chunks:
+                    try:
+                        payload = json.loads(chunk.removeprefix("data: ").strip())
+                        if payload.get("type") == "done" and payload.get("submitted") is True:
+                            user_confirmed = True
+                    except Exception:
+                        pass
+                    yield chunk
         finally:
             _browser_queues.pop(session_id, None)
             _browser_frames.pop(session_id, None)

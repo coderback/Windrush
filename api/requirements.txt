@@ -10,14 +10,12 @@ bcrypt
 passlib
 python-jose[cryptography]
 playwright>=1.45
-browser-use>=0.1
+# Pinned: browser_agent.py targets the 0.11 CDP API (its own Chat* LLM wrappers, actor Page,
+# keep_alive sessions). Minor releases have broken this before — upgrade deliberately.
+browser-use==0.11.13
 openai>=1.30          # OpenAI-compatible client (used for both Ollama + Groq)
-anthropic>=0.69       # Native Anthropic SDK (LLM_BACKEND=claude)
-langchain-anthropic>=0.3 # Claude via LangChain (browser agent, LLM_BACKEND=claude)
-langchain-ollama>=0.2 # Ollama LangChain integration (browser agent)
-# Keep groq + langchain-groq if switching back via LLM_BACKEND=groq
-groq>=0.9
-langchain-groq>=0.2
+anthropic>=0.72.1     # Native Anthropic SDK (LLM_BACKEND=claude); floor set by browser-use 0.11.13
+groq>=0.30            # browser-use's ChatGroq (LLM_BACKEND=groq); floor set by browser-use 0.11.13
 fpdf2>=2.7.9          # fallback PDF renderer
 weasyprint>=62        # HTML/CSS -> PDF for structured CV / cover-letter templates
 jinja2>=3.1           # HTML template rendering for documents

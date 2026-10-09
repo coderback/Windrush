@@ -4,6 +4,7 @@ import logging
 import os
 import re
 import time
+from contextlib import aclosing
 from html.parser import HTMLParser
 from typing import AsyncGenerator
 
@@ -1498,20 +1499,23 @@ async def run_apply(
 
     submitted = False
     if job_url and instruction_queue is not None:
-        async for step in apply_with_browser(
+        # aclosing: close the browser generator (its finally kills Chromium) as soon as we
+        # stop iterating — on `break` below or when our own consumer disconnects.
+        async with aclosing(apply_with_browser(
             job_url, persona, cover_letter, instruction_queue, frame_queue,
             job_email=job_email, job_password=job_password, cv_path=cv_path,
-        ):
-            event_type = "browser_blocked" if step.get("blocked") else "browser_action"
-            yield _sse(event_type, {
-                "action": step.get("action", ""),
-                "screenshot": step.get("screenshot"),
-                "reason": step.get("reason"),
-                "interactive": step.get("interactive", False),
-            })
-            if step.get("done"):
-                submitted = bool(step.get("submitted"))
-                break
+        )) as steps:
+            async for step in steps:
+                event_type = "browser_blocked" if step.get("blocked") else "browser_action"
+                yield _sse(event_type, {
+                    "action": step.get("action", ""),
+                    "screenshot": step.get("screenshot"),
+                    "reason": step.get("reason"),
+                    "interactive": step.get("interactive", False),
+                })
+                if step.get("done"):
+                    submitted = bool(step.get("submitted"))
+                    break
 
     # `submitted` is the only signal the caller should treat as "application sent";
     # `done` alone also fires on skip / cancel / timeout / browser errors.
