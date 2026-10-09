@@ -30,6 +30,8 @@ services:
       - TASK_PENETRATION_PATH=/data/task_penetration.csv
       - ADZUNA_APP_ID=${ADZUNA_APP_ID}
       - ADZUNA_API_KEY=${ADZUNA_API_KEY}
+      - BRAVE_SEARCH_API_KEY=${BRAVE_SEARCH_API_KEY:-}
+      - JWT_SECRET=${JWT_SECRET:?JWT_SECRET must be set in .env (generate with: openssl rand -hex 32)}
       - JOB_EMAIL=${JOB_EMAIL}
       - JOB_PASSWORD=${JOB_PASSWORD}
       - JOBS_MCP_URL=http://civic-guardrails:8002/mcp

@@ -287,6 +287,25 @@ def get_jobs(
         
     return candidates[offset : offset + limit]
 
+def get_job(job_db_id: str) -> dict | None:
+    """Return the stored job row (without its embedding) by primary key, or None."""
+    if not _DB_PATH:
+        init_db()
+    try:
+        con = sqlite3.connect(_DB_PATH)
+        con.row_factory = sqlite3.Row
+        row = con.execute("SELECT * FROM jobs WHERE id = ?", (job_db_id,)).fetchone()
+        con.close()
+    except Exception as exc:
+        logger.error("Failed to load job %s: %s", job_db_id, exc)
+        return None
+    if not row:
+        return None
+    job = dict(row)
+    job.pop("semantic_vector", None)
+    return job
+
+
 def update_description(job_db_id: str, description: str) -> None:
     """Persist a freshly-fetched full description back onto a stored job row."""
     if not _DB_PATH:

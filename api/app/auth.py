@@ -11,7 +11,10 @@ from pydantic import BaseModel
 from . import tracker
 
 # ── CONFIGURATION ─────────────────────────────────────────────────────────────
-SECRET_KEY = os.environ.get("JWT_SECRET", "change-this-in-production-use-openssl-rand-hex-32")
+SECRET_KEY = os.environ.get("JWT_SECRET", "")
+if not SECRET_KEY:
+    # No insecure fallback: a default secret lives in the repo and would let anyone forge tokens.
+    raise RuntimeError("JWT_SECRET is not set — generate one with `openssl rand -hex 32` and add it to .env")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7  # 7 days
 

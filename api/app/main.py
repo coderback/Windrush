@@ -390,7 +390,7 @@ async def apply(
             ):
                 try:
                     payload = json.loads(chunk.removeprefix("data: ").strip())
-                    if payload.get("type") == "done":
+                    if payload.get("type") == "done" and payload.get("submitted") is True:
                         user_confirmed = True
                 except Exception:
                     pass
@@ -693,18 +693,32 @@ async def _ensure_full_description(job: dict) -> dict:
     are only a web snippet), so anything that short is re-fetched from the live
     listing page. The result is persisted back to the DB so re-runs and revisits
     are instant.
+
+    The jobs table is shared by all users, so the client-supplied job is never
+    trusted for the write: we only persist when the id matches a stored row, and
+    then we fetch that row's *stored* URL — never the URL from the request body.
     """
     desc = (job.get("description") or "").strip()
     if len(desc) > 600:          # already a full description (e.g. previously fetched)
         return job
 
     from .job_searcher import fetch_full_description
+    db_id = str(job.get("id") or "")
+    stored = jobs_db.get_job(db_id) if db_id else None
+    if stored:
+        stored_desc = (stored.get("description") or "").strip()
+        if len(stored_desc) > 600:   # another request already fetched it
+            return {**job, "description": stored_desc}
+        full = await fetch_full_description(stored.get("url") or "")
+        if full and len(full) > len(stored_desc):
+            jobs_db.update_description(db_id, full)
+            return {**job, "description": full}
+        return job
+
+    # Not a stored job (e.g. pasted via /jobs/from-url): enrich this request only.
     full = await fetch_full_description(job.get("url", ""))
     if full and len(full) > len(desc):
         job = {**job, "description": full}
-        db_id = job.get("id")
-        if db_id:
-            jobs_db.update_description(str(db_id), full)
     return job
 
 

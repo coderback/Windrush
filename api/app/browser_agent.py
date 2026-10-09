@@ -231,6 +231,8 @@ async def _cdp_screenshotter(browser_session, frame_queue: asyncio.Queue):
 
 
 DONE_COMMANDS = {"submit", "done", "skip", "cancel", "abort"}
+# Subset of DONE_COMMANDS that mean "the application went in" (vs. abandoned).
+SUBMIT_COMMANDS = {"submit", "done"}
 
 
 async def _interactive_session(page: Page, instruction_queue: asyncio.Queue, context=None) -> AsyncGenerator[dict, None]:
@@ -285,8 +287,9 @@ async def _interactive_session(page: Page, instruction_queue: asyncio.Queue, con
             elif kind == "scroll":
                 await page.mouse.wheel(0, float(cmd.get("delta", 300)))
                 await page.wait_for_timeout(300)
-            elif kind in DONE_COMMANDS or cmd.get("type") in DONE_COMMANDS:
-                yield {"action": f"User ended session: {kind}", "screenshot": None, "blocked": False, "reason": None, "done": True}
+            elif kind in DONE_COMMANDS:
+                yield {"action": f"User ended session: {kind}", "screenshot": None, "blocked": False, "reason": None,
+                       "done": True, "submitted": kind in SUBMIT_COMMANDS}
                 return
 
             screenshot = await _screenshot_b64(page)
@@ -302,10 +305,11 @@ async def _interactive_session(page: Page, instruction_queue: asyncio.Queue, con
         else:
             text = str(raw).strip().lower()
             if text in DONE_COMMANDS:
-                if text in ("skip", "cancel", "abort"):
-                    yield {"action": "Cancelled by user", "screenshot": None, "blocked": False, "reason": None, "done": True}
+                if text in SUBMIT_COMMANDS:
+                    yield {"action": "User confirmed — proceeding", "screenshot": None, "blocked": False, "reason": None,
+                           "done": True, "submitted": True}
                 else:
-                    yield {"action": "User confirmed — proceeding", "screenshot": None, "blocked": False, "reason": None, "done": True}
+                    yield {"action": "Cancelled by user", "screenshot": None, "blocked": False, "reason": None, "done": True}
                 return
             await page.keyboard.type(str(raw))
             await page.wait_for_timeout(200)
@@ -568,8 +572,13 @@ async def apply_with_browser(
 
     # Check agent result
     agent_error = None
+    agent_succeeded = False
     try:
         result = agent_task.result()
+        # AgentHistoryList.is_successful(): True only when the agent finished and judged
+        # its own task (fill + submit) a success; None/False otherwise.
+        is_successful = getattr(result, "is_successful", None)
+        agent_succeeded = bool(is_successful()) if callable(is_successful) else False
         result_str = str(result)[:200] if result else "Done"
         yield {"action": f"Agent finished: {result_str}", "screenshot": None, "blocked": False, "reason": None, "done": False}
     except Exception as e:
@@ -627,7 +636,9 @@ async def apply_with_browser(
             if step.get("done"):
                 break
     else:
-        yield {"action": "Application complete", "screenshot": None, "blocked": False, "reason": None, "done": True}
+        # No page to review — fall back to the agent's own verdict on whether it submitted.
+        yield {"action": "Application complete" if agent_succeeded else "Agent did not confirm submission",
+               "screenshot": None, "blocked": False, "reason": None, "done": True, "submitted": agent_succeeded}
 
     try:
         await browser_session.close()

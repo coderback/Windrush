@@ -1251,7 +1251,7 @@ async def search_jobs_multi(query: str, location: str) -> list[dict]:
 
     l1, l2, l3, l4 = await asyncio.gather(
         _search_level1_playwright(keywords),
-        _search_level2_ats_apis(query),
+        _search_level2_ats_apis([query]),
         _search_level3_websearch(),
         _search_level4_adzuna(query, location),
     )

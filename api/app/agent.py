@@ -436,6 +436,12 @@ def _recency_key(entry: dict) -> tuple[int, int]:
     return (year, month)
 
 
+def _cert_date(raw: str) -> str:
+    """Render the profile's <input type="month"> value ('YYYY-MM') as MM/YYYY; pass anything else through."""
+    m = re.fullmatch(r"\s*((?:19|20)\d{2})-(0[1-9]|1[0-2])\s*", raw or "")
+    return f"{m.group(2)}/{m.group(1)}" if m else (raw or "").strip()
+
+
 def _persona_to_cvdoc(persona: dict) -> dict:
     """
     Build a complete CVDoc straight from the persona — used both as the structured
@@ -494,8 +500,12 @@ def _persona_to_cvdoc(persona: dict) -> dict:
             "tech": p.get("technologies", []) if isinstance(p.get("technologies"), list) else [],
             "link": p.get("url", ""),
         })
+    # Persona certs use issuing_organization / issue_date (models.Certification); the
+    # CVDoc uses issuer / year. Older payloads may already carry the CVDoc names.
     certifications = [
-        {"name": c.get("name", ""), "issuer": c.get("issuer", ""), "year": c.get("year", "")}
+        {"name": c.get("name", ""),
+         "issuer": c.get("issuing_organization", "") or c.get("issuer", ""),
+         "year": _cert_date(c.get("issue_date", "") or c.get("year", ""))}
         for c in persona.get("certifications", [])
     ]
     return {
@@ -1486,6 +1496,7 @@ async def run_apply(
 
     yield _sse("start", {"message": "Starting browser application with your Persona…", "session_id": session_id})
 
+    submitted = False
     if job_url and instruction_queue is not None:
         async for step in apply_with_browser(
             job_url, persona, cover_letter, instruction_queue, frame_queue,
@@ -1499,6 +1510,9 @@ async def run_apply(
                 "interactive": step.get("interactive", False),
             })
             if step.get("done"):
+                submitted = bool(step.get("submitted"))
                 break
 
-    yield _sse("done", {"message": "Done"})
+    # `submitted` is the only signal the caller should treat as "application sent";
+    # `done` alone also fires on skip / cancel / timeout / browser errors.
+    yield _sse("done", {"message": "Done", "submitted": submitted})
