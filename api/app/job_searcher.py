@@ -109,8 +109,8 @@ def _html_to_text(raw: str) -> str:
     return text.strip()
 
 
-def _extract_jsonld_jobposting(raw_html: str) -> str:
-    """Return the description from a JSON-LD JobPosting block, if present."""
+def _find_jsonld_jobposting(raw_html: str) -> dict:
+    """Return the first JSON-LD JobPosting object on the page, or {} if none."""
     for m in re.finditer(
         r'(?is)<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>',
         raw_html,
@@ -123,10 +123,15 @@ def _extract_jsonld_jobposting(raw_html: str) -> str:
             t = obj.get("@type", "")
             types = t if isinstance(t, list) else [t]
             if any("JobPosting" in str(x) for x in types):
-                desc = obj.get("description", "")
-                if desc:
-                    return _html_to_text(desc)
-    return ""
+                return obj
+    return {}
+
+
+def _extract_jsonld_jobposting(raw_html: str) -> str:
+    """Return the description from a JSON-LD JobPosting block, if present."""
+    obj = _find_jsonld_jobposting(raw_html)
+    desc = obj.get("description", "") if obj else ""
+    return _html_to_text(desc) if desc else ""
 
 
 _BROWSER_HEADERS = {
@@ -210,6 +215,150 @@ async def fetch_full_description(url: str, max_chars: int = 8000) -> str:
         logger.debug("JSON-LD description fetch failed for %s: %s", url[:80], exc)
 
     return ""
+
+
+# ── User-pasted-URL scraping (build a full Job from an arbitrary listing) ──────
+
+def _meta_content(raw_html: str, prop: str) -> str:
+    """Return the content of a <meta property|name="prop"> tag, if present."""
+    for attr in ("property", "name"):
+        m = re.search(
+            rf'(?is)<meta[^>]+{attr}=["\']{re.escape(prop)}["\'][^>]*>',
+            raw_html,
+        )
+        if m:
+            c = re.search(r'(?is)content=["\'](.*?)["\']', m.group(0))
+            if c:
+                return _html.unescape(c.group(1)).strip()
+    return ""
+
+
+def _first_tag_text(raw_html: str, tag: str) -> str:
+    m = re.search(rf"(?is)<{tag}[^>]*>(.*?)</{tag}>", raw_html)
+    return _html_to_text(m.group(1)) if m else ""
+
+
+def _jsonld_org_name(obj: dict) -> str:
+    org = obj.get("hiringOrganization")
+    if isinstance(org, dict):
+        return str(org.get("name", "")).strip()
+    if isinstance(org, str):
+        return org.strip()
+    return ""
+
+
+def _jsonld_location(obj: dict) -> str:
+    loc = obj.get("jobLocation")
+    if isinstance(loc, list):
+        loc = loc[0] if loc else {}
+    if isinstance(loc, dict):
+        addr = loc.get("address", loc)
+        if isinstance(addr, dict):
+            parts = [
+                addr.get("addressLocality", ""),
+                addr.get("addressRegion", ""),
+                addr.get("addressCountry", "")
+                    if isinstance(addr.get("addressCountry"), str)
+                    else (addr.get("addressCountry") or {}).get("name", ""),
+            ]
+            return ", ".join(p for p in parts if p)
+    if obj.get("jobLocationType") == "TELECOMMUTE":
+        return "Remote"
+    return ""
+
+
+def _jsonld_salary(obj: dict) -> tuple[float | None, float | None]:
+    base = obj.get("baseSalary")
+    if not isinstance(base, dict):
+        return None, None
+    value = base.get("value", base)
+    if not isinstance(value, dict):
+        return None, None
+
+    def _num(x):
+        try:
+            return float(x)
+        except (TypeError, ValueError):
+            return None
+
+    lo = _num(value.get("minValue")) or _num(value.get("value"))
+    hi = _num(value.get("maxValue")) or lo
+    return lo, hi
+
+
+async def scrape_job_from_url(url: str) -> dict:
+    """
+    Scrape an arbitrary job-posting URL into a full Job dict ready for analysis.
+
+    Reuses the ATS/JSON-LD description fetcher and adds structured-metadata
+    extraction (title, company, location, salary) from the page's JSON-LD
+    JobPosting block, falling back to OpenGraph / <title> / <h1> tags. Raises
+    ValueError if the page yields neither a usable title nor a description, so
+    the caller can surface a clear "couldn't read that listing" message.
+    """
+    import uuid
+    from urllib.parse import urlparse
+
+    if not url or not url.startswith("http"):
+        raise ValueError("Please paste a valid http(s) job-posting link.")
+
+    description = await fetch_full_description(url)
+
+    raw_html = ""
+    try:
+        async with httpx.AsyncClient(
+            headers=_BROWSER_HEADERS, follow_redirects=True, timeout=15.0,
+        ) as client:
+            resp = await client.get(url)
+            resp.raise_for_status()
+            raw_html = resp.text
+    except Exception as exc:
+        logger.debug("Page fetch failed for %s: %s", url[:80], exc)
+
+    posting = _find_jsonld_jobposting(raw_html) if raw_html else {}
+
+    title = str(posting.get("title", "")).strip()
+    company = _jsonld_org_name(posting)
+    location = _jsonld_location(posting)
+    salary_min, salary_max = _jsonld_salary(posting)
+
+    # Description fallback: JSON-LD object may carry it even when the ATS/standalone
+    # fetcher returned "" (e.g. it was < 200 chars there).
+    if not description and posting.get("description"):
+        description = _html_to_text(posting["description"])[:_DESC_MAX].strip()
+
+    # OpenGraph / HTML fallbacks for missing metadata.
+    if not title:
+        title = _meta_content(raw_html, "og:title") or _first_tag_text(raw_html, "h1")
+        if not title:
+            page_title = _first_tag_text(raw_html, "title")
+            title = re.split(r"\s+[|\-–—]\s+", page_title)[0].strip() if page_title else ""
+    if not company:
+        company = _meta_content(raw_html, "og:site_name")
+    if not company:
+        company = urlparse(url).netloc.replace("www.", "")
+
+    title = title.strip()
+    if not title and not description:
+        raise ValueError(
+            "Couldn't read that listing — try a direct job-posting link "
+            "(e.g. a Greenhouse, Lever, or a page with a standard job schema)."
+        )
+
+    job: dict = {
+        "id": uuid.uuid4().hex,
+        "job_id": uuid.uuid4().hex[:12],
+        "title": title or "Job posting",
+        "company": company or "Unknown",
+        "location": location,
+        "description": description,
+        "url": url,
+        "salary_min": salary_min,
+        "salary_max": salary_max,
+        "source": "user-url",
+    }
+    job["exposure_score"] = round(occupation_exposure(job["title"]), 3)
+    return job
 
 
 # ── Title filter (from career-ops/portals.yml) ────────────────────────────────

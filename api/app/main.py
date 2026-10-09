@@ -105,6 +105,45 @@ async def update_persona(
     return {"message": "Persona updated"}
 
 
+@app.get("/persona/export")
+async def export_persona(
+    current_user: Annotated[auth.User, Depends(auth.get_current_user)],
+    format: str = Query("json", pattern="^(json|md|pdf)$"),
+):
+    """Download the user's persona twin as JSON, Markdown, or a formatted CV PDF."""
+    from fastapi.responses import JSONResponse, Response
+    from .persona_export import persona_to_markdown
+    from .agent import _persona_to_cvdoc
+
+    persona = tracker.get_user_persona(current_user.id)
+
+    if format == "json":
+        return JSONResponse(
+            content=persona,
+            headers={"Content-Disposition": 'attachment; filename="windrush_persona.json"'},
+        )
+
+    if format == "md":
+        return Response(
+            content=persona_to_markdown(persona),
+            media_type="text/markdown; charset=utf-8",
+            headers={"Content-Disposition": 'attachment; filename="windrush_persona.md"'},
+        )
+
+    # format == "pdf" — render the persona through the existing CV pipeline.
+    cvdoc = _persona_to_cvdoc(persona)
+    try:
+        doc_id = await doc_render.render_pdf("cv", cvdoc, "classic")
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"PDF render failed: {exc}")
+    path = pdf_generator.get_pdf_path(doc_id)
+    return FileResponse(
+        path,
+        media_type="application/pdf",
+        headers={"Content-Disposition": 'attachment; filename="windrush_persona.pdf"'},
+    )
+
+
 # ── Protected Endpoints ───────────────────────────────────────────────────────
 
 @app.get("/health")
@@ -667,6 +706,34 @@ async def _ensure_full_description(job: dict) -> dict:
         if db_id:
             jobs_db.update_description(str(db_id), full)
     return job
+
+
+@app.post("/jobs/from-url")
+async def job_from_url(
+    body: dict,
+    current_user: Annotated[auth.User, Depends(auth.get_current_user)],
+):
+    """
+    Scrape a user-pasted job-posting URL into a full Job object for analysis.
+
+    The job is returned (not persisted) — the frontend keeps it in sessionStorage
+    and runs the normal detail-page flow; it only enters the DB if the user Saves.
+    """
+    from .job_searcher import scrape_job_from_url
+
+    url = (body.get("url") or "").strip()
+    if not url.startswith("http"):
+        raise HTTPException(status_code=400, detail="Please paste a valid http(s) link.")
+    try:
+        job = await scrape_job_from_url(url)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Could not fetch that listing: {exc}")
+
+    job["level"] = _infer_level(job.get("title", ""))
+    job["tags"] = jobs_db._extract_tags(job)
+    return {"job": job}
 
 
 @app.post("/jobs/analyze")
