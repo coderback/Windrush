@@ -9,6 +9,7 @@ numpy>=1.26
 bcrypt
 passlib
 python-jose[cryptography]
+cryptography>=42      # Fernet encryption of stored job-site passwords (app/crypto.py)
 playwright>=1.45
 # Pinned: browser_agent.py targets the 0.11 CDP API (its own Chat* LLM wrappers, actor Page,
 # keep_alive sessions). Minor releases have broken this before — upgrade deliberately.

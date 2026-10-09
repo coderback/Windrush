@@ -9,6 +9,8 @@ import sqlite3
 import uuid
 from datetime import datetime, timezone
 
+from . import crypto
+
 logger = logging.getLogger("windrush.tracker")
 
 _DB_PATH: str = ""
@@ -76,11 +78,13 @@ def init_db(db_path: str = "") -> None:
             "ALTER TABLE users ADD COLUMN onboarding_complete INTEGER DEFAULT 0",
             "ALTER TABLE applications ADD COLUMN tailored_cv TEXT",
             "ALTER TABLE applications ADD COLUMN user_id TEXT",
+            "ALTER TABLE users ADD COLUMN job_password_enc TEXT",
         ]:
             try:
                 con.execute(stmt)
             except sqlite3.OperationalError:
                 pass
+        _migrate_plaintext_job_passwords(con)
         # Create index after migrations so user_id column is guaranteed to exist
         try:
             con.execute(_CREATE_INDEX)
@@ -137,7 +141,34 @@ def get_user_persona(user_id: str) -> dict:
     return {}
 
 
+def _strip_job_password(persona: dict) -> str:
+    """Remove core_info.job_password from a persona dict in place; return what was there."""
+    core = persona.get("core_info")
+    if isinstance(core, dict):
+        return core.pop("job_password", "") or ""
+    return ""
+
+
+def _migrate_plaintext_job_passwords(con: sqlite3.Connection) -> None:
+    """One-off: move job passwords that older versions stored in the persona JSON into job_password_enc."""
+    rows = con.execute("SELECT id, persona FROM users WHERE persona LIKE '%job_password%'").fetchall()
+    for user_id, raw in rows:
+        try:
+            persona = json.loads(raw or "{}")
+        except json.JSONDecodeError:
+            continue
+        plaintext = _strip_job_password(persona)
+        if plaintext:
+            con.execute("UPDATE users SET job_password_enc=? WHERE id=?", (crypto.encrypt(plaintext), user_id))
+        con.execute("UPDATE users SET persona=? WHERE id=?", (json.dumps(persona), user_id))
+    if rows:
+        logger.info("Moved job passwords for %d user(s) out of persona JSON into encrypted storage", len(rows))
+
+
 def update_user_persona(user_id: str, persona: dict) -> bool:
+    # The job-site password never lives in the persona JSON — see set_job_password().
+    persona = json.loads(json.dumps(persona))
+    _strip_job_password(persona)
     try:
         con = sqlite3.connect(_DB_PATH)
         con.execute("UPDATE users SET persona=? WHERE id=?", (json.dumps(persona), user_id))
@@ -147,6 +178,32 @@ def update_user_persona(user_id: str, persona: dict) -> bool:
     except Exception as exc:
         logger.error("update_user_persona failed: %s", exc)
         return False
+
+
+def set_job_password(user_id: str, plaintext: str) -> None:
+    """Store (encrypted) or clear ('' ) the user's job-site password."""
+    con = sqlite3.connect(_DB_PATH)
+    con.execute(
+        "UPDATE users SET job_password_enc=? WHERE id=?",
+        (crypto.encrypt(plaintext) if plaintext else None, user_id),
+    )
+    con.commit()
+    con.close()
+
+
+def get_job_password(user_id: str) -> str:
+    """Decrypted job-site password, or '' if none is stored. Only for handing to the browser agent."""
+    con = sqlite3.connect(_DB_PATH)
+    row = con.execute("SELECT job_password_enc FROM users WHERE id=?", (user_id,)).fetchone()
+    con.close()
+    return crypto.decrypt(row[0]) if row and row[0] else ""
+
+
+def has_job_password(user_id: str) -> bool:
+    con = sqlite3.connect(_DB_PATH)
+    row = con.execute("SELECT job_password_enc FROM users WHERE id=?", (user_id,)).fetchone()
+    con.close()
+    return bool(row and row[0])
 
 
 def get_onboarding_status(user_id: str) -> bool:

@@ -20,6 +20,7 @@ import json
 
 import httpx
 
+from . import net_guard
 from .risk_scorer import occupation_exposure
 
 logger = logging.getLogger("windrush.job_searcher")
@@ -203,9 +204,9 @@ async def fetch_full_description(url: str, max_chars: int = 8000) -> str:
 
     try:
         async with httpx.AsyncClient(
-            headers=_BROWSER_HEADERS, follow_redirects=True, timeout=15.0,
+            headers=_BROWSER_HEADERS, timeout=15.0,
         ) as client:
-            resp = await client.get(url)
+            resp = await net_guard.safe_get(client, url)  # user-influenced URL: no internal hosts
             resp.raise_for_status()
             raw_html = resp.text
         jd = _extract_jsonld_jobposting(raw_html)
@@ -301,15 +302,17 @@ async def scrape_job_from_url(url: str) -> dict:
 
     if not url or not url.startswith("http"):
         raise ValueError("Please paste a valid http(s) job-posting link.")
+    # Fail loudly (400) rather than as a generic "couldn't read" — UnsafeURLError is a ValueError.
+    await net_guard.assert_public_url(url)
 
     description = await fetch_full_description(url)
 
     raw_html = ""
     try:
         async with httpx.AsyncClient(
-            headers=_BROWSER_HEADERS, follow_redirects=True, timeout=15.0,
+            headers=_BROWSER_HEADERS, timeout=15.0,
         ) as client:
-            resp = await client.get(url)
+            resp = await net_guard.safe_get(client, url)  # user-influenced URL: no internal hosts
             resp.raise_for_status()
             raw_html = resp.text
     except Exception as exc:

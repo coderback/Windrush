@@ -157,16 +157,43 @@ def sanitise_tool_input(tool_name: str, tool_input: dict) -> dict:
             raise GuardrailViolation("url_validation", "Job URL must begin with http:// or https://")
         _record(GuardrailEvent(time.time(), tool_name, "url_validation", False))
 
-    # Strip credential fields from any tool input (defensive belt-and-braces)
-    for field_name in list(cleaned.keys()):
-        if field_name in CREDENTIAL_FIELD_NAMES:
-            _record(GuardrailEvent(
-                time.time(), tool_name, "credential_strip", True,
-                detail=f"Stripped credential field '{field_name}' from {tool_name} input",
-            ))
-            del cleaned[field_name]
+    # Strip credential fields at any depth (e.g. persona.core_info.job_password)
+    cleaned, stripped = _replace_credentials(cleaned, drop=True)
+    for path in stripped:
+        _record(GuardrailEvent(
+            time.time(), tool_name, "credential_strip", True,
+            detail=f"Stripped credential field '{path}' from {tool_name} input",
+        ))
 
     return cleaned
+
+
+def _replace_credentials(v: Any, drop: bool, path: str = "") -> tuple[Any, list[str]]:
+    """
+    Recursively drop (drop=True) or mask as '***' (drop=False) every dict key in
+    CREDENTIAL_FIELD_NAMES. Returns (new_value, dotted paths of the keys touched).
+    """
+    hits: list[str] = []
+    if isinstance(v, dict):
+        out = {}
+        for k, val in v.items():
+            key_path = f"{path}.{k}" if path else str(k)
+            if k in CREDENTIAL_FIELD_NAMES:
+                hits.append(key_path)
+                if not drop:
+                    out[k] = "***"
+                continue
+            out[k], sub = _replace_credentials(val, drop, key_path)
+            hits.extend(sub)
+        return out, hits
+    if isinstance(v, list):
+        items = []
+        for i, item in enumerate(v):
+            new, sub = _replace_credentials(item, drop, f"{path}[{i}]")
+            items.append(new)
+            hits.extend(sub)
+        return items, hits
+    return v, hits
 
 
 def _redact_value(v: Any) -> Any:
@@ -222,12 +249,8 @@ def redact_credentials_from_input(tool_name: str, tool_input: dict) -> tuple[dic
     Return a copy of tool_input with credential values replaced by '***'.
     Safe for SSE streaming. The original tool_input is still used for execution.
     """
-    cleaned = dict(tool_input)
-    fired = False
-    for field_name in CREDENTIAL_FIELD_NAMES:
-        if field_name in cleaned:
-            cleaned[field_name] = "***"
-            fired = True
+    cleaned, masked = _replace_credentials(tool_input, drop=False)
+    fired = bool(masked)
     if fired:
         _record(GuardrailEvent(
             time.time(), tool_name, "credential_sse_mask", True,

@@ -21,6 +21,7 @@ from . import auth
 from . import pdf_generator
 from . import doc_render
 from . import jobs_db
+from . import net_guard
 from .models import Persona
 
 
@@ -88,10 +89,17 @@ async def login(form_data: Annotated[OAuth2PasswordRequestForm, Depends()]):
 
 # ── Persona Endpoints ─────────────────────────────────────────────────────────
 
+# The job-site password is stored encrypted outside the persona and never sent back to the
+# browser. GET returns this placeholder when one is saved; PUT treats it as "keep as-is",
+# '' as "clear", and anything else as a new password.
+JOB_PASSWORD_MASK = "••••••••"
+
+
 @app.get("/persona", response_model=Persona)
 async def get_persona(current_user: Annotated[auth.User, Depends(auth.get_current_user)]):
-    data = tracker.get_user_persona(current_user.id)
-    return Persona(**data)
+    persona = Persona(**tracker.get_user_persona(current_user.id))
+    persona.core_info.job_password = JOB_PASSWORD_MASK if tracker.has_job_password(current_user.id) else ""
+    return persona
 
 
 @app.put("/persona")
@@ -99,6 +107,10 @@ async def update_persona(
     persona: Persona,
     current_user: Annotated[auth.User, Depends(auth.get_current_user)],
 ):
+    password = persona.core_info.job_password
+    if password != JOB_PASSWORD_MASK:
+        tracker.set_job_password(current_user.id, password)
+    persona.core_info.job_password = ""
     ok = tracker.update_user_persona(current_user.id, persona.model_dump())
     if not ok:
         raise HTTPException(status_code=500, detail="Failed to update persona")
@@ -343,11 +355,18 @@ async def apply(
     except json.JSONDecodeError:
         gaps = []
 
+    # The browser agent navigates here from inside our network — refuse internal targets.
+    if job_url:
+        try:
+            await net_guard.assert_public_url(job_url)
+        except net_guard.UnsafeURLError as exc:
+            raise HTTPException(status_code=400, detail=f"Job URL not allowed: {exc}")
+
     # Fall back to persona credentials if not provided in form
     persona = tracker.get_user_persona(current_user.id)
     core = persona.get("core_info", {})
     effective_email = job_email or core.get("job_email", "")
-    effective_password = job_password or core.get("job_password", "")
+    effective_password = job_password or tracker.get_job_password(current_user.id)
 
     # Tailored CV PDF takes precedence over original upload if the user chose it
     if cv_doc_id:

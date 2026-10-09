@@ -29,6 +29,18 @@ VIEWPORT = {"width": 1280, "height": 800}
 _MAX_FILL_STEPS = 40
 _MAX_SUBMIT_STEPS = 4
 
+# Navigation the agent's browser must never reach: it runs inside the api container, next to
+# the internal services. Raw-IP URLs are blocked separately (BrowserProfile.block_ip_addresses).
+# 'http*://' because browser-use patterns without a scheme only match https.
+_BLOCK_IP_ADDRESSES = True
+_PROHIBITED_HOSTS = [
+    f"http*://{h}" for h in (
+        "localhost", "*.localhost", "host.docker.internal", "metadata.google.internal",
+        # docker-compose service names (see docker-compose.yml)
+        "api", "frontend", "nginx", "ollama", "jobs-mcp", "civic-guardrails",
+    )
+]
+
 # How long the review / takeover phase waits for the user's next command. Must stay under
 # nginx's proxy_read_timeout (600s) for /api/apply, which sees no bytes while we wait.
 _INPUT_TIMEOUT_S = 300
@@ -269,7 +281,10 @@ def _build_task(job_url: str, persona: dict, cover_letter: str,
                 job_email: str, job_password: str, cv_path: str) -> str:
     lines = []
     if job_email:
-        lines.append(f"If asked to log in, use: email={job_email}, password={job_password}")
+        # The real password is never in the prompt: browser-use substitutes the placeholder at
+        # input time (Agent sensitive_data, scoped to the job site — see _credential_scope).
+        password_hint = " password=<secret>job_password</secret>" if job_password else ""
+        lines.append(f"If asked to log in, use: email={job_email}{password_hint}")
     if cv_path:
         lines.append(f"If asked to upload a CV/resume, upload the file at: {cv_path}")
 
@@ -418,7 +433,6 @@ def _build_task(job_url: str, persona: dict, cover_letter: str,
         "call done with success=true, summarising what you filled and anything you were unsure about. If you cannot "
         "fill the form (blocked, missing information, page errors), call done with success=false and say why."
     )
-
     return task
 
 
@@ -429,6 +443,40 @@ _SUBMIT_TASK = (
     "call done with success=true only if it confirms the application was received/submitted; otherwise call done "
     "with success=false and quote any error or validation message shown."
 )
+
+
+def _browser_profile() -> "BrowserProfile":
+    return BrowserProfile(
+        headless=True,
+        keep_alive=True,  # keep the browser after agent.run() for review / takeover / submit
+        viewport=VIEWPORT,
+        device_scale_factor=1,
+        block_ip_addresses=_BLOCK_IP_ADDRESSES,
+        prohibited_domains=_PROHIBITED_HOSTS,
+        enable_default_extensions=False,
+        args=[
+            "--no-sandbox",
+            "--disable-dev-shm-usage",
+            "--disable-blink-features=AutomationControlled",
+            "--disable-extensions",
+            # Hardware / performance
+            "--disable-gpu",
+            "--js-flags=--max-old-space-size=512",
+        ],
+    )
+
+
+def _credential_scope(job_url: str) -> str | None:
+    """
+    browser-use domain pattern the job-site password may be typed into: the job URL's host and
+    its subdomains, HTTPS only. A login on a different domain (e.g. an external ATS) won't get
+    the secret — the agent hands over and the user types it — which is the point: a
+    prompt-injected page elsewhere can't get it typed into an attacker's form.
+    """
+    from urllib.parse import urlparse
+    host = (urlparse(job_url).hostname or "").lower()
+    host = host.removeprefix("www.")
+    return f"https://*.{host}" if host else None
 
 
 async def _submit_with_agent(llm, browser_session) -> tuple[bool, str]:
@@ -474,23 +522,7 @@ async def apply_with_browser(
     yield {"action": "Browser agent starting…", "screenshot": None, "blocked": False, "reason": None, "done": False}
 
     llm = _make_browser_llm()
-    browser_session = BrowserSession(browser_profile=BrowserProfile(
-        headless=True,
-        keep_alive=True,  # keep the browser after agent.run() for review / takeover / submit
-        viewport=VIEWPORT,
-        device_scale_factor=1,
-        disable_security=True,
-        enable_default_extensions=False,
-        args=[
-            "--no-sandbox",
-            "--disable-dev-shm-usage",
-            "--disable-blink-features=AutomationControlled",
-            "--disable-extensions",
-            # Hardware / performance
-            "--disable-gpu",
-            "--js-flags=--max-old-space-size=512",
-        ],
-    ))
+    browser_session = BrowserSession(browser_profile=_browser_profile())
 
     step_queue: asyncio.Queue = asyncio.Queue()
 
@@ -509,6 +541,9 @@ async def apply_with_browser(
             "done": False,
         })
 
+    scope = _credential_scope(job_url)
+    sensitive_data = {scope: {"job_password": job_password}} if (job_password and scope) else None
+
     agent_task: asyncio.Task | None = None
     screencast_task: asyncio.Task | None = None
     try:
@@ -519,6 +554,15 @@ async def apply_with_browser(
             register_new_step_callback=on_step,
             use_vision=False,
             available_file_paths=[cv_path] if cv_path else [],
+            sensitive_data=sensitive_data,
+            # The judge LLM call grades the run from the RAW step history, which browser-use does not
+            # redact — e.g. an evaluate() that reads the form back carries the typed password. We
+            # rely on the agent's own is_successful(), so the judge only costs a call and leaks.
+            use_judge=False,
+            # Open the job page before step 1. browser-use's own directly_open_url guesses the URL
+            # from the task text and gives up when it sees more than one URL-like string — which a
+            # persona's LinkedIn/GitHub links or a cover letter mentioning "ASP.NET" always trigger.
+            initial_actions=[{"navigate": {"url": job_url, "new_tab": False}}],
         )
         agent_task = asyncio.create_task(agent.run(max_steps=_MAX_FILL_STEPS))
         if frame_queue is not None:

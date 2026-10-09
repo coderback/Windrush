@@ -437,6 +437,30 @@ def _recency_key(entry: dict) -> tuple[int, int]:
     return (year, month)
 
 
+# core_info fields an LLM may see. Everything else — credentials, DOB, email, phone, postal
+# address — is identity/contact data the writing and scoring tasks don't need; documents get
+# contact details from the persona directly, never from the model.
+_LLM_CORE_FIELDS = (
+    "first_name", "last_name", "preferred_name", "city", "country",
+    "linkedin", "github", "portfolio", "website",
+    "visa_status", "visa_type", "right_to_work_uk", "require_sponsorship", "security_clearance",
+)
+
+
+def _llm_persona(persona: dict) -> dict:
+    """
+    The persona as sent to third-party LLMs: an allowlist of core_info, no diversity / equal-
+    opportunities data, and no salary figure. Use this for every prompt that embeds the persona.
+    """
+    core = persona.get("core_info", {}) or {}
+    slim = {k: v for k, v in persona.items() if k not in ("core_info", "diversity", "screening")}
+    slim["core_info"] = {k: core[k] for k in _LLM_CORE_FIELDS if k in core}
+    screening = {k: v for k, v in (persona.get("screening") or {}).items() if k != "salary_canonical"}
+    if screening:
+        slim["screening"] = screening
+    return slim
+
+
 def _cert_date(raw: str) -> str:
     """Render the profile's <input type="month"> value ('YYYY-MM') as MM/YYYY; pass anything else through."""
     m = re.fullmatch(r"\s*((?:19|20)\d{2})-(0[1-9]|1[0-2])\s*", raw or "")
@@ -961,7 +985,7 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
                 "Output ONLY the JSON, no markdown."
             ),
             user=(
-                f"Candidate Persona: {json.dumps(persona)}\n\n"
+                f"Candidate Persona: {json.dumps(_llm_persona(persona))}\n\n"
                 f"Jobs to Analyse: {json.dumps(jobs[:5])}"
             ),
             max_tokens=2048,
@@ -1068,7 +1092,7 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
         data = await _llm_json(
             system=system,
             user=(
-                f"CANDIDATE PERSONA (JSON): {json.dumps(persona)}\n\n"
+                f"CANDIDATE PERSONA (JSON): {json.dumps(_llm_persona(persona))}\n\n"
                 f"JOB: {job.get('title')} at {job.get('company')}\n"
                 f"DESCRIPTION: {job.get('description', '')[:2500]}"
                 + (f"\n\nMOST DOMAIN-RELEVANT PROJECTS for this role (use the best fit as your main 'Why me' "
@@ -1213,7 +1237,9 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
         # Feed the model the persona twin's FULL project data (problem statement,
         # quantified outcomes and technologies) instead of the thin 2-sentence
         # projection, so it can both SELECT by relevance and DESCRIBE with real metrics.
-        llm_cv = {**base_cv, "projects": _rank_projects_by_relevance(job, _persona_projects_for_llm(persona))}
+        # Contact details are restored from base_cv after generation, so the model never needs them.
+        llm_cv = {**base_cv, "contact": {},
+                  "projects": _rank_projects_by_relevance(job, _persona_projects_for_llm(persona))}
         level = _seniority(persona)
         if level == "junior":
             level_guidance = (
@@ -1274,7 +1300,7 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
                 "Leave 'headline' EMPTY — do not add a title line or echo the target job's role under the "
                 "candidate's name. "
                 "Use ONLY facts present in the provided candidate data — do NOT invent employers, dates, "
-                "metrics or skills. Keep every contact field exactly as given."
+                "metrics or skills. Leave 'contact' empty — it is filled in separately."
             ),
             user=(
                 f"TARGET JOB: {job.get('title','')} at {job.get('company','')}\n"
@@ -1381,7 +1407,7 @@ def _sse(event_type: str, data: dict) -> str:
 async def run_pipeline(user_id: str, cv_text: str, location: str = "London") -> AsyncGenerator[str, None]:
     """Yields SSE-formatted strings for each agent step."""
     persona_data = tracker.get_user_persona(user_id)
-    persona_str = json.dumps(persona_data, indent=2)
+    persona_str = json.dumps(_llm_persona(persona_data), indent=2)
 
     messages: list[dict] = [
         {
