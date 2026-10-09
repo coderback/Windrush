@@ -1,58 +1,57 @@
 # Windrush
 
-AI career advisor that analyses CVs, scores AI automation-exposure risk, finds matching jobs, generates tailored CVs and cover letters, and autonomously submits applications via browser automation.
+AI career advisor that analyses CVs, scores AI automation-exposure risk, finds matching jobs, generates tailored CVs and cover letters, and fills in job applications with a browser agent — which you review before anything is sent.
 
-Built with open/cloud LLMs served through an OpenAI-compatible client (Groq or local Ollama), [browser-use](https://github.com/browser-use/browser-use), Next.js, and FastAPI.
+Built with FastAPI, Next.js, [browser-use](https://github.com/browser-use/browser-use), and a choice of LLM backend: Anthropic Claude, Groq, or a local Ollama model.
 
 ---
 
 ## What it does
 
-1. **Accounts & Persona** — sign up, then build a rich persona (contact details, preferences, skills, work history, education, projects, certifications, screening answers, behavioural stories).
-2. **Upload a CV (PDF)** — parsed into structured data and merged into your persona.
+1. **Accounts & Persona** — sign up, then build a rich persona (contact details, preferences, skills, work history, education, projects, certifications, screening answers, behavioural stories, custom directives).
+2. **Upload a CV (PDF)** — parsed into structured data and merged into your persona; the PDF is kept so the browser agent can attach it.
 3. **AI Exposure Risk** — scores each skill and job title against the Anthropic Economic Index / O\*NET task-penetration data (~18 000 occupational tasks), with LLM-generated reasoning.
-4. **Job Feed** — discovers jobs across multiple sources, caches them locally, and ranks them by dense-vector semantic similarity to your persona and search intent.
-5. **Per-job analysis** — on demand, scores fit (LLM semantic match) and AI risk for a single role.
-6. **Tailored CV + Cover Letter** — generates structured, ATS-aware documents with a live in-app preview and PDF export (HTML/CSS → WeasyPrint).
-7. **Browser Application** — autonomously fills and submits the application form with a headless Chrome agent; falls back to interactive user control if the agent gets stuck, with a review step before submit.
-8. **Skill Roadmap** — generates 6 AI-resilient skill-development recommendations tailored to your industry and target role.
-9. **Application Tracker** — persists every application through a status lifecycle (Saved → Pending Review → Evaluated → Applied → Responded → Interview → Offer → Rejected/Discarded).
+4. **Job Feed** — searches a local job store with real filters (search terms, role/domain tags, level, location, remote) and ranks results by semantic similarity to your persona. When results are thin, live discovery across job boards runs in the background and the feed fills in as it finishes.
+5. **Paste any job link** — scrape an arbitrary listing into the same analysis flow.
+6. **Per-job analysis** — fit score (LLM semantic match) and AI risk for a single role.
+7. **Tailored CV + Cover Letter** — structured, ATS-aware documents with a live in-app preview and PDF export (HTML/CSS → WeasyPrint).
+8. **Browser Application** — a headless Chrome agent fills the application form and **stops before the final submit**. You review it in a live view (and can take over with clicks/typing), then `submit`, `done` (you submitted it yourself) or `skip`.
+9. **Skill Roadmap** — 6 AI-resilient skill-development recommendations for your industry and target role.
+10. **Application Tracker** — every application through a status lifecycle (Saved → Pending Review → Evaluated → Applied → Responded → Interview → Offer → Rejected / Discarded).
 
 ---
 
 ## Architecture
 
-Six Docker services:
+Four Docker services:
 
 | Service | Stack | Port | Role |
 |---|---|---|---|
-| `nginx` | nginx:alpine | 80 | Reverse proxy; disables SSE buffering |
+| `nginx` | nginx:alpine | 80 | Reverse proxy; disables buffering for SSE routes |
 | `frontend` | Next.js 14, React 18, TypeScript, Tailwind | 3000 | UI |
-| `api` | Python 3.13, FastAPI, OpenAI-compat client, Playwright, WeasyPrint | 8000 | Agent pipeline + browser automation + documents |
-| `jobs-mcp` | Python, FastMCP | 8001 | MCP server wrapping the Adzuna Jobs API |
-| `civic-guardrails` | Node.js, `@civic/passthrough-mcp-server` | 8002 | MCP proxy: rate-limiting, injection detection, PII scrubbing, audit logging |
-| `ollama` | ollama/ollama | 11434 | Local LLM inference + embeddings (`OLLAMA_KEEP_ALIVE=24h`) |
+| `api` | Python 3.13, FastAPI, browser-use, WeasyPrint | 8000 | LLM features, job search, documents, browser automation |
+| `ollama` | ollama/ollama | 11434 | Embeddings for the job feed (+ optional local LLM) |
 
-Only `nginx` is published to the host (port 80); every other service is reached through it. The `ollama` service has an NVIDIA GPU reservation enabled in `docker-compose.yml` — remove it if you don't have a GPU.
+Only `nginx` is published to the host (port 80). The `ollama` service has an NVIDIA GPU reservation in `docker-compose.yml` — remove it if you don't have a GPU.
 
 ---
 
 ## LLM Backend
 
-The API talks to LLMs through the OpenAI-compatible `AsyncOpenAI` client — there is **no Anthropic SDK**. The backend is selected with the `LLM_BACKEND` env var:
+Selected with `LLM_BACKEND`:
 
-| `LLM_BACKEND` | Agent / tool model | Browser-agent model | Notes |
+| `LLM_BACKEND` | Text features (CV parse, fit, cover letter, tailored CV, roadmap) | Browser agent | Needs |
 |---|---|---|---|
-| `groq` (compose default) | `meta-llama/llama-4-scout-17b-16e-instruct` | `llama-3.3-70b-versatile` | Requires `GROQ_API_KEY` |
-| `ollama` | `${OLLAMA_MODEL}` (default `qwen3.5:4b`) | `${OLLAMA_MODEL}` | Fully local; no API key |
+| `claude` | `ANTHROPIC_MODEL` (default `claude-sonnet-4-6`) via the `anthropic` SDK | same model via browser-use's `ChatAnthropic` | `ANTHROPIC_API_KEY` |
+| `groq` (compose default) | `GROQ_MODEL` (default `meta-llama/llama-4-scout-17b-16e-instruct`) | same model via browser-use's `ChatGroq` | `GROQ_API_KEY` |
+| `ollama` | `OLLAMA_MODEL` (default `qwen3.5:4b`) | same model via browser-use's `ChatOllama` | local resources |
 
-Embeddings for the semantic job feed always come from Ollama (`nomic-embed-text`), regardless of backend.
+The Groq browser model must be one browser-use drives with JSON-schema output (see `JsonSchemaModels` in `browser_use/llm/groq/chat.py`). Embeddings always come from Ollama (`nomic-embed-text`), whatever the backend:
 
-> If you run with `LLM_BACKEND=ollama`, pull the models into the ollama volume first:
-> ```bash
-> docker compose exec ollama ollama pull qwen3.5:4b
-> docker compose exec ollama ollama pull nomic-embed-text
-> ```
+```bash
+docker compose exec ollama ollama pull nomic-embed-text
+docker compose exec ollama ollama pull qwen3.5:4b   # only for LLM_BACKEND=ollama
+```
 
 ---
 
@@ -60,39 +59,41 @@ Embeddings for the semantic job feed always come from Ollama (`nomic-embed-text`
 
 ### Prerequisites
 - Docker + Docker Compose
-- A Groq API key (for the default backend) **or** enough local resources to run Ollama models
-- Adzuna API credentials (free tier) — optional; multiple free job sources and fixture data are used otherwise
+- An API key for your chosen backend (or enough local resources for Ollama)
+- Optional: Adzuna and Brave Search keys for more job sources
 
-### 1. Clone and configure
+### 1. Configure
 
 ```bash
-git clone <repo>
-cd Windrush
 cp .env.example .env
-# Edit .env (see Environment Variables below)
+# Required secrets:
+openssl rand -hex 32                                                                  # → JWT_SECRET
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"  # → CREDENTIALS_KEY
 ```
+
+The API refuses to start without `JWT_SECRET` and `CREDENTIALS_KEY`.
 
 ### 2. Data files
 
-The economic index and task-penetration data must be present in `./data/` (bind-mounted read-only at `/data` in the api container):
+The economic index and task-penetration data must be present in `./data/` (bind-mounted read-only at `/data`):
 
 ```
 data/economic_index.json   — Anthropic Economic Index (O*NET occupation exposure scores)
 data/task_penetration.csv  — O*NET task-level AI penetration scores (~18 000 rows)
 ```
 
-### 3. Build and run
+### 3. Run
 
 ```bash
 docker compose up --build
 ```
 
-Open [http://localhost](http://localhost), create an account, and complete onboarding.
+Open [http://localhost](http://localhost), create an account, and complete onboarding. Optionally pre-fill the job store with `docker compose exec api python -m app.job_sync`.
 
-For local (non-Docker) dev:
+Local (non-Docker) dev:
 
 ```bash
-cd api && uvicorn app.main:app --reload      # needs a reachable Ollama/Groq + the data files
+cd api && uvicorn app.main:app --reload      # needs the env vars above, the data files and a reachable Ollama
 cd frontend && npm run dev
 ```
 
@@ -102,133 +103,98 @@ cd frontend && npm run dev
 
 | Variable | Required | Description |
 |---|---|---|
-| `LLM_BACKEND` | No | `groq` (default in compose) or `ollama` |
-| `GROQ_API_KEY` | If `LLM_BACKEND=groq` | Powers the agent pipeline and browser agent via Groq |
-| `OLLAMA_HOST` | No | Ollama base URL (default `http://ollama:11434` in compose) |
-| `OLLAMA_MODEL` | No | Local model id (default `qwen3.5:4b`) |
-| `EMBEDDING_MODEL` | No | Embedding model for the semantic feed (default `nomic-embed-text`) |
-| `JOB_EMAIL` | For applying | Email credential passed to the browser agent for job-site login |
-| `JOB_PASSWORD` | For applying | Password credential (masked in SSE output) |
-| `ADZUNA_APP_ID` | Optional | Adzuna API id (enables the Adzuna job source) |
-| `ADZUNA_API_KEY` | Optional | Adzuna API key |
-| `ECONOMIC_INDEX_PATH` | No | Path to the economic index JSON (default `/data/economic_index.json`) |
-| `TASK_PENETRATION_PATH` | No | Path to the task penetration CSV (default `/data/task_penetration.csv`) |
-| `JOBS_MCP_URL` | No | Guardrails MCP endpoint (default `http://civic-guardrails:8002/mcp`) |
-| `APP_DATA_PATH` | No | SQLite data dir (default `/appdata` in compose) |
+| `JWT_SECRET` | **Yes** | Signs login tokens |
+| `CREDENTIALS_KEY` | **Yes** | Fernet key encrypting stored job-site passwords. Changing it makes saved passwords unreadable (users re-enter them) |
+| `LLM_BACKEND` | No | `claude`, `groq` (compose default) or `ollama` |
+| `ANTHROPIC_API_KEY` / `ANTHROPIC_MODEL` | For `claude` | Key / model id |
+| `GROQ_API_KEY` / `GROQ_MODEL` | For `groq` | Key / model id |
+| `OLLAMA_HOST` / `OLLAMA_MODEL` / `EMBEDDING_MODEL` | No | Ollama URL (compose: `http://ollama:11434`), local model, embedding model |
+| `ADZUNA_APP_ID` / `ADZUNA_API_KEY` | Optional | Enables the Adzuna job source |
+| `BRAVE_SEARCH_API_KEY` | Optional | Enables the Brave `site:` search job source |
+| `ECONOMIC_INDEX_PATH` / `TASK_PENETRATION_PATH` | No | Data file paths (default `/data/...`) |
+| `APP_DATA_PATH` | No | SQLite DBs, PDFs and uploaded CVs (compose: `/appdata`) |
 
-`JOB_EMAIL` / `JOB_PASSWORD` can also be supplied per-application from the persona instead of globally.
+Job-site login details are set per user on the Profile page, not via env vars.
 
 ---
 
 ## API Endpoints
 
-All long-running endpoints use **Server-Sent Events (SSE)** so the frontend renders incrementally. Protected endpoints require a `Bearer` JWT from `/login`.
+Long-running endpoints stream **Server-Sent Events (SSE)**. Protected endpoints require a `Bearer` JWT from `/login`.
 
 | Method | Path | Description |
 |---|---|---|
 | `POST` | `/signup` | Create an account |
 | `POST` | `/login` | OAuth2 password form → JWT |
-| `GET` / `PUT` | `/persona` | Read / update the structured persona |
-| `POST` | `/upload` | Parse a CV PDF, merge into the persona, return a `cv_session_id` |
-| `POST` | `/stream` | Run the full agent pipeline → SSE events |
-| `POST` | `/apply` | Trigger the browser application → SSE browser events |
-| `POST` | `/browser-input/{session_id}` | Send click/type/scroll/submit commands to the live session |
-| `GET` | `/browser-stream/{session_id}` | SSE stream of live base64 JPEG frames (CDP screencast) |
-| `GET` | `/jobs` | Paginated, filtered, semantically-ranked job feed |
+| `GET` / `PUT` | `/persona` | Read / update the persona (the job-site password is write-only — GET returns a mask) |
+| `GET` | `/persona/export?format=json\|md\|pdf` | Download the persona |
+| `POST` | `/upload` | Parse a CV PDF and merge it into the persona |
+| `GET` | `/jobs` | Filtered, semantically-ranked job feed; `discovering: true` while background discovery runs |
+| `POST` | `/jobs/from-url` | Scrape a pasted job link into a job object |
 | `POST` | `/jobs/save` | Bookmark a job into the tracker as `Saved` |
 | `POST` | `/jobs/analyze` | SSE: fit + AI-risk analysis for one job |
-| `POST` | `/jobs/cover-letter` | SSE: generate a tailored cover letter |
-| `POST` | `/jobs/tailored-cv` | SSE: generate a tailored, structured CV |
+| `POST` | `/jobs/cover-letter` | SSE: tailored cover letter |
+| `POST` | `/jobs/tailored-cv` | SSE: tailored, structured CV |
+| `POST` | `/apply` | SSE: browser application (fill → review → submit) |
+| `POST` | `/browser-input/{session_id}` | Click/type/key/scroll/`submit`/`done`/`skip` into the live session |
+| `GET` | `/browser-stream/{session_id}` | SSE: live JPEG frames (CDP screencast) |
 | `GET` / `POST` | `/applications` | List / create tracked applications |
-| `PATCH` | `/applications/{id}/status` | Update an application's status + notes |
+| `PATCH` | `/applications/{id}/status` | Update one of *your* applications' status + notes |
 | `GET` / `POST` | `/onboarding/status`, `/onboarding/complete` | Onboarding state |
-| `POST` | `/score-skills` | Score AI risk for all persona skills |
-| `POST` | `/careers/roadmap` | SSE: generate a skill-development roadmap |
+| `POST` | `/score-skills` | AI risk for all persona skills |
+| `POST` | `/careers/roadmap` | SSE: skill-development roadmap |
 | `POST` | `/documents/pdf` | Render a structured doc (or legacy text) to PDF |
 | `POST` | `/documents/preview` | Render a structured doc to HTML for the live preview |
 | `GET` | `/documents/{doc_id}/download` | Download a generated PDF |
-| `GET` | `/guardrails/audit` | In-process guardrail audit log |
 | `GET` | `/health` | Liveness check |
-
----
-
-## Agent Pipeline
-
-The API drives the LLM in an agentic tool-use loop (`api/app/agent.py`). The system prompt enforces this order:
-
-```
-extract_cv_profile → score_ai_risk → search_jobs (+ optional web_search)
-  → score_job_fit → generate_skill_roadmap → generate_cover_letter
-```
-
-After the user explicitly approves, the apply phase runs the browser agent. The loop also:
-- nudges the model to continue if it stops early (max 2 nudges),
-- injects a correction if the model hallucinates a tool name.
-
-The full tool set is: `extract_cv_profile`, `score_ai_risk`, `search_jobs`, `web_search` (DuckDuckGo Lite), `score_job_fit`, `generate_cover_letter`, `generate_tailored_cv`, `generate_skill_roadmap`, `apply_to_job`, `lookup_economic_index`.
-
-**Dual-path tool data:**
-- SSE output → PII-redacted (emails, phones, postcodes, NI numbers) and credential-masked.
-- LLM context → unredacted (the agent needs real contact details to fill forms).
 
 ---
 
 ## AI Exposure Risk Scoring
 
-Scores are computed without any neural network — deterministic lookups against O\*NET data, with the LLM only adding human-readable reasoning afterwards.
-
-`score_ai_risk` resolves each skill/title in this order (`agent.py`, `risk_scorer.py`):
+Scores are deterministic lookups against O\*NET data; the LLM only adds human-readable reasoning afterwards. `score_ai_risk` resolves each skill/title in this order (`agent.py`, `risk_scorer.py`):
 
 1. **Curated exposure table** — a hand-tuned map of common tech skills and job titles.
-2. **Keyword task search** — average penetration of all O\*NET tasks containing the term (reliable for multi-word occupational phrases).
+2. **Keyword task search** — average penetration of all O\*NET tasks containing the term.
 3. **TF-IDF semantic match** — cosine similarity against ~1 350 non-zero-penetration task descriptions; requires all content words to appear.
 4. **O\*NET word-overlap** — stems and noise-strips the title, then matches the occupation with the most shared content words.
 5. **Default 0.5** — neutral when no data differentiates.
 
-Labels: **High ≥ 65 %**, **Medium 35–65 %**, **Low < 35 %**.
-
-**Job fit** (`score_job_fit`) is an LLM semantic analysis returning `fit_score` (0–100), `level_match` (`strong`/`ok`/`reach`), `matched_skills`, `skill_gaps`, and a one-line rationale. **Feed ordering** is done by dense-vector cosine similarity between an interest-weighted persona embedding and each job's embedding.
+Labels: **High ≥ 65 %**, **Medium 35–65 %**, **Low < 35 %**. **Job fit** (`score_job_fit`) is an LLM semantic analysis returning `fit_score` (0–100), `level_match` (`strong`/`ok`/`reach`), `matched_skills`, `skill_gaps` and a one-line rationale.
 
 ---
 
-## Job Discovery
+## Job Feed & Discovery
 
-`search_jobs` runs a multi-level cascade (`api/app/job_searcher.py`) and caches results in a local SQLite store (`jobs.db`):
-
-1. **Playwright scraping** of curated company career pages.
-2. **Public ATS JSON APIs** — Greenhouse, Ashby, Lever, Workable, SmartRecruiters (60+ companies).
-3. **Brave Search** with `site:` filters.
-4. **Adzuna** paid API (when credentials are set).
-
-If everything is empty, it falls back to `api/app/jobs_fixture.json`. The `/jobs` feed lazily triggers live discovery when local matches run low and persists new jobs (with embeddings) for next time.
+- **Search** (`jobs_db.get_jobs`) filters in SQL: free-text terms (the search box sends them as tags) must appear in title/company/description; role tags (`ml`, `backend`, …) match any; domain tags (`fintech`, `sponsorship`, …) must all match; location uses whole-word aliases (`uk`, `us`, …). Results are ranked by cosine similarity between your persona-plus-search embedding and each job's stored embedding (the 2 000 most recent matches are ranked), and jobs you've applied to or discarded are removed before pagination.
+- **Discovery** (`discovery.py` → `job_searcher.py`) runs when page 1 is thin — in a background **worker process**, so the API stays responsive — with one run per query/location at a time and a 30-minute cooldown. Sources: Playwright scraping of curated career pages; Greenhouse / Ashby / Lever / Workable / SmartRecruiters public APIs (60+ companies); Brave `site:` search; Adzuna. If every source is empty it shows bundled fixture jobs, which are never stored.
+- **Embeddings** are computed only for new jobs, in batched Ollama `/api/embed` calls.
 
 ---
 
 ## Browser Automation
 
-The browser agent (`api/app/browser_agent.py`) uses browser-use with the configured backend's model:
+`browser_agent.py` targets browser-use **0.11.13** (pinned — its API changes between minor versions):
 
-- **No vision** (`use_vision=False`) — the agent reasons from the DOM/accessibility tree, which is faster.
-- **CDP screencast** — live JPEG frames (quality 60, up to ~30 fps, max 1280×800) streamed to the frontend via a separate SSE endpoint, independent of the agent.
-- **File upload** — the CV PDF path is passed as `available_file_paths` so the agent can attach it directly.
-- **Rich task prompt** — persona contact details, skills, education, experience, projects, screening answers, behavioural stories, and dropdown/diversity defaults are compiled into the agent's task.
-- **Interactive fallback + review** — if the agent fails (or before final submit), the frontend becomes a clickable remote control; clicks/types/scrolls are dispatched via Playwright until the user types `submit`/`skip`.
+- **Fill, then review** — the agent is told never to click the final submit button. When it's done you get the live view; `submit` runs a short follow-up agent that clicks it and checks for a confirmation, `done` records that you submitted it yourself, `skip` abandons it. Only a confirmed submission marks the application *Applied*.
+- **Live view & takeover** — CDP screencast frames over a separate SSE endpoint; your clicks/typing/scrolling are replayed onto the page via CDP.
+- **Credentials** — your job-site password is passed as browser-use `sensitive_data`: the model only ever sees `<secret>job_password</secret>`, and the real value is typed only on the job site's own host over HTTPS. The browser-use "judge" call is disabled because it sees unredacted step history.
+- **Network limits** — the agent's browser can't open raw-IP URLs, `localhost` or the internal service hostnames.
+- **CV upload** — the tailored CV PDF if you generated one, otherwise your uploaded original.
 
 ---
 
-## Guardrails
+## Security & Privacy
 
-| Layer | Where | What |
-|---|---|---|
-| CV injection check | `guardrails.py` (pre-pipeline) | Regex patterns detect prompt injection in uploaded CV text; blocks before any LLM call |
-| Tool input sanitisation | `guardrails.py` | Validates search queries (injection/HTML), validates `apply_to_job` URLs (`http(s)://`), strips credential fields from all tool inputs |
-| PII redaction (SSE) | `guardrails.py` | Redacts emails, UK/intl phones, postcodes, NI numbers from SSE-streamed tool results/inputs |
-| Credential masking (SSE) | `guardrails.py` | Replaces password/token/secret/api_key values with `***` in SSE events |
-| MCP rate limiting | `civic-guardrails/server.js` | 30 requests/minute per session |
-| MCP search guardrail | `civic-guardrails/server.js` | Blocks injection patterns in `search_jobs` queries |
-| MCP PII scrub + audit | `civic-guardrails/server.js` | Scrubs emails/phones from job responses; logs all MCP requests/responses to `/logs/audit.jsonl` |
-
-Guardrail events surface in the UI (flashing shield badge) and via `GET /guardrails/audit`.
+| Control | Where |
+|---|---|
+| Required `JWT_SECRET` (no default) | `auth.py` |
+| Job-site password encrypted at rest, never returned to the browser | `crypto.py`, `tracker.py`, `main.py` |
+| Persona sent to LLMs is an allowlist — no credentials, DOB, contact details, diversity data or salary | `agent._llm_persona` |
+| Server-side fetches of user-influenced URLs only reach public IPs, re-checked on every redirect | `net_guard.py` |
+| Shared job descriptions can only be refreshed from the stored job's own URL | `main._ensure_full_description` |
+| Application updates scoped to the owning user | `tracker.update_status` |
+| Prompt-injection screening of uploaded CV text | `guardrails.py` |
 
 ---
 
@@ -238,20 +204,7 @@ Guardrail events surface in the UI (flashing shield badge) and via `GET /guardra
 
 **Pages:** `login`, `signup`, `onboarding`, `dashboard`, `jobs` (feed), `jobs/[id]` (analysis + documents + apply), `applications` (tracker), `careers` (risk + roadmap), `profile` (persona editor).
 
-**Key components:**
-
-| Component | Purpose |
-|---|---|
-| `AppShell` / `Sidebar` | Navigation shell (hidden on auth/onboarding pages) |
-| `RiskRadar` | AI exposure % per skill |
-| `JobCard` / `JobList` | Ranked job cards with badges |
-| `DocEditor` | Structured CV/cover-letter editor with live HTML preview |
-| `CoverLetter` | Cover-letter review + job-site credential entry |
-| `BrowserView` | Clickable live browser screencast; clicks sent to `/browser-input` |
-| `AgentLog` | Real-time tool calls, results, guardrail events, browser steps |
-| `SkillRoadmap` | Timeline of skill recommendations |
-| `GuardrailBadge` | Flashes when a guardrail fires |
-| `ApplicationTracker` | Status lifecycle management |
+**Components:** `AppShell` / `Sidebar` (navigation), `JobCard`, `DocEditor` (structured CV/cover-letter editor with live preview), `BrowserView` (clickable live screencast).
 
 ---
 
@@ -259,31 +212,28 @@ Guardrail events surface in the UI (flashing shield badge) and via `GET /guardra
 
 | File | Description |
 |---|---|
-| `data/economic_index.json` | ~3 000 O\*NET occupation codes → `overall_exposure` (0–1). Source: Anthropic Economic Index. |
-| `data/task_penetration.csv` | ~18 000 O\*NET task descriptions → `penetration` score (TF-IDF + keyword search). |
-| `api/app/jobs_fixture.json` | Mock job listings used as a last-resort fallback. |
-| `applications.db` (SQLite, `/appdata`) | `users` (bcrypt passwords, persona JSON, onboarding flag) + `applications`. |
-| `jobs.db` (SQLite, `/appdata`) | Cached jobs with semantic vectors; populated lazily or via `python -m app.job_sync`. |
+| `data/economic_index.json` | 756 O\*NET occupations → `overall_exposure` (0–1). Source: Anthropic Economic Index. |
+| `data/task_penetration.csv` | ~18 000 O\*NET task descriptions → `penetration` score. |
+| `api/app/jobs_fixture.json` | Mock job listings shown only when every live source is empty. |
+| `applications.db` (SQLite, `/appdata`) | `users` (bcrypt password hashes, persona JSON, encrypted job-site password, onboarding flag) + `applications`. |
+| `jobs.db` (SQLite, `/appdata`) | Cached jobs with semantic vectors; filled by discovery or `python -m app.job_sync`. |
+| `/appdata/pdfs`, `/appdata/cvs` | Generated PDFs; each user's uploaded CV. |
 
 ---
 
-## Models in Use
+## Development
 
-| Use case | `groq` backend | `ollama` backend |
-|---|---|---|
-| Agent loop + internal tools (CV parse, fit, cover letter, roadmap, tailored CV) | `meta-llama/llama-4-scout-17b-16e-instruct` | `qwen3.5:4b` (`OLLAMA_MODEL`) |
-| Browser automation | `llama-3.3-70b-versatile` | `qwen3.5:4b` (`OLLAMA_MODEL`) |
-| Embeddings (semantic feed) | `nomic-embed-text` (Ollama) | `nomic-embed-text` (Ollama) |
+**Tests** (`api/tests/`):
 
----
+```bash
+cd api
+pip install -r requirements.txt -r requirements-dev.txt
+pytest                      # fast suite — no network, LLM or browser
+pytest -m browser           # real headless Chromium (needs: playwright install chromium)
+```
 
-## Development Notes
+CI (`.github/workflows/ci.yml`) runs both, plus a frontend type-check and build.
 
-**Switching backend:** set `LLM_BACKEND=ollama` (and pull the models) or `LLM_BACKEND=groq` (and set `GROQ_API_KEY`).
+**Switching backend:** set `LLM_BACKEND` and the matching key (see above).
 
-**Adding a new tool:**
-1. Add the definition to `TOOLS` in `agent.py` (`name`, `description`, `input_schema`).
-2. Add a handler branch in `execute_tool()`.
-3. If the tool processes user data, add it to `_PII_REDACT_TOOLS` in `guardrails.py`.
-
-**Document templates:** structured CV/cover-letter rendering lives in `api/app/doc_render.py` + `api/app/templates/` (`registry.py`, `classic_cv.html`, `classic_letter.html`, `base.css`), rendered with Jinja2 → WeasyPrint (fpdf2 is the fallback).
+**Document templates:** `api/app/doc_render.py` + `api/app/templates/` (`registry.py`, `classic_cv.html`, `classic_letter.html`, `base.css`), rendered with Jinja2 → WeasyPrint (fpdf2 fallback).

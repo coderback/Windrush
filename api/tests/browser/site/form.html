@@ -1,0 +1,15 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Test Application Form</title></head>
+<body style="margin:0;font-family:sans-serif">
+<form id="f" onsubmit="event.preventDefault(); window.__submitted = true; document.body.innerHTML = '<h1 id=ok>Application received - thank you</h1>';">
+  <label style="position:absolute;left:20px;top:105px">Full name</label>
+  <input id="name" name="name" style="position:absolute;left:100px;top:100px;width:300px;height:30px">
+  <label style="position:absolute;left:20px;top:205px">Email</label>
+  <input id="email" name="email" type="email" style="position:absolute;left:100px;top:200px;width:300px;height:30px">
+  <label style="position:absolute;left:20px;top:250px">Password</label>
+  <input id="pw" name="password" type="password" style="position:absolute;left:100px;top:245px;width:300px;height:30px">
+  <a id="pop" href="/other.html" target="_blank" style="position:absolute;left:100px;top:300px;font-size:24px">Open company page</a>
+  <button id="submit" type="submit" style="position:absolute;left:100px;top:400px;width:200px;height:40px">Submit application</button>
+  <div style="height:3000px"></div>
+</form>
+</body></html>

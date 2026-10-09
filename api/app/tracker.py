@@ -238,8 +238,10 @@ def add_application(
         status = "Pending Review"
 
     app_id = uuid.uuid4().hex
+    # Always close: a failed INSERT leaves its implicit transaction open, and an unclosed
+    # connection would hold the DB write lock ("database is locked" for the next writer).
+    con = sqlite3.connect(_DB_PATH)
     try:
-        con = sqlite3.connect(_DB_PATH)
         con.execute("PRAGMA journal_mode=WAL")
         con.execute(
             """INSERT INTO applications
@@ -269,7 +271,6 @@ def add_application(
             ),
         )
         con.commit()
-        con.close()
         logger.info("Tracker: added application %s for user %s (%s @ %s)", app_id, user_id, job.get("title"), job.get("company"))
         return app_id
     except sqlite3.IntegrityError:
@@ -278,6 +279,8 @@ def add_application(
     except Exception as exc:
         logger.error("Tracker add_application failed: %s", exc)
         return None
+    finally:
+        con.close()
 
 
 def get_user_application_statuses(user_id: str) -> dict[tuple[str, str], str]:
@@ -322,7 +325,20 @@ def list_applications(user_id: str, status: str | None = None) -> list[dict]:
         return []
 
 
-def update_status(app_id: str, status: str, notes: str | None = None) -> bool:
+def find_application_id(user_id: str, company: str, job_title: str) -> str | None:
+    """Id of this user's existing application for (company, title) — the dedup key — if any."""
+    con = sqlite3.connect(_DB_PATH)
+    row = con.execute(
+        "SELECT id FROM applications WHERE user_id=? AND lower(company)=lower(?) AND lower(job_title)=lower(?)",
+        (user_id, company or "", job_title or ""),
+    ).fetchone()
+    con.close()
+    return row[0] if row else None
+
+
+def update_status(app_id: str, status: str, notes: str | None = None, *, user_id: str) -> bool:
+    """Update one of `user_id`'s applications. False if the status is invalid or no such row
+    belongs to that user (so ids from other accounts can't be modified)."""
     if status not in VALID_STATUSES:
         logger.warning("Tracker: invalid status %r", status)
         return False
@@ -336,11 +352,11 @@ def update_status(app_id: str, status: str, notes: str | None = None) -> bool:
         if notes is not None:
             updates.append("notes=?")
             params.append(notes)
-        params.append(app_id)
-        con.execute(f"UPDATE applications SET {', '.join(updates)} WHERE id=?", params)
+        params += [app_id, user_id]
+        cur = con.execute(f"UPDATE applications SET {', '.join(updates)} WHERE id=? AND user_id=?", params)
         con.commit()
         con.close()
-        return True
+        return cur.rowcount == 1
     except Exception as exc:
         logger.error("Tracker update_status failed: %s", exc)
         return False

@@ -33,16 +33,11 @@ services:
       - BRAVE_SEARCH_API_KEY=${BRAVE_SEARCH_API_KEY:-}
       - JWT_SECRET=${JWT_SECRET:?JWT_SECRET must be set in .env (generate with: openssl rand -hex 32)}
       - CREDENTIALS_KEY=${CREDENTIALS_KEY:?CREDENTIALS_KEY must be set in .env (see .env.example)}
-      - JOB_EMAIL=${JOB_EMAIL}
-      - JOB_PASSWORD=${JOB_PASSWORD}
-      - JOBS_MCP_URL=http://civic-guardrails:8002/mcp
       - APP_DATA_PATH=/appdata
     volumes:
       - economic_data:/data:ro
       - app_data:/appdata
     depends_on:
-      - jobs-mcp
-      - civic-guardrails
       - ollama
 
   ollama:
@@ -61,26 +56,6 @@ services:
               count: 1
               capabilities: [gpu]
 
-  jobs-mcp:
-    build: ./jobs-mcp
-    expose: ["8001"]
-    environment:
-      - ADZUNA_APP_ID=${ADZUNA_APP_ID}
-      - ADZUNA_API_KEY=${ADZUNA_API_KEY}
-      - FASTMCP_HOST=0.0.0.0
-      - FASTMCP_PORT=8001
-
-  civic-guardrails:
-    build: ./civic-guardrails
-    expose: ["8002"]
-    environment:
-      - UPSTREAM_MCP_URL=http://jobs-mcp:8001/mcp
-      - AUDIT_LOG_PATH=/logs/audit.jsonl
-      - PORT=8002
-    volumes:
-      - guardrail_logs:/logs
-    depends_on: [jobs-mcp]
-
 volumes:
   economic_data:
     driver: local
@@ -88,6 +63,5 @@ volumes:
       type: none
       o: bind
       device: ./data
-  guardrail_logs:
   app_data:
   ollama_data:

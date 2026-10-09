@@ -1,8 +1,9 @@
 import asyncio
 import json
 import logging
+import os
 import pathlib
-import tempfile
+import re
 import uuid
 from contextlib import aclosing, asynccontextmanager
 from typing import Optional, Annotated
@@ -13,8 +14,8 @@ from fastapi.responses import StreamingResponse
 from fastapi.security import OAuth2PasswordRequestForm
 
 from .cv_parser import extract_text
-from .agent import run_pipeline, run_apply, execute_tool
-from .guardrails import check_cv_for_injection, get_audit_log, GuardrailViolation
+from .agent import run_apply, execute_tool
+from .guardrails import check_cv_for_injection, GuardrailViolation
 from . import tracker
 from . import auth
 from . import pdf_generator
@@ -52,11 +53,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Session registries (now also keyed by user_id for better isolation)
+# Live browser-apply sessions
 _browser_queues: dict[str, asyncio.Queue] = {}   # session_id → instruction queue
 _browser_frames: dict[str, asyncio.Queue] = {}   # session_id → CDP screencast frame queue
-_cv_files: dict[str, str] = {}                   # cv_session_id → temp file path
-_cv_texts: dict[str, str] = {}                   # cv_session_id → extracted text
+
+
+def _original_cv_path(user_id: str) -> pathlib.Path:
+    """The user's most recently uploaded CV — one file per user, overwritten on re-upload."""
+    return pathlib.Path(os.environ.get("APP_DATA_PATH", "/tmp")) / "cvs" / f"{user_id}.pdf"
 
 
 # ── Auth Endpoints ────────────────────────────────────────────────────────────
@@ -164,17 +168,12 @@ async def health():
     return {"status": "ok"}
 
 
-@app.get("/guardrails/audit")
-async def guardrails_audit(current_user: Annotated[auth.User, Depends(auth.get_current_user)]):
-    return get_audit_log()
-
-
 @app.post("/upload")
 async def upload_cv(
     file: UploadFile = File(...),
     current_user: Annotated[auth.User, Depends(auth.get_current_user)] = None,
 ):
-    """Parse CV, merge into Persona, and return a cv_session_id for the pipeline."""
+    """Parse a CV PDF, merge what it contains into the Persona, and keep the PDF for applications."""
     pdf_bytes = await file.read()
     try:
         cv_text = extract_text(pdf_bytes)
@@ -187,7 +186,6 @@ async def upload_cv(
         raise HTTPException(status_code=422, detail=f"GUARDRAIL: {e.detail}")
 
     # Extract structured data from CV
-    from .agent import execute_tool
     cv_data = await execute_tool("extract_cv_profile", {"cv_text": cv_text})
 
     # Merge into existing Persona
@@ -277,48 +275,12 @@ async def upload_cv(
 
     tracker.update_user_persona(current_user.id, persona.model_dump())
 
-    cv_session_id = uuid.uuid4().hex
-    cv_path = pathlib.Path(tempfile.gettempdir()) / f"cv_{cv_session_id}.pdf"
-    cv_path.write_bytes(pdf_bytes)
-    _cv_files[cv_session_id] = str(cv_path)
-    _cv_texts[cv_session_id] = cv_text
+    # Keep the original PDF so the apply flow can upload it when no tailored CV is chosen.
+    cv_file = _original_cv_path(current_user.id)
+    cv_file.parent.mkdir(parents=True, exist_ok=True)
+    cv_file.write_bytes(pdf_bytes)
 
-    return {"cv_session_id": cv_session_id, "persona": persona}
-
-
-@app.post("/stream")
-async def pipeline_stream(
-    cv_session_id: str = Form(...),
-    location: str = Form(default="London"),
-    current_user: Annotated[auth.User, Depends(auth.get_current_user)] = None,
-):
-    cv_text = _cv_texts.get(cv_session_id)
-    if not cv_text:
-        raise HTTPException(status_code=404, detail="CV session not found or expired — please re-upload")
-
-    cv_path_str = _cv_files.get(cv_session_id, "")
-
-    async def pipeline_with_cv_session():
-        import time
-        try:
-            yield f"data: {json.dumps({'type': 'cv_session', 'cv_session_id': cv_session_id, 'timestamp': time.time()})}\n\n"
-            async for chunk in run_pipeline(current_user.id, cv_text, location):
-                yield chunk
-        finally:
-            if cv_path_str:
-                pathlib.Path(cv_path_str).unlink(missing_ok=True)
-            _cv_files.pop(cv_session_id, None)
-            _cv_texts.pop(cv_session_id, None)
-
-    return StreamingResponse(
-        pipeline_with_cv_session(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",
-            "Connection": "keep-alive",
-        },
-    )
+    return {"persona": persona}
 
 
 @app.post("/apply")
@@ -330,7 +292,6 @@ async def apply(
     skill_risks: str = Form(default="[]"),
     job_email: str = Form(default=""),
     job_password: str = Form(default=""),
-    cv_session_id: str = Form(default=""),
     tailored_cv: str = Form(default=""),
     cv_doc_id: str = Form(default=""),
     job_title: str = Form(default=""),
@@ -369,13 +330,13 @@ async def apply(
     effective_email = job_email or core.get("job_email", "")
     effective_password = job_password or tracker.get_job_password(current_user.id)
 
-    # Tailored CV PDF takes precedence over original upload if the user chose it
-    if cv_doc_id:
-        tailored_path = pdf_generator.get_pdf_path(cv_doc_id)
-        import os as _os2
-        cv_path = tailored_path if _os2.path.exists(tailored_path) else _cv_files.get(cv_session_id, "")
+    # Tailored CV PDF (if the user chose it) takes precedence over their uploaded original.
+    original_cv = _original_cv_path(current_user.id)
+    tailored_path = pdf_generator.get_pdf_path(cv_doc_id) if re.fullmatch(r"[a-f0-9]{32}", cv_doc_id) else ""
+    if tailored_path and os.path.exists(tailored_path):
+        cv_path = tailored_path
     else:
-        cv_path = _cv_files.get(cv_session_id, "")
+        cv_path = str(original_cv) if original_cv.exists() else ""
     session_id = str(uuid.uuid4())
 
     job_dict = {
@@ -394,7 +355,7 @@ async def apply(
     }
     app_id = tracker.add_application(
         current_user.id, job_dict, profile, cover_letter, score_data, tailored_cv=tailored_cv
-    )
+    ) or tracker.find_application_id(current_user.id, company, job_title)  # already saved/tracked
 
     q: asyncio.Queue = asyncio.Queue()
     fq: asyncio.Queue = asyncio.Queue(maxsize=8)
@@ -421,7 +382,7 @@ async def apply(
             _browser_queues.pop(session_id, None)
             _browser_frames.pop(session_id, None)
             if app_id and user_confirmed:
-                tracker.update_status(app_id, "Applied")
+                tracker.update_status(app_id, "Applied", user_id=current_user.id)
 
     return StreamingResponse(
         cleanup_gen(),
@@ -509,9 +470,11 @@ async def update_application_status(
 ):
     status = body.get("status", "")
     notes = body.get("notes")
-    ok = tracker.update_status(app_id, status, notes)
-    if not ok:
+    if status not in tracker.VALID_STATUSES:
         raise HTTPException(status_code=400, detail=f"Invalid status: {status!r}")
+    if not tracker.update_status(app_id, status, notes, user_id=current_user.id):
+        # Unknown id, or another user's application — indistinguishable to the caller by design.
+        raise HTTPException(status_code=404, detail="Application not found")
     return {"id": app_id, "status": status, "updated": True}
 
 

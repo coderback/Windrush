@@ -37,7 +37,7 @@ _PROHIBITED_HOSTS = [
     f"http*://{h}" for h in (
         "localhost", "*.localhost", "host.docker.internal", "metadata.google.internal",
         # docker-compose service names (see docker-compose.yml)
-        "api", "frontend", "nginx", "ollama", "jobs-mcp", "civic-guardrails",
+        "api", "frontend", "nginx", "ollama",
     )
 ]
 

@@ -58,7 +58,7 @@ export default function OnboardingPage() {
         const data = await res.json().catch(() => ({}));
         throw new Error((data as { detail?: string }).detail ?? "Upload failed");
       }
-      const { persona } = await res.json() as { cv_session_id: string; persona: Record<string, unknown> };
+      const { persona } = await res.json() as { persona: Record<string, unknown> };
       // Pre-fill persona step from extracted data
       if (persona) {
         setFullPersona(persona);
