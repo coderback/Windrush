@@ -46,12 +46,17 @@ export default function JobsPage() {
   const [linkLoading, setLinkLoading] = useState(false);
   const [linkError, setLinkError] = useState<string | null>(null);
 
+  // Live discovery runs server-side in the background when the feed is thin; while it does,
+  // re-poll page 1 quietly so new matches appear without a manual refresh.
+  const [discovering, setDiscovering] = useState(false);
+  const discoveryPolls = useRef(0);
+
   const observerRef = useRef<HTMLDivElement | null>(null);
 
   const fetchJobs = useCallback(
-    async (pageNum: number, append = false) => {
+    async (pageNum: number, append = false, silent = false) => {
       if (pageNum === 1) {
-        setLoading(true);
+        if (!silent) setLoading(true);
       } else {
         setLoadingMore(true);
       }
@@ -72,6 +77,7 @@ export default function JobsPage() {
         const data = await res.json();
         const incoming: Job[] = data.jobs ?? [];
         setHasMore(data.has_more ?? incoming.length === 20);
+        if (pageNum === 1) setDiscovering(!!data.discovering);
 
         if (append) {
           setJobs((prev) => [...prev, ...incoming]);
@@ -91,8 +97,20 @@ export default function JobsPage() {
   // Fetch when committed search params or filters change
   useEffect(() => {
     setPage(1);
+    discoveryPolls.current = 0;
     fetchJobs(1);
   }, [fetchJobs]);
+
+  // While discovery is running, refresh page 1 every 15s (up to ~2 min). Skipped once the user
+  // has scrolled past page 1 so a refresh can't wipe the pages they've loaded.
+  useEffect(() => {
+    if (!discovering || page !== 1 || discoveryPolls.current >= 8) return;
+    const t = setTimeout(() => {
+      discoveryPolls.current += 1;
+      fetchJobs(1, false, true);
+    }, 15000);
+    return () => clearTimeout(t);
+  }, [discovering, page, jobs, fetchJobs]);
 
   // Infinite scroll observer
   useEffect(() => {
@@ -363,15 +381,28 @@ export default function JobsPage() {
         </div>
       ) : jobs.length === 0 ? (
         <div className="text-center py-16 text-zinc-600">
-          <p className="text-sm">
-            No jobs found. Try adjusting your search or filters.
-          </p>
+          {discovering ? (
+            <p className="text-sm flex items-center justify-center gap-2">
+              <span className="w-4 h-4 border-2 border-zinc-700 border-t-teal-500 rounded-full animate-spin" />
+              Searching live job boards for matches — new roles will appear here shortly…
+            </p>
+          ) : (
+            <p className="text-sm">
+              No jobs found. Try adjusting your search or filters.
+            </p>
+          )}
         </div>
       ) : (
         <>
-          <p className="text-xs text-zinc-600 mb-4">
+          <p className="text-xs text-zinc-600 mb-4 flex items-center gap-2">
             {jobs.length} job{jobs.length !== 1 ? "s" : ""}
             {hasMore ? "+" : ""}
+            {discovering && (
+              <span className="flex items-center gap-1.5 text-zinc-500">
+                <span className="w-3 h-3 border-2 border-zinc-700 border-t-teal-500 rounded-full animate-spin" />
+                searching live job boards for more…
+              </span>
+            )}
           </p>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {jobs.map((job, i) => (

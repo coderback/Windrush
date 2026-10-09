@@ -7,6 +7,7 @@ import json
 import logging
 import re
 import time
+from collections import deque
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -75,7 +76,9 @@ class GuardrailEvent:
     detail: str = ""
 
 
-_audit_log: list[GuardrailEvent] = []
+# Most recent events only — an unbounded list grew by several entries per tool call forever.
+_AUDIT_LOG_MAX = 2000
+_audit_log: "deque[GuardrailEvent]" = deque(maxlen=_AUDIT_LOG_MAX)
 
 
 def _record(event: GuardrailEvent) -> None:

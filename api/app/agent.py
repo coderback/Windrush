@@ -11,6 +11,7 @@ from typing import AsyncGenerator
 import httpx
 from openai import AsyncOpenAI
 
+from . import http_client
 from . import tracker
 from .cv_parser import extract_text
 from .risk_scorer import lookup_onet, lookup_by_title, ECONOMIC_INDEX
@@ -815,7 +816,7 @@ async def _ddg_search(query: str, max_results: int = 15) -> list[dict]:
     Returns a list of {title, url, snippet} dicts.
     """
     try:
-        async with httpx.AsyncClient(
+        async with http_client.async_client(
             headers={
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
                 "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",

@@ -15,7 +15,6 @@ from fastapi.security import OAuth2PasswordRequestForm
 from .cv_parser import extract_text
 from .agent import run_pipeline, run_apply, execute_tool
 from .guardrails import check_cv_for_injection, get_audit_log, GuardrailViolation
-from .job_proxy import search_jobs
 from . import tracker
 from . import auth
 from . import pdf_generator
@@ -40,6 +39,8 @@ async def lifespan(app: FastAPI):
     jobs_db.init_db()
     pdf_generator.init_pdf_dir(data_dir)
     yield
+    from . import discovery
+    discovery.shutdown()
 
 
 app = FastAPI(title="Windrush API", lifespan=lifespan)
@@ -561,6 +562,16 @@ async def onboarding_complete(current_user: Annotated[auth.User, Depends(auth.ge
 # ── Job Feed ──────────────────────────────────────────────────────────────────
 
 from . import semantic
+from . import discovery
+
+# Live discovery kicks in (in the background) when page 1 has fewer matches than this.
+_THIN_FEED = 5
+# Request-path embedding budget: past this the feed falls back to recency ranking rather than
+# making the user wait on Ollama loading the model (background work still allows 600s).
+_FEED_EMBED_TIMEOUT_S = 20.0
+# Tracker statuses that hide a job from the feed.
+_HIDE_STATUSES = {"Applied", "Responded", "Interview", "Offer", "Rejected", "Discarded"}
+
 
 @app.get("/jobs")
 async def get_jobs(
@@ -574,118 +585,57 @@ async def get_jobs(
     limit: int = Query(default=20, ge=1, le=100),
     current_user: Annotated[auth.User, Depends(auth.get_current_user)] = None,
 ):
-    """Return job listings for the job feed with pagination and filtering."""
-    tag_list = [t.strip() for t in tags.split(",")] if tags else []
+    """
+    Job feed. Explicit filters (query, tags, category, level, location, remote) are applied in
+    SQL; the persona only *ranks* (semantic similarity) and supplies a default location. If page
+    1 comes back thin, live discovery starts in the background and `discovering` tells the
+    client to re-poll — the request itself never waits on scraping or embedding.
+    """
+    tag_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else []
 
-    # Always pull the persona to get preferences and for semantic search
     persona_data = tracker.get_user_persona(current_user.id)
-    
-    effective_query = query
-    effective_location = location
+    prefs = persona_data.get("preferences", {}) or {}
+    titles = prefs.get("target_titles", []) or []
+    locs = prefs.get("preferred_locations", []) or []
+    effective_location = location or (locs[0] if locs else "")
 
-    if not effective_query:
-        prefs = persona_data.get("preferences", {})
-        titles = prefs.get("target_titles", [])
-        # Join multiple target titles for a broader default search
-        effective_query = " ".join(titles) if titles else ""
-        
-        locs = prefs.get("preferred_locations", [])
-        if not effective_location:
-            effective_location = locs[0] if locs else ""
-
-    # Generate semantic vector that combines Persona + current search query/tags
-    # This "Interest-Weighted" vector ensures the AI prioritizes both who you are AND what you want.
+    # "Interest-weighted" ranking vector: who you are (persona) + what you're searching for now.
     persona_text = semantic.vectorize_persona(persona_data)
-    
-    # Merge explicit keywords and tags into a single semantic intent block
-    intent_parts = []
-    if query: intent_parts.append(query)
-    if tag_list: intent_parts.extend(tag_list)
-    
+    intent_parts = ([query] if query else []) + tag_list
     if intent_parts:
         intent_str = ", ".join(intent_parts)
-        # Boost the query by repeating it in the text
         persona_text = f"Current user interest: {intent_str}. Specific focus: {intent_str}. {persona_text}"
-    
-    persona_vector = await semantic.get_embedding(persona_text)
+    persona_vector = await semantic.get_embedding(persona_text, timeout=_FEED_EMBED_TIMEOUT_S)
 
-    # ── Clean Feed Logic ──
-    # Fetch user's active pipeline statuses to filter/badge the feed
     status_map = tracker.get_user_application_statuses(current_user.id)
-    # Statuses that trigger hiding from the feed
-    HIDE_STATUSES = {"Applied", "Responded", "Interview", "Offer", "Rejected", "Discarded"}
+    hidden = {key for key, status in status_map.items() if status in _HIDE_STATUSES}
 
-    def process_clean_feed(raw_jobs: list[dict]) -> list[dict]:
-        clean = []
-        for job in raw_jobs:
-            key = (job.get("company", "").lower(), job.get("title", "").lower())
-            status = status_map.get(key)
-            
-            if status in HIDE_STATUSES:
-                continue
-            
-            if status == "Saved":
-                job["tracker_status"] = "Saved"
-            elif status:
-                # Catch-all for other statuses (e.g. Evaluated, Pending Review)
-                job["tracker_status"] = status
-                
-            clean.append(job)
-        return clean
-
-    offset = (page - 1) * limit
-
-    # Query the local jobs database first
-    raw_jobs = jobs_db.get_jobs(
-        query=effective_query,
-        location=effective_location,
-        level=level,
-        category=category,
-        remote=remote,
-        tags=tag_list,
-        persona_vector=persona_vector,
-        limit=limit,
-        offset=offset,
+    jobs, has_more = await asyncio.to_thread(
+        jobs_db.get_jobs,
+        query=query, location=effective_location, level=level, category=category, remote=remote,
+        tags=tag_list, persona_vector=persona_vector, limit=limit, offset=(page - 1) * limit,
+        exclude=hidden,
     )
-    jobs = process_clean_feed(raw_jobs)
+    for job in jobs:
+        status = status_map.get(((job.get("company") or "").lower(), (job.get("title") or "").lower()))
+        if status:
+            job["tracker_status"] = status
 
-    # Proactive Infinite Discovery: If we don't have enough local matches for this 
-    # specific location/query, trigger a live discovery across external APIs.
-    if (not jobs or len(jobs) < 5):
-        # Use only the first title or the specific user query for live search
-        live_query = query if query else (titles[0] if persona_data.get("preferences", {}).get("target_titles") else "software engineer")
-        
-        # Don't trigger if the query is just a single character (e.g. typing)
-        if len(live_query) > 2:
-            live_jobs = await search_jobs(live_query, effective_location or "London")
-            if live_jobs:
-                # Persist them for future queries
-                for j in live_jobs:
-                    j["source"] = j.get("source", "live")
-                    j["level"] = _infer_level(j.get("title", ""))
-                jobs_db.add_jobs(live_jobs)
-                
-                # Re-query and re-filter
-                refreshed_raw = jobs_db.get_jobs(
-                    query=effective_query,
-                    location=effective_location,
-                    level=level,
-                    category=category,
-                    remote=remote,
-                    tags=tag_list,
-                    persona_vector=persona_vector,
-                    limit=limit,
-                    offset=offset,
-                )
-                jobs = process_clean_feed(refreshed_raw)
+    discovering = False
+    if page == 1 and len(jobs) < _THIN_FEED:
+        free_text = [t for t in tag_list if t.lower() not in jobs_db.ROLE_TAGS | jobs_db.DOMAIN_TAGS]
+        live_query = query or (free_text[0] if free_text else "") or (titles[0] if titles else "software engineer")
+        if len(live_query) > 2:  # don't fire on a stray character
+            discovering = discovery.ensure(live_query, effective_location or "London")
 
     return {
         "jobs": jobs,
-        "query": effective_query,
+        "query": query,
         "location": effective_location,
         "page": page,
         "limit": limit,
-        "has_more": len(jobs) == limit,
+        "has_more": has_more,
+        "discovering": discovering,
     }
 
 

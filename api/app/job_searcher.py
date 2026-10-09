@@ -20,6 +20,7 @@ import json
 
 import httpx
 
+from . import http_client
 from . import net_guard
 from .risk_scorer import occupation_exposure
 
@@ -54,6 +55,7 @@ _TITLE_SEP = re.compile(r"(.+?)(?:\s*[@|—–-]\s*|\s+at\s+)(.+?)$", re.I)
 def _load_fixture() -> list[dict]:
     jobs = json.loads(_FIXTURE_PATH.read_text())
     for job in jobs:
+        job["source"] = "fixture"  # mock data: shown as a fallback, never persisted (see discovery.py)
         if "exposure_score" not in job:
             job["exposure_score"] = round(occupation_exposure(job["title"]), 3)
     return jobs
@@ -155,7 +157,7 @@ async def _ats_full_description(url: str) -> str:
     host = parsed.netloc.lower()
     path = parsed.path
 
-    async with httpx.AsyncClient(follow_redirects=True, timeout=12.0) as client:
+    async with http_client.async_client(follow_redirects=True, timeout=12.0) as client:
         # Greenhouse — boards(-api).greenhouse.io/{slug}/jobs/{id}
         if "greenhouse.io" in host:
             m = re.search(r"/([^/]+)/jobs/(\d+)", path)
@@ -203,7 +205,7 @@ async def fetch_full_description(url: str, max_chars: int = 8000) -> str:
         logger.debug("ATS description fetch failed for %s: %s", url[:80], exc)
 
     try:
-        async with httpx.AsyncClient(
+        async with http_client.async_client(
             headers=_BROWSER_HEADERS, timeout=15.0,
         ) as client:
             resp = await net_guard.safe_get(client, url)  # user-influenced URL: no internal hosts
@@ -309,7 +311,7 @@ async def scrape_job_from_url(url: str) -> dict:
 
     raw_html = ""
     try:
-        async with httpx.AsyncClient(
+        async with http_client.async_client(
             headers=_BROWSER_HEADERS, timeout=15.0,
         ) as client:
             resp = await net_guard.safe_get(client, url)  # user-influenced URL: no internal hosts
@@ -708,36 +710,42 @@ async def _fetch_greenhouse(slug: str, company: str, keywords: list[str]) -> lis
     try:
         # content=true is required — without it the API omits the JD entirely.
         url = f"https://boards-api.greenhouse.io/v1/boards/{slug}/jobs?content=true"
-        async with httpx.AsyncClient(timeout=8.0) as client:
+        async with http_client.async_client(timeout=8.0) as client:
             resp = await client.get(url)
             resp.raise_for_status()
-            data = resp.json()
-        jobs = []
-        for item in data.get("jobs", []):
-            title = item.get("title", "")
-            if not _title_matches_query(title, keywords):
-                continue
-            location = item.get("location", {}).get("name", "")
-            jobs.append({
-                "job_id": f"gh-{item.get('id', '')}",
-                "title": title,
-                "company": company,
-                "location": location or "Remote",
-                "description": _html_to_text(item.get("content") or "")[:_DESC_MAX],
-                "url": item.get("absolute_url", ""),
-                "salary_min": None,
-                "salary_max": None,
-                "exposure_score": round(occupation_exposure(title), 3),
-            })
-        return jobs
+        # Big boards return every posting's full HTML (several MB); decoding + HTML-to-text +
+        # exposure scoring is ~1s of CPU, so do it off the event loop.
+        return await asyncio.to_thread(_greenhouse_jobs, resp.content, company, keywords)
     except Exception:
         return []
+
+
+def _greenhouse_jobs(raw: bytes, company: str, keywords: list[str]) -> list[dict]:
+    data = json.loads(raw)
+    jobs = []
+    for item in data.get("jobs", []):
+        title = item.get("title", "")
+        if not _title_matches_query(title, keywords):
+            continue
+        location = item.get("location", {}).get("name", "")
+        jobs.append({
+            "job_id": f"gh-{item.get('id', '')}",
+            "title": title,
+            "company": company,
+            "location": location or "Remote",
+            "description": _html_to_text(item.get("content") or "")[:_DESC_MAX],
+            "url": item.get("absolute_url", ""),
+            "salary_min": None,
+            "salary_max": None,
+            "exposure_score": round(occupation_exposure(title), 3),
+        })
+    return jobs
 
 
 async def _fetch_ashby(slug: str, company: str, keywords: list[str]) -> list[dict]:
     try:
         url = f"https://api.ashbyhq.com/posting-api/job-board/{slug}"
-        async with httpx.AsyncClient(timeout=8.0) as client:
+        async with http_client.async_client(timeout=8.0) as client:
             resp = await client.get(url)
             resp.raise_for_status()
             data = resp.json()
@@ -772,7 +780,7 @@ async def _fetch_ashby(slug: str, company: str, keywords: list[str]) -> list[dic
 async def _fetch_lever(slug: str, company: str, keywords: list[str]) -> list[dict]:
     try:
         url = f"https://api.lever.co/v0/postings/{slug}?mode=json"
-        async with httpx.AsyncClient(timeout=8.0) as client:
+        async with http_client.async_client(timeout=8.0) as client:
             resp = await client.get(url)
             resp.raise_for_status()
             data = resp.json()
@@ -801,7 +809,7 @@ async def _fetch_lever(slug: str, company: str, keywords: list[str]) -> list[dic
 async def _fetch_workable(slug: str, company: str, keywords: list[str]) -> list[dict]:
     try:
         url = f"https://apply.workable.com/api/v1/widget/accounts/{slug}?details=true"
-        async with httpx.AsyncClient(timeout=8.0) as client:
+        async with http_client.async_client(timeout=8.0) as client:
             resp = await client.get(url)
             resp.raise_for_status()
             data = resp.json()
@@ -841,7 +849,7 @@ async def _fetch_smartrecruiters(slug: str, company: str, keywords: list[str]) -
         jobs: list[dict] = []
         limit = 100
         offset = 0
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with http_client.async_client(timeout=10.0) as client:
             while offset < 200:  # cap at 200 to avoid hammering
                 url = (
                     f"https://api.smartrecruiters.com/v1/companies/{slug}/postings"
@@ -1101,7 +1109,7 @@ async def _search_level3_websearch() -> list[dict]:
         logger.debug("Level 3: BRAVE_SEARCH_API_KEY not set, skipping")
         return []
 
-    async with httpx.AsyncClient() as client:
+    async with http_client.async_client() as client:
         results = await asyncio.gather(
             *[_brave_search_one(client, q) for q in _SEARCH_QUERIES],
             return_exceptions=True,
@@ -1129,7 +1137,7 @@ async def _search_level4_workable(query: str, location: str) -> list[dict]:
         q = urllib.parse.quote(query)
         loc = urllib.parse.quote(location)
         url = f"https://jobs.workable.com/api/v1/jobs?query={q}&location={loc}"
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with http_client.async_client(timeout=10.0) as client:
             resp = await client.get(url)
             resp.raise_for_status()
             data = resp.json()
@@ -1169,14 +1177,17 @@ async def _search_level4_adzuna(query: str, location: str) -> list[dict]:
         return []
 
     # Map location to country code
+    # Whole-word matching: a substring test sent "Australia" (contains "us") to the US index.
     country = "gb"
     loc_lower = location.lower()
-    if any(x in loc_lower for x in ["usa", "us", "san francisco", "new york", "seattle"]):
-        country = "us"
-    elif any(x in loc_lower for x in ["canada", "toronto", "vancouver"]):
-        country = "ca"
-    elif any(x in loc_lower for x in ["australia", "sydney"]):
+    def _mentions(*names: str) -> bool:
+        return any(re.search(rf"(?<![a-z]){re.escape(n)}(?![a-z])", loc_lower) for n in names)
+    if _mentions("australia", "sydney", "melbourne"):
         country = "au"
+    elif _mentions("canada", "toronto", "vancouver"):
+        country = "ca"
+    elif _mentions("usa", "us", "united states", "san francisco", "new york", "seattle"):
+        country = "us"
 
     base_url = f"https://api.adzuna.com/v1/api/jobs/{country}/search/1"
     query = re.sub(r"\s+", " ", _BOOLEAN_OPS.sub(" ", query)).strip()
@@ -1190,7 +1201,7 @@ async def _search_level4_adzuna(query: str, location: str) -> list[dict]:
             "results_per_page": 20,
             "sort_by": "relevance",
         }
-        async with httpx.AsyncClient(timeout=12.0) as client:
+        async with http_client.async_client(timeout=12.0) as client:
             resp = await client.get(base_url, params=params)
             resp.raise_for_status()
             data = resp.json()
@@ -1264,7 +1275,7 @@ async def search_jobs_multi(query: str, location: str) -> list[dict]:
 
     if not deduped:
         logger.warning("All live sources returned 0 results — falling back to fixture")
-        return _FIXTURE
+        return [dict(j) for j in _FIXTURE]  # copies: callers mutate jobs
 
     # Apply title filter — fall back to unfiltered if filter removes everything
     filtered = [j for j in deduped if _passes_title_filter(j["title"])]
