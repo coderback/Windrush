@@ -94,8 +94,10 @@ Local (non-Docker) dev:
 
 ```bash
 cd api && uvicorn app.main:app --reload      # needs the env vars above, the data files and a reachable Ollama
-cd frontend && npm run dev
+cd frontend && npm run dev                   # needs API_URL (below)
 ```
+
+**Frontend without nginx** (`npm run dev`, Vercel): the browser calls `/api/*` on the frontend's own origin, and `frontend/src/app/api/[...path]/route.ts` forwards those calls to `API_URL`. Set it to the API's base URL — for local dev, put `API_URL=http://localhost:8000` in `frontend/.env` (git-ignored); on Vercel, add it to the project's environment variables. Without it every `/api/*` call returns 503. Under Docker Compose nginx routes `/api` straight to the API, so `API_URL` isn't needed. On Vercel, streamed responses (analysis, the apply session) end at the function duration limit.
 
 ---
 
@@ -113,6 +115,7 @@ cd frontend && npm run dev
 | `BRAVE_SEARCH_API_KEY` | Optional | Enables the Brave `site:` search job source |
 | `ECONOMIC_INDEX_PATH` / `TASK_PENETRATION_PATH` | No | Data file paths (default `/data/...`) |
 | `APP_DATA_PATH` | No | SQLite DBs, PDFs and uploaded CVs (compose: `/appdata`) |
+| `API_URL` | Frontend, without nginx | Base URL of the API that the frontend's `/api/*` proxy forwards to (e.g. `http://localhost:8000`). Set in the frontend's environment, not the root `.env`; not needed under Docker Compose |
 
 Job-site login details are set per user on the Profile page, not via env vars.
 
