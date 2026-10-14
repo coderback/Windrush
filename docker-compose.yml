@@ -34,6 +34,10 @@ services:
       - JWT_SECRET=${JWT_SECRET:?JWT_SECRET must be set in .env (generate with: openssl rand -hex 32)}
       - CREDENTIALS_KEY=${CREDENTIALS_KEY:?CREDENTIALS_KEY must be set in .env (see .env.example)}
       - APP_DATA_PATH=/appdata
+      # browser-use telemetry / cloud sync default to ON and would send each run's task prompt
+      # (the applicant's personal data), actions and visited URLs to browser-use. Keep them off.
+      - ANONYMIZED_TELEMETRY=false
+      - BROWSER_USE_CLOUD_SYNC=false
     volumes:
       - economic_data:/data:ro
       - app_data:/appdata
