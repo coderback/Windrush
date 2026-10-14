@@ -160,3 +160,69 @@ def test_explicit_search_discovers_only_what_was_asked_for(multi_user, ollama, r
                                                            params, expected):
     assert _feed_as(multi_user, params)["discovering"] is True
     assert sorted(recorded_searches) == expected
+
+
+def test_discovery_covers_at_most_four_preferred_locations(db, ollama, recorded_searches):
+    uid = tracker.create_user("many@x.com", "h")
+    cities = [f"City {i}" for i in range(12)]
+    tracker.update_user_persona(uid, {"preferences": {
+        "target_titles": ["Data Engineer", "ML Engineer", "Data Analyst"],
+        "preferred_locations": ["Remote", *cities],
+    }})
+    _feed_as(uid)
+    _feed_as(uid)  # a reload doesn't reach for the remaining locations either
+    # 3 titles x 4 locations = 12 Adzuna calls per feed load; "Remote" doesn't take a slot.
+    assert sorted(recorded_searches) == [(t, cities[:4]) for t in ("Data Analyst", "Data Engineer", "ML Engineer")]
+
+
+def test_filtering_to_covered_locations_reuses_the_run(multi_user, ollama, recorded_searches):
+    _feed_as(multi_user)  # discovers each title over London + Manchester
+    recorded_searches.clear()
+    assert _feed_as(multi_user, {"location": "london"})["discovering"] is False  # in cooldown
+    assert recorded_searches == []
+    _feed_as(multi_user, {"location": "Leeds"})
+    assert sorted(recorded_searches) == [(t, ["Leeds"]) for t in
+                                         ("Data Engineer", "Graduate Data Analyst", "Junior Software Engineer")]
+
+
+def test_discovery_state_is_per_query_and_location(db, monkeypatch):
+    runs = []
+
+    async def flow():
+        release = asyncio.Event()
+
+        async def held_search(query, locations):
+            runs.append((query, locations))
+            await release.wait()
+            return []
+        monkeypatch.setattr(discovery, "search_jobs", held_search)
+
+        async def settle():
+            while any(not t.done() for t in discovery._running.values()):
+                await asyncio.sleep(0.01)
+
+        assert discovery.ensure("Data Analyst", ["London", "london ", "Manchester"]) is True
+        await asyncio.sleep(0)
+        # While it runs: any subset, in any order / case / spacing, with duplicates, joins it.
+        assert discovery.ensure("data  analyst", ["LONDON"]) is True
+        assert discovery.ensure("Data Analyst", ["manchester", "London", "MANCHESTER"]) is True
+        assert discovery.is_running("Data Analyst", ["Manchester", "Paris"])
+        assert not discovery.is_running("Data Analyst", ["Paris"])
+        assert not discovery.is_running("Data Engineer", ["London"])  # pairs, not locations
+        # A location not yet covered runs alone, not alongside the ones already in flight.
+        assert discovery.ensure("Data Analyst", ["London", "Leeds"]) is True
+        release.set()
+        await settle()
+        # Afterwards every covered pair is in cooldown, however the request spells it.
+        assert discovery.ensure("Data Analyst", ["Manchester"]) is False
+        assert discovery.ensure("DATA ANALYST", ["leeds", "London"]) is False
+        assert not discovery.is_running("Data Analyst", ["London", "Manchester", "Leeds"])
+        # Adding a new location runs only that one.
+        assert discovery.ensure("Data Analyst", ["Manchester", "Bristol", "London"]) is True
+        assert discovery.is_running("Data Analyst", ["Bristol"])
+        await settle()
+        assert discovery._running == {}  # every pair of every run is released when it finishes
+
+    asyncio.run(flow())
+    assert runs == [("Data Analyst", ["London", "Manchester"]), ("Data Analyst", ["Leeds"]),
+                    ("Data Analyst", ["Bristol"])]

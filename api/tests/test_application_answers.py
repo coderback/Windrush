@@ -7,6 +7,7 @@ import pytest
 
 import app.browser_agent as ba
 from app import agent, net_guard, tracker
+from app.models import is_present_end_date
 
 UNSET_FACTS = ["Right to work", "Require visa sponsorship", "Has government ties", "Willing to relocate",
                "Can work in-person", "Can start immediately", "Has reliable transportation",
@@ -64,7 +65,12 @@ def test_currently_employed_means_a_current_role_not_any_past_one():
     assert _answers(current)["Are you currently employed"] == "Yes"
 
 
-@pytest.mark.parametrize("end_date", ["Present", "current", "NOW", "Ongoing", "to date", "Date", " present. "])
+@pytest.mark.parametrize("end_date", [
+    "Present", "current", "NOW", "Ongoing", "to date", "Date", " present. ",
+    # What CVs and LinkedIn PDFs trail the word with, or leave in front of it after the range split.
+    "Present (7 years 9 months)", "Present (Remote)", "Present Day", "-- Present", "– Present", "to present",
+    "Present*", "Till date", "until now", "Today", "Currently", "Now · 10 mos",
+])
 def test_a_present_end_date_counts_as_currently_employed(end_date):
     # How parsed CVs often store a current role: is_current left off, the CV's word in end_date.
     persona = {"history": [{"employer": "Old Co", "end_date": "2019"},
@@ -72,14 +78,25 @@ def test_a_present_end_date_counts_as_currently_employed(end_date):
     assert _answers(persona)["Are you currently employed"] == "Yes"
 
 
+@pytest.mark.parametrize("end_date", ["2021", "Mar 2019", "Nov 2020", "Nowhere Ltd", "Dated"])
+def test_an_ended_role_is_not_mistaken_for_a_present_one(end_date):
+    assert not is_present_end_date(end_date)
+
+
 def test_currently_employed_is_no_only_when_every_role_has_really_ended():
-    ended = {"history": [{"employer": "A", "end_date": "2021"}, {"employer": "B", "end_date": "Mar 2019"}]}
+    ended = {"history": [{"employer": "A", "end_date": "2021"}, {"employer": "B", "end_date": "Mar 2019"},
+                         {"employer": "C", "end_date": "03/2018"}, {"employer": "D", "end_date": "2016-07"}]}
     assert _answers(ended)["Are you currently employed"] == "No"
 
     # A role with no end date may be the current one: don't claim either way.
     unclear = {"history": [{"employer": "A", "end_date": "2021"}, {"employer": "B", "end_date": ""}]}
     assert "Are you currently employed" not in _answers(unclear)
     assert "Are you currently employed" not in _answers({"history": [{"employer": "A"}]})
+
+    # Nor one whose end date has no year: it isn't a date we can read, so it may still mean "present".
+    for end_date in ("Recently", "Summer", "Left", "Mar"):
+        unread = {"history": [{"employer": "A", "end_date": "2021"}, {"employer": "B", "end_date": end_date}]}
+        assert "Are you currently employed" not in _answers(unread), end_date
 
 
 def test_remote_preference_is_stated_only_when_the_user_picked_one():
@@ -194,14 +211,19 @@ class _FakeHistory:
         return self.text
 
 
-def _fill_events(monkeypatch, final_result: str, ok: bool = True) -> list[dict]:
-    """apply_with_browser's events with browser-use faked out: the fill agent finishes with
-    `final_result`, then the user skips the review."""
+def _fake_browser_use(monkeypatch, final_result: str, ok: bool = True, error: Exception | None = None,
+                      step_goal: str = "", has_page: bool = True):
+    """browser-use faked out: every agent (the fill one, then the submit one) reports one step whose
+    goal is `step_goal` (if given), then finishes with `final_result` — or raises `error`."""
     class FakeAgent:
         def __init__(self, **kwargs):
-            pass
+            self.on_step = kwargs.get("register_new_step_callback")
 
         async def run(self, max_steps):
+            if step_goal and self.on_step:
+                await self.on_step(None, type("Output", (), {"next_goal": step_goal})(), 1)
+            if error:
+                raise error
             return _FakeHistory(ok, final_result)
 
     class FakeSession:
@@ -219,13 +241,27 @@ def _fill_events(monkeypatch, final_result: str, ok: bool = True) -> list[dict]:
     monkeypatch.setattr(ba, "BrowserSession", FakeSession)
     monkeypatch.setattr(ba, "_browser_profile", lambda: None)
     monkeypatch.setattr(ba, "_make_browser_llm", lambda: None)
-    monkeypatch.setattr(ba, "_has_page", lambda session: True)
+    monkeypatch.setattr(ba, "_has_page", lambda session: has_page)
     monkeypatch.setattr(ba, "_screenshot_b64", no_screenshot)
 
+
+def _review_queue(*commands: str) -> asyncio.Queue:
+    queue: asyncio.Queue = asyncio.Queue()
+    for command in commands:
+        queue.put_nowait(command)
+    return queue
+
+
+def _fill_events(monkeypatch, final_result: str, ok: bool = True, commands=("skip",), job_password: str = "",
+                 **fake) -> list[dict]:
+    """apply_with_browser's events with browser-use faked out (see _fake_browser_use): the fill agent
+    finishes with `final_result`, then the user answers the review with `commands`."""
+    _fake_browser_use(monkeypatch, final_result, ok, **fake)
+
     async def run():
-        queue: asyncio.Queue = asyncio.Queue()
-        queue.put_nowait("skip")
-        return [e async for e in ba.apply_with_browser("https://jobs.example.com/1", {}, "", queue)]
+        return [e async for e in ba.apply_with_browser(
+            "https://jobs.example.com/1", {}, "", _review_queue(*commands),
+            job_email="ada@example.com" if job_password else "", job_password=job_password)]
     return asyncio.run(run())
 
 
@@ -248,6 +284,56 @@ def test_notes_are_capped_and_also_shown_when_the_agent_could_not_finish(monkeyp
     review = next(e for e in events if e.get("interactive"))
     assert "couldn't finish" in review["action"]
     assert review["notes"].startswith("Needs your input:") and len(review["notes"]) == ba._MAX_NOTES_CHARS
+
+
+# ── The job-site password never reaches the client ────────────────────────────
+
+PASSWORD = "Hunter2-REAL-PASSWORD"
+AGENT_ERROR = RuntimeError(f"Error executing action input: value '{PASSWORD}' rejected")
+
+
+def test_the_password_browser_use_puts_back_into_agent_text_is_masked_in_every_event(monkeypatch):
+    # browser-use swaps <secret>job_password</secret> for the real value in what the agent does — its
+    # `done` summary included — so it comes back to us in the notes, step goals, errors, the submit detail.
+    said = f"Needs your input:\n- Notice period\n\nLogged in as ada@example.com with password {PASSWORD}."
+    runs = {
+        "filled, then sent": _fill_events(monkeypatch, said, commands=("submit",), job_password=PASSWORD,
+                                         step_goal=f"Type {PASSWORD} into the password field"),
+        "not finished, send fails, skipped": _fill_events(monkeypatch, said, ok=False, commands=("submit", "skip"),
+                                                          job_password=PASSWORD),
+        "agent crashed, so did the send": _fill_events(monkeypatch, said, commands=("submit", "skip"),
+                                                       job_password=PASSWORD, error=AGENT_ERROR),
+        "agent crashed, no page": _fill_events(monkeypatch, said, job_password=PASSWORD, error=AGENT_ERROR,
+                                               has_page=False),
+    }
+    for name, events in runs.items():
+        shown = json.dumps(events, ensure_ascii=False)
+        assert PASSWORD not in shown, name
+        assert ba._REDACTED in shown, name   # the text is still there, just masked
+
+    sent = runs["filled, then sent"]
+    assert next(e for e in sent if e.get("interactive"))["notes"].endswith(f"with password {ba._REDACTED}.")
+    assert sent[-1]["submitted"] is True and ba._REDACTED in sent[-1]["action"]
+
+
+def test_the_password_is_masked_before_the_notes_are_capped(monkeypatch):
+    # Capped first, a password straddling the cap would leave its first characters showing.
+    said = "x" * (ba._MAX_NOTES_CHARS - 4) + PASSWORD
+    review = next(e for e in _fill_events(monkeypatch, said, job_password=PASSWORD) if e.get("interactive"))
+    assert review["notes"] == "x" * (ba._MAX_NOTES_CHARS - 4) + ba._REDACTED[:4]
+
+
+def test_the_apply_stream_never_carries_the_password(monkeypatch, user):
+    _fake_browser_use(monkeypatch, f"Needs your input:\n- Notice period\n\nLogged in with password {PASSWORD}.")
+    monkeypatch.setattr(agent, "apply_with_browser", ba.apply_with_browser)
+
+    async def run():
+        return "".join([chunk async for chunk in agent.run_apply(
+            user, "j", "https://jobs.example.com/1", "", [], "sid", _review_queue("submit"), None,
+            job_email="ada@example.com", job_password=PASSWORD)])
+    stream = asyncio.run(run())
+    assert "Needs your input" in stream and '"submitted": true' in stream
+    assert PASSWORD not in stream
 
 
 def test_apply_stream_passes_the_notes_to_the_client(client, monkeypatch):

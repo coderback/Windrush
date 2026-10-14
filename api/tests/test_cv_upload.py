@@ -42,8 +42,22 @@ def test_upload_merges_persona_and_stores_one_file_per_user(client, user, db, fa
     ("Sept 2019 to date", ("Sept 2019", "", True)),
     ("2016 - 2018", ("2016", "2018", False)),
     ("2020-01 - 2021-03", ("2020-01", "2021-03", False)),
+    ("2020-01–2021-06", ("2020-01", "2021-06", False)),   # unspaced en dash between ISO-style dates
+    ("2020-01—2021-06", ("2020-01", "2021-06", False)),
+    ("Oct 2019 -Present", ("Oct 2019", "", True)),
     ("2021", ("", "", False)),
     (None, ("", "", False)),
+    # A current role however the CV (or a LinkedIn PDF export) trails or prefixes the word.
+    ("Jan 2017 - Present (7 years 9 months)", ("Jan 2017", "", True)),
+    ("Jan 2020 – Present (Remote)", ("Jan 2020", "", True)),
+    ("Jan 2020 - Present Day", ("Jan 2020", "", True)),
+    ("2019 -- Present", ("2019", "", True)),
+    ("Mar 2023 – to present", ("Mar 2023", "", True)),
+    ("2021 - Present*", ("2021", "", True)),
+    ("Mar 2021 – Till date", ("Mar 2021", "", True)),
+    ("Jan 2020 till date", ("Jan 2020", "", True)),
+    ("June 2022 – Today", ("June 2022", "", True)),
+    ("2019 - Currently", ("2019", "", True)),
 ])
 def test_cv_role_dates_split_and_present_means_current(dates, expected):
     assert main._split_cv_dates(dates) == expected
@@ -52,12 +66,13 @@ def test_cv_role_dates_split_and_present_means_current(dates, expected):
 def test_upload_marks_roles_ending_present_as_current(client, user, monkeypatch):
     async def extract(name, tool_input):
         return {"experience": [{"employer": "Now Co", "title": "Analyst", "dates": "Mar 2021 – Now"},
+                               {"employer": "Side Co", "title": "Mentor", "dates": "Jan 2017 - Present (7 years 9 months)"},
                                {"employer": "Old Co", "title": "Intern", "dates": "2019 - 2020"}]}
     monkeypatch.setattr(main, "execute_tool", extract)
 
     history = _upload(client, _pdf("cv")).json()["persona"]["history"]
     assert [(h["start_date"], h["end_date"], h["is_current"]) for h in history] == [
-        ("Mar 2021", "", True), ("2019", "2020", False)]
+        ("Mar 2021", "", True), ("Jan 2017", "", True), ("2019", "2020", False)]
 
 
 def test_upload_rejects_prompt_injection(client, fake_extract):

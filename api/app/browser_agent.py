@@ -13,6 +13,7 @@ import base64
 import json
 import logging
 import os
+import re
 from typing import AsyncGenerator, Awaitable, Callable
 
 from .models import is_present_end_date
@@ -32,6 +33,8 @@ _MAX_FILL_STEPS = 40
 _MAX_SUBMIT_STEPS = 4
 # The fill agent's final summary, shown to the user during review (bounded: it's LLM output).
 _MAX_NOTES_CHARS = 2000
+# Shown in place of the job-site password in agent text sent to the client (see _redact).
+_REDACTED = "••••••••"
 
 # Navigation the agent's browser must never reach: it runs inside the api container, next to
 # the internal services. Raw-IP URLs are blocked separately (BrowserProfile.block_ip_addresses).
@@ -91,6 +94,14 @@ async def _screenshot_b64(browser_session) -> str:
 
 def _has_page(browser_session) -> bool:
     return bool(getattr(browser_session, "agent_focus_target_id", None))
+
+
+def _redact(text: str, secret: str) -> str:
+    """`text` with every occurrence of `secret` masked. browser-use swaps <secret>job_password</secret>
+    for the real value in everything the agent does — its own `done` text included — so agent text
+    goes through here before it reaches the client (and before any truncation, which could cut the
+    password in half and leave a prefix showing)."""
+    return text.replace(secret, _REDACTED) if secret else text
 
 
 def _push_frame(frame_queue: asyncio.Queue, frame_b64: str):
@@ -301,6 +312,9 @@ _YES_NO_QUESTIONS = (
 
 _DISABILITY_ANSWERS = {"yes": "Yes", "no": "No", "prefer_not_to_say": "Prefer not to say"}
 
+# A year (19xx/20xx) in a role's end date: the role has actually ended.
+_END_YEAR = re.compile(r"(?<!\d)(?:19|20)\d{2}(?!\d)")
+
 
 def _known_answers(persona: dict) -> list[tuple[str, str]]:
     core = persona.get("core_info") or {}
@@ -329,11 +343,12 @@ def _known_answers(persona: dict) -> list[tuple[str, str]]:
     if locations:
         answers.append(("Preferred work locations", locations))
     # Parsed CVs often leave is_current off and put "Present" (or nothing) in end_date, so "No" needs
-    # every role to have really ended; anything less certain is left for the user.
+    # every role to have really ended — an end date with a year in it; anything less certain is left
+    # for the user (an end date we don't recognise may still mean "present").
     history = [job for job in persona.get("history") or [] if isinstance(job, dict)]
     if any(job.get("is_current") or is_present_end_date(job.get("end_date")) for job in history):
         answers.append(("Are you currently employed", "Yes"))
-    elif history and all(str(job.get("end_date") or "").strip() for job in history):
+    elif history and all(_END_YEAR.search(str(job.get("end_date") or "")) for job in history):
         answers.append(("Are you currently employed", "No"))
     answers.append(("How did you hear about us", "Website / Internet search"))
     return answers
@@ -510,18 +525,20 @@ def _credential_scope(job_url: str) -> str | None:
     return f"https://*.{host}" if host else None
 
 
-async def _submit_with_agent(llm, browser_session) -> tuple[bool, str]:
-    """Run a tiny follow-up agent on the same (kept-alive) browser to click the final submit."""
+async def _submit_with_agent(llm, browser_session, secret: str = "") -> tuple[bool, str]:
+    """Run a tiny follow-up agent on the same (kept-alive) browser to click the final submit.
+    `secret` (the job-site password) is masked out of the detail it returns for the client."""
     try:
         agent = Agent(
             task=_SUBMIT_TASK, llm=llm, browser_session=browser_session,
             use_vision=False, use_judge=False, directly_open_url=False,
         )
         history = await agent.run(max_steps=_MAX_SUBMIT_STEPS)
-        return bool(history.is_successful()), (history.final_result() or "")[:200]
+        return bool(history.is_successful()), _redact(history.final_result() or "", secret)[:200]
     except Exception as exc:
-        logger.warning("submit agent failed: %s", exc)
-        return False, str(exc)[:200]
+        error = _redact(str(exc), secret)
+        logger.warning("submit agent failed: %s", error)
+        return False, error[:200]
 
 
 async def apply_with_browser(
@@ -564,7 +581,7 @@ async def apply_with_browser(
             _push_frame(frame_queue, screenshot)
         goal = getattr(agent_output, "next_goal", "") or ""
         actions = getattr(agent_output, "action", None) or []
-        action_str = str(goal or (actions[0] if actions else agent_output))[:120]
+        action_str = _redact(str(goal or (actions[0] if actions else agent_output)), job_password)[:120]
         await step_queue.put({
             "action": f"Step {step_number}: {action_str}",
             "screenshot": screenshot,
@@ -609,18 +626,19 @@ async def apply_with_browser(
         while not step_queue.empty():
             yield step_queue.get_nowait()
 
-        agent_error: Exception | None = None
+        agent_error = ""
         ready = False
         notes = ""
         try:
             history = agent_task.result()
             ready = bool(history.is_successful())  # agent's own verdict: "form filled, ready to submit"
             # Its summary starts with the "Needs your input" list, so it goes to the user whole,
-            # not squeezed into the one-line header.
-            notes = (history.final_result() or "").strip()[:_MAX_NOTES_CHARS]
+            # not squeezed into the one-line header. browser-use has put the real password back
+            # wherever the agent wrote the placeholder, so mask it before capping the length.
+            notes = _redact(history.final_result() or "", job_password).strip()[:_MAX_NOTES_CHARS]
         except Exception as exc:
-            agent_error = exc
-            logger.warning("browser agent failed: %s", exc)
+            agent_error = _redact(str(exc), job_password) or type(exc).__name__
+            logger.warning("browser agent failed: %s", agent_error)
 
         if not _has_page(browser_session):
             yield {"action": f"Browser error: {agent_error or 'no page was opened'}", "screenshot": None,
@@ -640,7 +658,7 @@ async def apply_with_browser(
 
         async for step in _interactive_session(
             browser_session, instruction_queue, intro, reason,
-            on_submit=lambda: _submit_with_agent(llm, browser_session), notes=notes,
+            on_submit=lambda: _submit_with_agent(llm, browser_session, job_password), notes=notes,
         ):
             yield step
             if step.get("done"):

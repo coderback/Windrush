@@ -169,9 +169,10 @@ async def health():
     return {"status": "ok"}
 
 
-# Between the two dates of a CV role. Spaced separators first, so "2020-01 - 2021-03" splits between
-# the dates rather than inside the first one.
-_DATE_RANGE_SEPS = (re.compile(r"\s+(?:-|–|—|to)\s+", re.I), re.compile(r"\s*[-–—]\s*"))
+# Between the two dates of a CV role. Spaced separators first, then en/em dashes, then a bare hyphen,
+# so "2020-01 - 2021-03" and "2020-01–2021-06" split between the dates rather than inside the first one.
+_DATE_RANGE_SEPS = (re.compile(r"\s+(?:-|–|—|to|till|until)\s+", re.I), re.compile(r"\s*[–—]\s*"),
+                    re.compile(r"\s*-\s*"))
 
 
 def _split_cv_dates(dates) -> tuple[str, str, bool]:
@@ -548,9 +549,12 @@ from . import discovery
 
 # Live discovery kicks in (in the background) when page 1 has fewer matches than this.
 _THIN_FEED = 5
-# It runs once per top target title, each run covering all their preferred locations; capped
-# because each run is a full multi-source search in the worker pool.
+# It runs once per top target title, each run covering their first few preferred locations;
+# capped because each run is a full multi-source search in the worker pool.
 _DISCOVERY_TITLES = 3
+# Each location is one Adzuna call per title: 3 titles x 4 locations = 12 calls per feed load,
+# well under Adzuna's default ~25 calls/minute.
+_DISCOVERY_LOCATIONS = 4
 # Request-path embedding budget: past this the feed falls back to recency ranking rather than
 # making the user wait on Ollama loading the model (background work still allows 600s).
 _FEED_EMBED_TIMEOUT_S = 20.0
@@ -624,9 +628,10 @@ async def get_jobs(
     if page == 1 and len(jobs) < _THIN_FEED:
         free_text = [t for t in tag_list if t.lower() not in jobs_db.ROLE_TAGS | jobs_db.DOMAIN_TAGS]
         live_queries = [query] if query else free_text[:1] or titles[:_DISCOVERY_TITLES] or ["software engineer"]
-        live_locations = [location] if location else [l for l in locs if l.lower() != "remote"] or ["London"]
-        # One run per title over every location. ensure() is cheap for runs already in flight
-        # or in cooldown; evaluate them all.
+        live_locations = ([location] if location else
+                          [l for l in locs if l.lower() != "remote"][:_DISCOVERY_LOCATIONS] or ["London"])
+        # One run per title over its locations not already in flight or in cooldown. ensure() is
+        # cheap for those; evaluate every title.
         discovering = any([discovery.ensure(q, live_locations) for q in live_queries
                            if len(q) > 2])  # don't fire on a stray character
 

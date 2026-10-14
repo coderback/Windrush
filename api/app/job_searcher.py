@@ -1273,8 +1273,14 @@ async def search_jobs_multi(query: str, locations: list[str]) -> list[dict]:
     )
     l4 = [job for jobs in l4_per_location for job in jobs]
 
-    combined = l1 + l2 + l3 + l4
-    deduped  = _deduplicate(combined)
+    # The same title at the same company in two locations is two postings, so each location's
+    # results are deduplicated against levels 1-3 and within themselves, but not against each
+    # other. _deduplicate keeps order and `base` is already unique, so the slice is exactly
+    # that location's new jobs.
+    base = _deduplicate(l1 + l2 + l3)
+    deduped = list(base)
+    for jobs in l4_per_location:
+        deduped += _deduplicate(base + jobs)[len(base):]
 
     if not deduped:
         logger.warning("All live sources returned 0 results — falling back to fixture")

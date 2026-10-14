@@ -1,15 +1,20 @@
+import re
+
 from pydantic import BaseModel, Field
 from typing import List, Optional
 
 
 # ── PERSONA MODELS ────────────────────────────────────────────────────────────
 
-# End dates CVs give a role that hasn't ended ("2020 – Present", "2019 to date").
-PRESENT_END_DATES = frozenset({"present", "current", "now", "ongoing", "to date", "date"})
+# End dates CVs give a role that hasn't ended ("2020 – Present", "2019 to date"). Matched as a prefix:
+# CVs (and LinkedIn PDFs) trail it with more text — "Present (7 years 9 months)", "Present (Remote)",
+# "Present Day", "Present*" — and a stray dash or "to"/"till" can survive the range split ("-- Present").
+_PRESENT_END_DATE = re.compile(
+    r"[\s\-–—]*(?:(?:to|till|until|up\s+to)\s+)?(?:present|current(?:ly)?|now|ongoing|today|date)\b", re.I)
 
 
 def is_present_end_date(end_date) -> bool:
-    return str(end_date or "").strip().rstrip(".").strip().lower() in PRESENT_END_DATES
+    return bool(_PRESENT_END_DATE.match(str(end_date or "")))
 
 
 class WorkExperience(BaseModel):

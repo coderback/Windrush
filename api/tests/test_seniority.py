@@ -49,7 +49,14 @@ from conftest import make_job
     ("Graduate Staff Nurse", "junior"),
     ("Graduate Engineer - Office of the Chief Technology Officer", "junior"),
     ("Analyst, reporting to the Head of Finance", "mid"),
+    ("Analyst - Office of the Co-Head of Engineering", "mid"),
     ("Lead Generation Executive", "mid"),
+    # ... but only up to the next separator, so the role's own rank still counts
+    ("Office of the CTO - Graduate Software Engineer", "junior"),
+    ("Office of the CTO - Senior Software Engineer", "senior"),
+    ("Office of the CFO: Senior Analyst", "senior"),
+    ("Reporting to CEO - Head of Strategy", "senior"),
+    ("Office of the General Counsel - Trainee Solicitor", "junior"),
     # People who run a scheme are not on it
     ("Apprenticeship Manager", "senior"),
     ("Early Careers Manager", "senior"),
@@ -58,8 +65,16 @@ from conftest import make_job
     ("Early Careers Recruiter", "mid"),
     ("Placement Officer", "mid"),
     ("Apprenticeship Assessor", "mid"),
+    ("Apprenticeship Skills Coach", "mid"),
     ("Internship Program Coordinator", "mid"),
+    ("Graduate Recruiter", "mid"),
     ("Graduate Recruitment Consultant", "junior"),  # the agency trainee role
+    # ... but a graduate or apprentice doing any other job is the trainee
+    ("Graduate Administrator", "junior"),
+    ("Apprentice Administrator", "junior"),
+    ("Graduate Tutor", "junior"),
+    ("Graduate Adviser - Financial Planning", "junior"),
+    ("Graduate Coordinator - Logistics", "junior"),
     # Words that merely contain a signal must not trigger it
     ("International Sales Executive", "mid"),
     ("Internal Communications Officer", "mid"),
@@ -69,6 +84,10 @@ from conftest import make_job
     ("Engineer I-II", "mid"),
     ("Analyst 1-2", "mid"),
     ("Data Engineer", "mid"),
+    # Non-breaking spaces, line breaks and doubled spaces
+    ("Vice\xa0President,  Engineering", "senior"),
+    ("Entry\nLevel Analyst", "junior"),
+    ("Head\xa0Office Assistant", "mid"),
 ])
 def test_title(title, expected):
     assert infer_level(title) == expected
@@ -91,21 +110,68 @@ def test_title(title, expected):
     ("We have 20 years of experience in fintech.", "mid"),
     # The headline requirement, not the smallest
     ("5+ years of software engineering experience. 1+ year of experience with AWS.", "senior"),
+    ("5+ years of software engineering experience. 1+ year with AWS.", "senior"),
     ("3+ years of non-internship professional software development experience. "
      "1+ years of experience as a mentor.", "mid"),
     # A real years requirement beats junior wording; 2 years alone is mid
     ("Our team includes recent graduates; you bring 3+ years of experience.", "mid"),
     ("Work alongside recent graduates. 6+ years of experience required.", "senior"),
     ("Graduate scheme. 2 years of experience preferred.", "junior"),
+    # ... but a figure that is someone else's, or a span of time, is not a requirement
+    ("Learn from engineers with 6+ years of experience.", "mid"),
+    ("Entry-level role. Learn from engineers with 6+ years of experience.", "junior"),
+    ("Our engineers have 10+ years of experience.", "mid"),
+    ("Acme is a specialist recruitment firm with over 10 years of experience.", "mid"),
+    ("1-2 years of experience. You'll learn from mentors with 8 years of experience.", "junior"),
+    ("Join our graduate programme. We have 12 years of experience in consulting.", "junior"),
+    ("0-2 years of experience required; managers have 7 years of experience.", "junior"),
+    ("With over 10 years of experience in fintech, we hire recent graduates every year.", "junior"),
+    ("With 5+ years of experience in Go, you will lead our platform team.", "senior"),
+    ("We're looking for an engineer with 5+ years of experience in Go.", "senior"),
+    ("Recent graduates welcome. You must have graduated in the last 3 years and have some work experience.",
+     "junior"),
+    ("Over 3 years you'll gain experience in four business areas as part of our graduate scheme.", "junior"),
+    ("Graduate Scheme\nProgramme length: 3 years\nExperience: none required", "junior"),
+    # A required figure beats a preferred one
+    ("Minimum 2 years experience; 5 years experience preferred.", "mid"),
+    ("Required: 1-2 years of experience. Nice to have: 3+ years of experience with Kubernetes.", "junior"),
+    ("5+ years of experience (preferred). 2+ years of experience required.", "mid"),
+    ("Ideally 5+ years of experience.", "senior"),
     # Junior wording that is negated or describes a duty
     ("This is not an entry-level role.", "mid"),
     ("Please note this is not a graduate scheme.", "mid"),
     ("No graduates or entry-level applicants, please.", "mid"),
+    ("This role is not suitable for recent graduates.", "mid"),
+    ("We are unable to consider recent graduates - this is not an entry-level position.", "mid"),
     ("You will mentor recent graduates.", "mid"),
     ("You will support our graduate programme.", "mid"),
+    ("You'll be onboarding new grads.", "mid"),
+    ("You will be responsible for mentoring recent graduates.", "mid"),
+    ("Responsible for mentoring recent graduates.", "mid"),
     ("Help onboard new grads.", "mid"),
+    ("Responsibilities: mentoring recent graduates and reviewing code.", "mid"),
     ("We run a graduate scheme for STEM students.", "junior"),
     ("No visa sponsorship, recent graduates welcome.", "junior"),
+    # ... but not a negation of something else
+    ("Experience not essential - entry level role with full training.", "junior"),
+    ("Visa sponsorship is not available for this graduate programme.", "junior"),
+    ("This isn't your average graduate scheme.", "junior"),
+    ("Never coded before? No problem - this entry-level role includes training.", "junior"),
+    ("You don't need a degree - recent graduates are encouraged to apply.", "junior"),
+    ("No degree needed - entry-level role with full training.", "junior"),
+    # ... nor the employer hiring or training graduates, nor an adjective
+    ("We are hiring recent graduates for this role.", "junior"),
+    ("We're recruiting recent graduates for our 2027 intake.", "junior"),
+    ("Hiring recent graduates into our data team.", "junior"),
+    ("We'll train recent graduates from any discipline.", "junior"),
+    ("Join our market-leading graduate programme in London.", "junior"),
+    ("Our industry-leading graduate scheme starts in September 2027.", "junior"),
+    ("We offer a fully supported graduate programme.", "junior"),
+    ("Our long-running graduate scheme has trained 2,000 engineers.", "junior"),
+    ("You'll join our market-leading graduate programme.", "junior"),
+    ("You'll join a fully supported graduate programme.", "junior"),
+    ("Join one of the UK's leading graduate programmes.", "junior"),
+    ("No experience necessary.", "junior"),
     # Other ways of stating years
     ("Five years of experience in Python.", "senior"),
     ("5+ yrs experience with Go.", "senior"),
@@ -117,8 +183,16 @@ def test_title(title, expected):
     ("Experience required: 3 years. Recent graduates welcome.", "mid"),
     ("6 months experience", "junior"),
     ("12 months' experience with Excel.", "junior"),
+    ("Between two and five years of experience.", "mid"),
+    ("Up to 2 years of experience.", "junior"),
+    ("0-2 years of experience.", "junior"),
+    ("Experience: none required", "junior"),
     # Years that are not experience
     ("Must have lived in the UK for at least 5 years.", "mid"),
+    # Non-breaking spaces, line breaks and doubled spaces
+    ("Requirements:\n- 5+ years of\n  experience with Python", "senior"),
+    ("6+\xa0years of  experience", "senior"),
+    ("We run a graduate\nscheme for STEM students.", "junior"),
 ])
 def test_neutral_title_falls_back_to_description(description, expected):
     assert infer_level("Software Engineer", description) == expected
@@ -127,6 +201,22 @@ def test_neutral_title_falls_back_to_description(description, expected):
 def test_long_whitespace_run_is_fast():
     start = time.perf_counter()
     assert infer_level("Software Engineer", "5" + "\xa0" * 8000 + " x") == "mid"
+    assert time.perf_counter() - start < 0.1
+
+
+@pytest.mark.parametrize("phrase, times", [
+    ("5 years experience ", 420),
+    ("we have 5 years of experience ", 270),
+    ("5 years experience preferred ", 280),
+    ("with 5 years of experience ", 300),
+    ("not recent graduates ", 380),
+    ("you will mentor recent graduates ", 240),
+])
+def test_many_figures_and_phrases_are_fast(phrase, times):
+    description = phrase * times  # about 8,000 characters
+    # Each figure and phrase looks at its own clause; that must not rescan the text each time.
+    start = time.perf_counter()
+    infer_level("Software Engineer", description)
     assert time.perf_counter() - start < 0.1
 
 

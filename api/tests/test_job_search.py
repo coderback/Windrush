@@ -64,6 +64,29 @@ def test_only_the_location_dependent_level_fans_out_over_locations(monkeypatch):
     assert len(jobs) == 30  # the result cap scales with the locations, so none are crowded out
 
 
+def test_same_role_in_two_locations_keeps_both_postings(monkeypatch):
+    for name in LIVE_SOURCES[:3]:
+        monkeypatch.setattr(job_searcher, name, _empty)
+
+    async def fake_ats(queries):
+        return [{"title": "Graduate Software Engineer", "company": "Sky", "url": "https://sky/1"}]
+    monkeypatch.setattr(job_searcher, "_search_level2_ats_apis", fake_ats)
+
+    async def fake_adzuna(query, location):
+        return [
+            {"title": "Software Engineer", "company": "BBC", "url": f"https://adzuna/{location}/1"},
+            # Reposted in the same location, and a listing the ATS level already found.
+            {"title": "Software Engineer", "company": "BBC", "url": f"https://adzuna/{location}/1-repost"},
+            {"title": "Graduate Software Engineer", "company": "Sky", "url": f"https://adzuna/{location}/2"},
+        ]
+    monkeypatch.setattr(job_searcher, "_search_level4_adzuna", fake_adzuna)
+
+    jobs = asyncio.run(job_searcher.search_jobs_multi("software engineer", ["London", "Manchester"]))
+    # BBC's posting survives in both locations; repeats within a location or of levels 1-3 don't.
+    assert sorted(j["url"] for j in jobs) == ["https://adzuna/London/1", "https://adzuna/Manchester/1",
+                                              "https://sky/1"]
+
+
 @pytest.mark.parametrize("location, country", [
     ("Sydney, Australia", "au"), ("Austin, US", "us"), ("New York", "us"), ("Toronto", "ca"),
     ("London", "gb"), ("Houston", "gb"), ("Belarus", "gb"),
