@@ -23,7 +23,7 @@ from . import doc_render
 from . import jobs_db
 from . import net_guard
 from . import seniority
-from .models import Persona
+from .models import Persona, is_present_end_date
 
 
 @asynccontextmanager
@@ -169,6 +169,23 @@ async def health():
     return {"status": "ok"}
 
 
+# Between the two dates of a CV role. Spaced separators first, so "2020-01 - 2021-03" splits between
+# the dates rather than inside the first one.
+_DATE_RANGE_SEPS = (re.compile(r"\s+(?:-|–|—|to)\s+", re.I), re.compile(r"\s*[-–—]\s*"))
+
+
+def _split_cv_dates(dates) -> tuple[str, str, bool]:
+    """(start_date, end_date, is_current) from a parsed CV role's free-text dates. An end such as
+    "Present" or "Now" means the role is current, so it isn't kept as an end date."""
+    text = str(dates or "").strip()
+    for sep in _DATE_RANGE_SEPS:
+        parts = sep.split(text, maxsplit=1)
+        if len(parts) == 2:
+            start, end = parts[0].strip(), parts[1].strip()
+            return (start, "", True) if is_present_end_date(end) else (start, end, False)
+    return "", "", is_present_end_date(text)
+
+
 @app.post("/upload")
 async def upload_cv(
     file: UploadFile = File(...),
@@ -253,12 +270,13 @@ async def upload_cv(
         new_history = []
         for exp in cv_data["experience"]:
             # Map old 'summary' to achievements/summary as needed
+            start_date, end_date, is_current = _split_cv_dates(exp.get("dates"))
             new_history.append(WorkExperience(
                 employer=exp.get("employer", ""),
                 title=exp.get("title", ""),
-                start_date=exp.get("dates", "").split("-")[0].strip() if "-" in exp.get("dates", "") else "",
-                end_date=exp.get("dates", "").split("-")[1].strip() if "-" in exp.get("dates", "") else "",
-                is_current="present" in exp.get("dates", "").lower(),
+                start_date=start_date,
+                end_date=end_date,
+                is_current=is_current,
                 summary=exp.get("summary", ""),
             ))
         persona.history = new_history
@@ -530,15 +548,27 @@ from . import discovery
 
 # Live discovery kicks in (in the background) when page 1 has fewer matches than this.
 _THIN_FEED = 5
-# It searches the user's top target titles across their preferred locations, capped because
-# each (title, location) run is a full multi-source search in the worker pool.
+# It runs once per top target title, each run covering all their preferred locations; capped
+# because each run is a full multi-source search in the worker pool.
 _DISCOVERY_TITLES = 3
-_DISCOVERY_PAIRS = 6
 # Request-path embedding budget: past this the feed falls back to recency ranking rather than
 # making the user wait on Ollama loading the model (background work still allows 600s).
 _FEED_EMBED_TIMEOUT_S = 20.0
 # Tracker statuses that hide a job from the feed.
 _HIDE_STATUSES = {"Applied", "Responded", "Interview", "Offer", "Rejected", "Discarded"}
+
+
+def _distinct(items) -> list[str]:
+    """Stripped, non-empty items without case/whitespace duplicates (first spelling kept). The
+    profile stores raw comma-split text, e.g. "London, london , LONDON"."""
+    seen, out = set(), []
+    for item in items or []:
+        item = (item or "").strip()
+        norm = " ".join(item.lower().split())
+        if norm and norm not in seen:
+            seen.add(norm)
+            out.append(item)
+    return out
 
 
 @app.get("/jobs")
@@ -563,8 +593,8 @@ async def get_jobs(
 
     persona_data = tracker.get_user_persona(current_user.id)
     prefs = persona_data.get("preferences", {}) or {}
-    titles = [t.strip() for t in prefs.get("target_titles", []) or [] if t and t.strip()]
-    locs = [loc.strip() for loc in prefs.get("preferred_locations", []) or [] if loc and loc.strip()]
+    titles = _distinct(prefs.get("target_titles"))
+    locs = _distinct(prefs.get("preferred_locations"))
     # An explicit filter wins; otherwise any of the user's preferred locations matches.
     effective_location = location or locs
 
@@ -595,10 +625,10 @@ async def get_jobs(
         free_text = [t for t in tag_list if t.lower() not in jobs_db.ROLE_TAGS | jobs_db.DOMAIN_TAGS]
         live_queries = [query] if query else free_text[:1] or titles[:_DISCOVERY_TITLES] or ["software engineer"]
         live_locations = [location] if location else [l for l in locs if l.lower() != "remote"] or ["London"]
-        pairs = [(q, l) for q in live_queries if len(q) > 2  # don't fire on a stray character
-                 for l in live_locations][:_DISCOVERY_PAIRS]
-        # ensure() is cheap for pairs already running or in cooldown; evaluate them all.
-        discovering = any([discovery.ensure(q, l) for q, l in pairs])
+        # One run per title over every location. ensure() is cheap for runs already in flight
+        # or in cooldown; evaluate them all.
+        discovering = any([discovery.ensure(q, live_locations) for q in live_queries
+                           if len(q) > 2])  # don't fire on a stray character
 
     return {
         "jobs": jobs,

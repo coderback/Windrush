@@ -4,6 +4,14 @@ from typing import List, Optional
 
 # ── PERSONA MODELS ────────────────────────────────────────────────────────────
 
+# End dates CVs give a role that hasn't ended ("2020 – Present", "2019 to date").
+PRESENT_END_DATES = frozenset({"present", "current", "now", "ongoing", "to date", "date"})
+
+
+def is_present_end_date(end_date) -> bool:
+    return str(end_date or "").strip().rstrip(".").strip().lower() in PRESENT_END_DATES
+
+
 class WorkExperience(BaseModel):
     employer: str
     title: str
@@ -99,7 +107,7 @@ class JobPreferences(BaseModel):
     target_titles: List[str] = []
     min_salary: Optional[int] = None
     expected_hourly_rate: Optional[float] = None
-    remote_preference: str = "remote"
+    remote_preference: str = ""  # "" = not answered; else "remote" / "hybrid" / "onsite"
     relocation_willingness: Optional[bool] = None
     preferred_locations: List[str] = []
     industries: List[str] = []

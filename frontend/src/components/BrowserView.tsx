@@ -8,6 +8,7 @@ interface Props {
   screenshot: string | null;
   blocked: boolean;
   reason: string | null;
+  notes?: string | null;
   sessionId: string;
   interactive?: boolean;
   onInstructionSent?: () => void;
@@ -21,6 +22,7 @@ export default function BrowserView({
   screenshot,
   blocked,
   reason,
+  notes,
   sessionId,
   interactive,
   onInstructionSent,
@@ -116,6 +118,14 @@ export default function BrowserView({
         </div>
         <span className="text-xs text-zinc-500 max-w-[60%] truncate">{action}</span>
       </div>
+
+      {/* The agent's summary, in full: it lists what it left for you under "Needs your input" */}
+      {notes && (
+        <div className="w-full max-w-5xl shrink-0 max-h-40 overflow-y-auto text-sm text-amber-200 border border-amber-500/30 rounded-lg px-4 py-2.5 bg-amber-500/5">
+          <p className="text-[10px] uppercase tracking-widest text-amber-400/80 mb-1">Agent notes</p>
+          <p className="whitespace-pre-wrap break-words">{notes}</p>
+        </div>
+      )}
 
       {/* Screenshot */}
       <div className="w-full max-w-5xl border border-zinc-700 rounded-lg overflow-hidden bg-zinc-900 shrink-0">

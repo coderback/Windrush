@@ -1111,12 +1111,15 @@ async def run_apply(
         )) as steps:
             async for step in steps:
                 event_type = "browser_blocked" if step.get("blocked") else "browser_action"
-                yield _sse(event_type, {
+                event = {
                     "action": step.get("action", ""),
                     "screenshot": step.get("screenshot"),
                     "reason": step.get("reason"),
                     "interactive": step.get("interactive", False),
-                })
+                }
+                if step.get("notes"):
+                    event["notes"] = step["notes"]
+                yield _sse(event_type, event)
                 if step.get("done"):
                     submitted = bool(step.get("submitted"))
                     break

@@ -18,10 +18,11 @@ from . import jobs_db
 
 logger = logging.getLogger("windrush.discovery")
 
-_COOLDOWN_S = 30 * 60          # don't re-run the same (query, location) within this window
+_COOLDOWN_S = 30 * 60          # don't re-run the same (query, locations) within this window
 _MAX_CONCURRENT = 2            # each run may launch Chromium; cap total load
-_running: dict[tuple[str, str], asyncio.Task] = {}
-_finished_at: dict[tuple[str, str], float] = {}
+_Key = tuple[str, tuple[str, ...]]
+_running: dict[_Key, asyncio.Task] = {}
+_finished_at: dict[_Key, float] = {}
 
 # The live search runs in worker *processes*: it fans out to ~70 job boards and does a lot of
 # CPU work on the results (multi-MB JSON, HTML-to-text, exposure scoring). In threads that
@@ -46,48 +47,53 @@ def shutdown() -> None:
         _pool = None
 
 
-def _search_in_process(query: str, location: str) -> list[dict]:
+def _search_in_process(query: str, locations: list[str]) -> list[dict]:
     """Worker-process entry point: run the async multi-source search on its own event loop."""
     from .job_proxy import search_jobs
-    return asyncio.run(search_jobs(query, location))
+    return asyncio.run(search_jobs(query, locations))
 
 
-async def search_jobs(query: str, location: str) -> list[dict]:
+async def search_jobs(query: str, locations: list[str]) -> list[dict]:
     """Live multi-source search, executed in a worker process."""
     global _pool
     try:
-        return await asyncio.get_running_loop().run_in_executor(_get_pool(), _search_in_process, query, location)
+        return await asyncio.get_running_loop().run_in_executor(_get_pool(), _search_in_process, query, locations)
     except BrokenProcessPool:
         _pool = None  # a worker died (e.g. Chromium OOM) — start a fresh pool next time
         raise
 
 
-def _key(query: str, location: str) -> tuple[str, str]:
-    return (" ".join(query.lower().split()), " ".join(location.lower().split()))
+def _norm(text: str) -> str:
+    return " ".join(text.lower().split())
 
 
-def is_running(query: str, location: str) -> bool:
-    task = _running.get(_key(query, location))
+def _key(query: str, locations: list[str]) -> _Key:
+    return (_norm(query), tuple(sorted({_norm(loc) for loc in locations})))
+
+
+def is_running(query: str, locations: list[str]) -> bool:
+    task = _running.get(_key(query, locations))
     return bool(task and not task.done())
 
 
-def ensure(query: str, location: str) -> bool:
+def ensure(query: str, locations: list[str]) -> bool:
     """
-    Start a background discovery for (query, location) unless one is running or ran recently.
+    Start a background discovery for `query` across `locations` unless one is running or ran
+    recently. One run covers every location: only the location-dependent sources fan out.
     Returns True while a discovery for this key is in flight (the caller reports `discovering`).
     """
-    key = _key(query, location)
-    if is_running(query, location):
+    key = _key(query, locations)
+    if is_running(query, locations):
         return True
     if time.monotonic() - _finished_at.get(key, -_COOLDOWN_S) < _COOLDOWN_S:
         return False
-    task = asyncio.create_task(_discover(query, location), name=f"discover:{key}")
+    task = asyncio.create_task(_discover(query, locations), name=f"discover:{key}")
     _running[key] = task
     task.add_done_callback(lambda t, k=key: _done(k, t))
     return True
 
 
-def _done(key: tuple[str, str], task: asyncio.Task) -> None:
+def _done(key: _Key, task: asyncio.Task) -> None:
     _running.pop(key, None)
     _finished_at[key] = time.monotonic()
     if len(_finished_at) > 1000:  # bound memory: forget the oldest entries
@@ -97,9 +103,9 @@ def _done(key: tuple[str, str], task: asyncio.Task) -> None:
         logger.warning("discovery %r failed: %s", key, task.exception())
 
 
-async def _discover(query: str, location: str) -> None:
+async def _discover(query: str, locations: list[str]) -> None:
     started = time.monotonic()
-    jobs = await search_jobs(query, location)  # concurrency is capped by the pool size
+    jobs = await search_jobs(query, locations)  # concurrency is capped by the pool size
     # search_jobs falls back to the bundled mock fixture when every live source is empty;
     # those must never be persisted as real listings.
     live = [dict(j) for j in jobs if j.get("source") != "fixture"]
@@ -108,4 +114,4 @@ async def _discover(query: str, location: str) -> None:
     # Embedding is mostly waiting on Ollama, so a thread is enough here.
     added, refreshed = (await asyncio.to_thread(jobs_db.add_jobs, live)) if live else (0, 0)
     logger.info("discovery %r/%r: %d found, %d added, %d refreshed in %.1fs",
-                query, location, len(live), added, refreshed, time.monotonic() - started)
+                query, locations, len(live), added, refreshed, time.monotonic() - started)

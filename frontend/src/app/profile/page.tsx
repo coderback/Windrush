@@ -667,6 +667,7 @@ export default function ProfilePage() {
                 <div className="space-y-2">
                   <label className="text-xs text-zinc-500 uppercase">Work Setting</label>
                   <select className="w-full bg-zinc-950 border border-zinc-800 rounded p-2 text-sm focus:border-teal-500 outline-none" value={persona.preferences.remote_preference} onChange={(e) => handleChange("preferences", "remote_preference", e.target.value)}>
+                    <option value="">Not answered</option>
                     <option value="remote">Remote-only</option>
                     <option value="hybrid">Hybrid</option>
                     <option value="onsite">On-site</option>

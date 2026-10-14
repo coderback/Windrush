@@ -1255,20 +1255,23 @@ def _deduplicate(jobs: list[dict]) -> list[dict]:
 
 # ── Public interface ──────────────────────────────────────────────────────────
 
-async def search_jobs_multi(query: str, location: str) -> list[dict]:
+async def search_jobs_multi(query: str, locations: list[str]) -> list[dict]:
     """
     Run all 4 levels concurrently, apply title filter, deduplicate,
-    sort seniority-boosted titles first, and return up to 20 jobs.
+    sort seniority-boosted titles first, and return up to 20 jobs per location.
     Falls back to fixture if all live sources return nothing.
     """
     keywords = _query_keywords(query)
 
-    l1, l2, l3, l4 = await asyncio.gather(
+    # Only the aggregator (level 4) takes a location: run levels 1-3 once and fan level 4
+    # out over the locations, rather than repeating the whole search per location.
+    l1, l2, l3, *l4_per_location = await asyncio.gather(
         _search_level1_playwright(keywords),
         _search_level2_ats_apis([query]),
         _search_level3_websearch(),
-        _search_level4_adzuna(query, location),
+        *[_search_level4_adzuna(query, location) for location in locations],
     )
+    l4 = [job for jobs in l4_per_location for job in jobs]
 
     combined = l1 + l2 + l3 + l4
     deduped  = _deduplicate(combined)
@@ -1290,4 +1293,4 @@ async def search_jobs_multi(query: str, location: str) -> list[dict]:
         "Job discovery: L1=%d L2=%d L3=%d L4=%d → %d after dedup → %d after filter",
         len(l1), len(l2), len(l3), len(l4), len(deduped), len(filtered),
     )
-    return filtered[:20]
+    return filtered[:20 * max(1, len(locations))]

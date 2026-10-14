@@ -26,8 +26,8 @@ def feed_user(db):
 def slow_live_search(monkeypatch):
     calls = []
 
-    async def fake_search(query, location):
-        calls.append((query, location))
+    async def fake_search(query, locations):
+        calls.append((query, locations))
         await asyncio.sleep(1.5)
         return [make_job(f"Q{i}", f"Quantum Engineer {i}", f"QCo{i}", "London, UK", "qubits") for i in range(40)]
     monkeypatch.setattr(discovery, "search_jobs", fake_search)
@@ -58,7 +58,7 @@ def test_thin_feed_discovers_in_the_background(feed_user, ollama, slow_live_sear
             first = (await c.get("/jobs", params={"tags": "quantum"})).json()
             latency = time.perf_counter() - t0
             again = (await c.get("/jobs", params={"tags": "quantum"})).json()
-            while discovery.is_running("quantum", "London"):
+            while discovery.is_running("quantum", ["London"]):
                 await asyncio.sleep(0.05)
             after = (await c.get("/jobs", params={"tags": "quantum"})).json()
         stop.set()
@@ -89,42 +89,74 @@ def test_hung_embedder_falls_back_to_unranked_results(feed_user, ollama, monkeyp
 
 
 def test_fixture_jobs_from_discovery_are_never_stored(db, ollama, monkeypatch):
-    async def fixture_only(query, location):
+    async def fixture_only(query, locations):
         return [dict(j) for j in job_searcher._FIXTURE]
     monkeypatch.setattr(discovery, "search_jobs", fixture_only)
-    asyncio.run(discovery._discover("anything", "London"))
+    asyncio.run(discovery._discover("anything", ["London"]))
     assert jobs_db.job_count() == 0
 
 
-def test_feed_uses_every_preferred_location_and_searches_each_target_title(db, ollama, monkeypatch):
+@pytest.fixture
+def multi_user(db):
     uid = tracker.create_user("multi@x.com", "h")
+    # Raw profile text: duplicates that differ only in case / whitespace, and "Remote".
     tracker.update_user_persona(uid, {"preferences": {
-        "target_titles": ["Graduate Data Analyst", "Junior Software Engineer"],
-        "preferred_locations": ["London", "Manchester"],
+        "target_titles": ["Graduate Data Analyst", "graduate data analyst ", "Junior Software Engineer",
+                          "Data Engineer", "ML Engineer"],
+        "preferred_locations": ["London", "london ", "LONDON", "Manchester", "Remote"],
     }})
-    jobs_db.add_jobs([make_job(1, "Analyst", location="London, UK"),
-                      make_job(2, "Engineer", location="Manchester, UK"),
-                      make_job(3, "Designer", location="Leeds, UK"),
-                      make_job(4, "Analyst", company="Maple", location="London, Ontario, Canada")])
+    return uid
+
+
+@pytest.fixture
+def recorded_searches(monkeypatch):
     searches = []
 
-    async def record(query, location):
-        searches.append((query, location))
+    async def record(query, locations):
+        searches.append((query, locations))
         return []
     monkeypatch.setattr(discovery, "search_jobs", record)
+    return searches
+
+
+def _feed_as(uid, params=None):
+    """GET /jobs as `uid`, then wait for the discovery runs it started."""
     main.app.dependency_overrides[auth.get_current_user] = lambda: auth.User(id=uid, email="multi@x.com")
     try:
         async def flow():
             async with _client() as c:
-                body = (await c.get("/jobs")).json()
+                body = (await c.get("/jobs", params=params)).json()
                 while any(not t.done() for t in discovery._running.values()):
                     await asyncio.sleep(0.01)
             return body
-        body = asyncio.run(flow())
+        return asyncio.run(flow())
     finally:
         main.app.dependency_overrides.clear()
 
+
+def test_feed_uses_every_preferred_location_and_searches_each_target_title_once(multi_user, ollama,
+                                                                               recorded_searches):
+    jobs_db.add_jobs([make_job(1, "Analyst", location="London, UK"),
+                      make_job(2, "Engineer", location="Manchester, UK"),
+                      make_job(3, "Designer", location="Leeds, UK"),
+                      make_job(4, "Analyst", company="Maple", location="London, Ontario, Canada")])
+    body = _feed_as(multi_user)
+
     assert sorted(j["location"] for j in body["jobs"]) == ["London, UK", "Manchester, UK"]
-    assert body["discovering"] is True
-    assert sorted(searches) == sorted([(t, l) for t in ("Graduate Data Analyst", "Junior Software Engineer")
-                                       for l in ("London", "Manchester")])
+    assert body["discovering"] is True and body["location"] == "London, Manchester, Remote"
+    # One run per distinct title (duplicates don't use up the cap of 3), each over every
+    # distinct location except "Remote".
+    assert sorted(recorded_searches) == [(t, ["London", "Manchester"]) for t in
+                                         ("Data Engineer", "Graduate Data Analyst", "Junior Software Engineer")]
+
+
+@pytest.mark.parametrize("params, expected", [
+    ({"query": "quantum"}, [("quantum", ["London", "Manchester"])]),
+    ({"location": "Berlin"}, [(t, ["Berlin"]) for t in
+                              ("Data Engineer", "Graduate Data Analyst", "Junior Software Engineer")]),
+    ({"query": "quantum", "location": "Berlin"}, [("quantum", ["Berlin"])]),
+])
+def test_explicit_search_discovers_only_what_was_asked_for(multi_user, ollama, recorded_searches,
+                                                           params, expected):
+    assert _feed_as(multi_user, params)["discovering"] is True
+    assert sorted(recorded_searches) == expected

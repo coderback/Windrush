@@ -115,6 +115,26 @@ def test_filters(seeded, kwargs, expected):
     assert ids(**kwargs) == expected
 
 
+@pytest.mark.parametrize("location, expected", [
+    ("London", ["UK1", "UK2"]),
+    (["London", "Toronto"], ["TO", "UK1", "UK2"]),  # Toronto keeps its Ontario rows
+])
+def test_london_ontario_rows_cannot_crowd_uk_jobs_out_of_the_candidate_pool(db, ollama, monkeypatch,
+                                                                            location, expected):
+    monkeypatch.setattr(jobs_db, "_CANDIDATE_POOL", 3)
+    older = [make_job("UK1", "Analyst", location="London, UK"),
+             make_job("UK2", "Engineer", location="London, England"),
+             make_job("TO", "Developer", location="Toronto, Ontario, Canada")]
+    newer = [make_job(f"ON{i}", f"Analyst {i}", location="London, Ontario, Canada") for i in range(5)]
+    jobs_db.add_jobs(older + newer)
+    con = sqlite3.connect(jobs_db._DB_PATH)
+    for n, job in enumerate(newer + older):  # the Ontario rows are the newest
+        con.execute("UPDATE jobs SET updated_at=? WHERE job_id=?", (f"2026-10-{20 - n}T00:00:00", job["job_id"]))
+    con.commit()
+    con.close()
+    assert ids(location=location) == expected
+
+
 def test_exclusions_apply_before_pagination(seeded):
     seen, page, more = [], 0, True
     while more:

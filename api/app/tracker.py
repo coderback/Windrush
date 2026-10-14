@@ -173,6 +173,13 @@ def _migrate_plaintext_job_passwords(con: sqlite3.Connection) -> None:
 _NEVER_USER_SET = (("core_info", "right_to_work_uk"), ("core_info", "require_sponsorship"),
                    ("preferences", "can_work_in_person"))
 
+# Settable in the UI, but every save stored the full model, so these old defaults were written for
+# everyone. A value still equal to its default can't be told apart from one never answered; any
+# other value was chosen by the user and is kept.
+_OLD_DEFAULTS = (("core_info", "has_government_ties", False), ("preferences", "relocation_willingness", False),
+                 ("preferences", "can_start_immediately", False), ("preferences", "needs_accommodations", False),
+                 ("preferences", "has_reliable_transportation", True))
+
 
 def _clear_default_eligibility_answers(con: sqlite3.Connection) -> None:
     """One-off: forget yes/no answers that were only ever defaults, so they read as unanswered."""
@@ -188,11 +195,16 @@ def _clear_default_eligibility_answers(con: sqlite3.Connection) -> None:
             if isinstance(block, dict) and block.get(field) is not None:
                 block[field] = None
                 changed = True
+        for section, field, default in _OLD_DEFAULTS:
+            block = persona.get(section)
+            if isinstance(block, dict) and block.get(field) is default:
+                block[field] = None
+                changed = True
         if changed:
             con.execute("UPDATE users SET persona=? WHERE id=?", (json.dumps(persona), user_id))
             cleared += 1
     if cleared:
-        logger.info("Cleared default right-to-work/sponsorship answers for %d user(s)", cleared)
+        logger.info("Cleared default yes/no application answers for %d user(s)", cleared)
 
 
 def update_user_persona(user_id: str, persona: dict) -> bool:

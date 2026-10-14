@@ -261,8 +261,8 @@ def _like(term: str) -> str:
 
 
 def _location_matcher(location: str):
-    """(sql_terms, matches) for one location filter: LIKE terms as a SQL superset, and a precise
-    whole-word check of a job's location string."""
+    """(sql, params, matches) for one location filter: a LIKE clause as a SQL superset, and a
+    precise whole-word check of a job's location string."""
     loc = location.lower().strip()
     terms = _LOCATION_ALIASES.get(_LOCATION_ALIAS_KEYS.get(loc, ""), [loc])
     regex = re.compile(r"(?<![a-z])(" + "|".join(re.escape(t) for t in terms) + r")(?![a-z])")
@@ -270,11 +270,18 @@ def _location_matcher(location: str):
     # explicitly searching for the Canadian / US ones.
     exclude_other_londons = "london" in terms and not any(x in loc for x in ("ontario", "new london", "canada"))
 
+    sql = "(" + " OR ".join("lower(location) LIKE ? ESCAPE '\\'" for _ in terms) + ")"
+    params = [_like(t) for t in terms]
+    if exclude_other_londons:
+        # Also in SQL, scoped to this location's clause: otherwise those rows fill the candidate
+        # pool and push UK jobs out, while another location (e.g. Toronto) may still want Ontario.
+        sql = f"({sql} AND lower(location) NOT LIKE '%ontario%' AND lower(location) NOT LIKE '%new london%')"
+
     def matches(job_location: str) -> bool:
         if not regex.search(job_location):
             return False
         return not (exclude_other_londons and ("ontario" in job_location or "new london" in job_location))
-    return terms, matches
+    return sql, params, matches
 
 
 def _parse_tags(tags: list[str]) -> tuple[list[str], list[str], list[str]]:
@@ -342,14 +349,14 @@ def get_jobs(
         where.append(remote_sql)
         params += [f"%{t}%" for t in _REMOTE_TERMS]
     elif matchers:
-        terms = sorted({t for ts, _ in matchers for t in ts})
-        loc_sql = "(" + " OR ".join("lower(location) LIKE ? ESCAPE '\\'" for _ in terms) + ")"
+        loc_sql = "(" + " OR ".join(sql for sql, _, _ in matchers) + ")"
+        loc_params = [p for _, ps, _ in matchers for p in ps]
         if remote:  # "in <location>, or remote"
             where.append(f"({loc_sql} OR {remote_sql})")
-            params += [_like(t) for t in terms] + [f"%{t}%" for t in _REMOTE_TERMS]
+            params += loc_params + [f"%{t}%" for t in _REMOTE_TERMS]
         else:
             where.append(loc_sql)
-            params += [_like(t) for t in terms]
+            params += loc_params
 
     columns = "*" if persona_vector else (
         "id, job_id, title, company, normalized_company, location, description, url, salary_min, salary_max, "
@@ -368,7 +375,7 @@ def get_jobs(
         if exclude and ((job.get("company") or "").lower(), (job.get("title") or "").lower()) in exclude:
             continue
         loc = (job.get("location") or "").lower()
-        if matchers and not any(matches(loc) for _, matches in matchers):
+        if matchers and not any(matches(loc) for _, _, matches in matchers):
             if not (remote and any(t in loc for t in _REMOTE_TERMS)):
                 continue
         candidates.append(job)

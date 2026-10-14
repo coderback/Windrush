@@ -15,6 +15,8 @@ import logging
 import os
 from typing import AsyncGenerator, Awaitable, Callable
 
+from .models import is_present_end_date
+
 logger = logging.getLogger("windrush.browser_agent")
 
 _BACKEND = os.environ.get("LLM_BACKEND", "ollama").lower()
@@ -28,6 +30,8 @@ VIEWPORT = {"width": 1280, "height": 800}
 # browser-use defaults to 500 steps; cap the LLM spend per application.
 _MAX_FILL_STEPS = 40
 _MAX_SUBMIT_STEPS = 4
+# The fill agent's final summary, shown to the user during review (bounded: it's LLM output).
+_MAX_NOTES_CHARS = 2000
 
 # Navigation the agent's browser must never reach: it runs inside the api container, next to
 # the internal services. Raw-IP URLs are blocked separately (BrowserProfile.block_ip_addresses).
@@ -207,6 +211,7 @@ async def _interactive_session(
     intro_action: str,
     intro_reason: str,
     on_submit: Callable[[], Awaitable[tuple[bool, str]]],
+    notes: str = "",
 ) -> AsyncGenerator[dict, None]:
     """
     Hand control to the user until they finish. Commands (from BrowserView.tsx):
@@ -215,12 +220,16 @@ async def _interactive_session(
       'done'   → the user submitted it themselves
       'skip' / 'cancel' / 'abort' → abandon (not submitted)
       any other text → typed into the focused field
+    `notes` (the agent's own summary) rides on the first event only; the UI keeps it for the review.
     """
     def interactive(action: str, reason: str, screenshot: str) -> dict:
         return {"action": action, "screenshot": screenshot or None, "blocked": True,
                 "reason": reason, "done": False, "interactive": True}
 
-    yield interactive(intro_action, intro_reason, await _screenshot_b64(browser_session))
+    intro = interactive(intro_action, intro_reason, await _screenshot_b64(browser_session))
+    if notes:
+        intro["notes"] = notes
+    yield intro
     again = "Click the screenshot or type below. 'submit' sends it, 'done' if you submitted it yourself, 'skip' cancels."
 
     while True:
@@ -313,14 +322,19 @@ def _known_answers(persona: dict) -> list[tuple[str, str]]:
         ("Disability", _DISABILITY_ANSWERS.get(diversity.get("disability_status") or "", "Prefer not to say")),
         ("Salary expectations (Annual)", screening.get("salary_canonical") or prefs.get("min_salary") or "Negotiable"),
         ("Salary expectations (Hourly)", prefs.get("expected_hourly_rate") or "Negotiable"),
-        ("Remote/Hybrid preference", prefs.get("remote_preference") or "No preference"),
     ]
+    if prefs.get("remote_preference"):
+        answers.append(("Remote/Hybrid preference", prefs["remote_preference"]))
     locations = ", ".join(loc for loc in prefs.get("preferred_locations") or [] if loc)
     if locations:
         answers.append(("Preferred work locations", locations))
-    if persona.get("history"):
-        employed = any(job.get("is_current") for job in persona["history"])
-        answers.append(("Are you currently employed", "Yes" if employed else "No"))
+    # Parsed CVs often leave is_current off and put "Present" (or nothing) in end_date, so "No" needs
+    # every role to have really ended; anything less certain is left for the user.
+    history = [job for job in persona.get("history") or [] if isinstance(job, dict)]
+    if any(job.get("is_current") or is_present_end_date(job.get("end_date")) for job in history):
+        answers.append(("Are you currently employed", "Yes"))
+    elif history and all(str(job.get("end_date") or "").strip() for job in history):
+        answers.append(("Are you currently employed", "No"))
     answers.append(("How did you hear about us", "Website / Internet search"))
     return answers
 
@@ -431,7 +445,7 @@ def _build_task(job_url: str, persona: dict, cover_letter: str,
     task += (
         "\n\nOnly state facts given above. If a question asks for a fact about the candidate that isn't "
         "covered (for example work authorisation, sponsorship, criminal record, notice period), do NOT guess: "
-        "leave it unanswered and list it in your final summary under 'Needs your input'."
+        "leave it unanswered and list it at the start of your final summary under 'Needs your input'."
     )
 
     if persona.get("custom_directives"):
@@ -445,8 +459,10 @@ def _build_task(job_url: str, persona: dict, cover_letter: str,
         "\n\nIMPORTANT — DO NOT SUBMIT. Never click the FINAL button that sends the application "
         "(e.g. 'Submit', 'Submit application', 'Apply', 'Send application', 'Finish'). The candidate reviews the "
         "filled form and submits it themselves. As soon as the only thing left is that final submission, stop and "
-        "call done with success=true, summarising what you filled and anything you were unsure about. If you cannot "
-        "fill the form (blocked, missing information, page errors), call done with success=false and say why."
+        "call done with success=true. In the done text, start with 'Needs your input: ...' (one question per line) "
+        "if you left any question unanswered, then summarise what you filled and anything you were unsure about. "
+        "If you cannot fill the form (blocked, missing information, page errors), call done with success=false and "
+        "say why, again starting with 'Needs your input: ...' for anything the candidate must answer."
     )
     return task
 
@@ -522,7 +538,8 @@ async def apply_with_browser(
     Async generator: the browser-use agent fills the application, then the user reviews it and
     decides whether to submit (see module docstring). Yields dicts:
       { action, screenshot (base64|None), blocked (bool), reason (str|None), done (bool),
-        interactive (bool, optional), submitted (bool, only on the final done event) }
+        interactive (bool, optional), submitted (bool, only on the final done event),
+        notes (str, only on the first review event: the agent's summary, "Needs your input" first) }
     The browser is always killed on exit — including when the client disconnects mid-run.
     """
     if not BROWSER_USE_AVAILABLE:
@@ -594,11 +611,13 @@ async def apply_with_browser(
 
         agent_error: Exception | None = None
         ready = False
-        summary = ""
+        notes = ""
         try:
             history = agent_task.result()
             ready = bool(history.is_successful())  # agent's own verdict: "form filled, ready to submit"
-            summary = (history.final_result() or "")[:300]
+            # Its summary starts with the "Needs your input" list, so it goes to the user whole,
+            # not squeezed into the one-line header.
+            notes = (history.final_result() or "").strip()[:_MAX_NOTES_CHARS]
         except Exception as exc:
             agent_error = exc
             logger.warning("browser agent failed: %s", exc)
@@ -608,19 +627,20 @@ async def apply_with_browser(
                    "blocked": False, "reason": None, "done": True}
             return
 
+        see_notes = " — see the agent's notes" if notes else ""
         if agent_error:
             intro = f"The agent hit a problem — handing control to you ({agent_error})"
             reason = "Finish the form yourself, then type 'submit' (or 'done' if you submitted it), or 'skip'."
         elif ready:
-            intro = "Form filled — review it before anything is sent" + (f". Agent notes: {summary}" if summary else "")
+            intro = "Form filled — review it before anything is sent" + see_notes
             reason = "Type 'submit' to send it, click/type to fix anything first, or 'skip' to cancel."
         else:
-            intro = "The agent couldn't finish the form" + (f": {summary}" if summary else "")
+            intro = "The agent couldn't finish the form" + see_notes
             reason = "Take over by clicking/typing, then 'submit' (or 'done' if you submitted it), or 'skip'."
 
         async for step in _interactive_session(
             browser_session, instruction_queue, intro, reason,
-            on_submit=lambda: _submit_with_agent(llm, browser_session),
+            on_submit=lambda: _submit_with_agent(llm, browser_session), notes=notes,
         ):
             yield step
             if step.get("done"):
