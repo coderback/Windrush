@@ -94,3 +94,37 @@ def test_fixture_jobs_from_discovery_are_never_stored(db, ollama, monkeypatch):
     monkeypatch.setattr(discovery, "search_jobs", fixture_only)
     asyncio.run(discovery._discover("anything", "London"))
     assert jobs_db.job_count() == 0
+
+
+def test_feed_uses_every_preferred_location_and_searches_each_target_title(db, ollama, monkeypatch):
+    uid = tracker.create_user("multi@x.com", "h")
+    tracker.update_user_persona(uid, {"preferences": {
+        "target_titles": ["Graduate Data Analyst", "Junior Software Engineer"],
+        "preferred_locations": ["London", "Manchester"],
+    }})
+    jobs_db.add_jobs([make_job(1, "Analyst", location="London, UK"),
+                      make_job(2, "Engineer", location="Manchester, UK"),
+                      make_job(3, "Designer", location="Leeds, UK"),
+                      make_job(4, "Analyst", company="Maple", location="London, Ontario, Canada")])
+    searches = []
+
+    async def record(query, location):
+        searches.append((query, location))
+        return []
+    monkeypatch.setattr(discovery, "search_jobs", record)
+    main.app.dependency_overrides[auth.get_current_user] = lambda: auth.User(id=uid, email="multi@x.com")
+    try:
+        async def flow():
+            async with _client() as c:
+                body = (await c.get("/jobs")).json()
+                while any(not t.done() for t in discovery._running.values()):
+                    await asyncio.sleep(0.01)
+            return body
+        body = asyncio.run(flow())
+    finally:
+        main.app.dependency_overrides.clear()
+
+    assert sorted(j["location"] for j in body["jobs"]) == ["London, UK", "Manchester, UK"]
+    assert body["discovering"] is True
+    assert sorted(searches) == sorted([(t, l) for t in ("Graduate Data Analyst", "Junior Software Engineer")
+                                       for l in ("London", "Manchester")])

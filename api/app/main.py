@@ -22,6 +22,7 @@ from . import pdf_generator
 from . import doc_render
 from . import jobs_db
 from . import net_guard
+from . import seniority
 from .models import Persona
 
 
@@ -529,6 +530,10 @@ from . import discovery
 
 # Live discovery kicks in (in the background) when page 1 has fewer matches than this.
 _THIN_FEED = 5
+# It searches the user's top target titles across their preferred locations, capped because
+# each (title, location) run is a full multi-source search in the worker pool.
+_DISCOVERY_TITLES = 3
+_DISCOVERY_PAIRS = 6
 # Request-path embedding budget: past this the feed falls back to recency ranking rather than
 # making the user wait on Ollama loading the model (background work still allows 600s).
 _FEED_EMBED_TIMEOUT_S = 20.0
@@ -558,9 +563,10 @@ async def get_jobs(
 
     persona_data = tracker.get_user_persona(current_user.id)
     prefs = persona_data.get("preferences", {}) or {}
-    titles = prefs.get("target_titles", []) or []
-    locs = prefs.get("preferred_locations", []) or []
-    effective_location = location or (locs[0] if locs else "")
+    titles = [t.strip() for t in prefs.get("target_titles", []) or [] if t and t.strip()]
+    locs = [loc.strip() for loc in prefs.get("preferred_locations", []) or [] if loc and loc.strip()]
+    # An explicit filter wins; otherwise any of the user's preferred locations matches.
+    effective_location = location or locs
 
     # "Interest-weighted" ranking vector: who you are (persona) + what you're searching for now.
     persona_text = semantic.vectorize_persona(persona_data)
@@ -587,28 +593,22 @@ async def get_jobs(
     discovering = False
     if page == 1 and len(jobs) < _THIN_FEED:
         free_text = [t for t in tag_list if t.lower() not in jobs_db.ROLE_TAGS | jobs_db.DOMAIN_TAGS]
-        live_query = query or (free_text[0] if free_text else "") or (titles[0] if titles else "software engineer")
-        if len(live_query) > 2:  # don't fire on a stray character
-            discovering = discovery.ensure(live_query, effective_location or "London")
+        live_queries = [query] if query else free_text[:1] or titles[:_DISCOVERY_TITLES] or ["software engineer"]
+        live_locations = [location] if location else [l for l in locs if l.lower() != "remote"] or ["London"]
+        pairs = [(q, l) for q in live_queries if len(q) > 2  # don't fire on a stray character
+                 for l in live_locations][:_DISCOVERY_PAIRS]
+        # ensure() is cheap for pairs already running or in cooldown; evaluate them all.
+        discovering = any([discovery.ensure(q, l) for q, l in pairs])
 
     return {
         "jobs": jobs,
         "query": query,
-        "location": effective_location,
+        "location": location or ", ".join(locs),
         "page": page,
         "limit": limit,
         "has_more": has_more,
         "discovering": discovering,
     }
-
-
-def _infer_level(title: str) -> str:
-    t = title.lower()
-    if any(w in t for w in ["junior", "graduate", "entry", "associate", "intern"]):
-        return "junior"
-    elif any(w in t for w in ["senior", "lead", "principal", "staff", "manager", "head", "director"]):
-        return "senior"
-    return "mid"
 
 
 # ── Per-job agent endpoints (SSE) ─────────────────────────────────────────────
@@ -679,7 +679,7 @@ async def job_from_url(
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Could not fetch that listing: {exc}")
 
-    job["level"] = _infer_level(job.get("title", ""))
+    job["level"] = seniority.infer_level(job.get("title", ""), job.get("description", ""))
     job["tags"] = jobs_db._extract_tags(job)
     return {"job": job}
 

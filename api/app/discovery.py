@@ -98,7 +98,6 @@ def _done(key: tuple[str, str], task: asyncio.Task) -> None:
 
 
 async def _discover(query: str, location: str) -> None:
-    from .main import _infer_level  # deferred: main imports this module
     started = time.monotonic()
     jobs = await search_jobs(query, location)  # concurrency is capped by the pool size
     # search_jobs falls back to the bundled mock fixture when every live source is empty;
@@ -106,7 +105,6 @@ async def _discover(query: str, location: str) -> None:
     live = [dict(j) for j in jobs if j.get("source") != "fixture"]
     for j in live:
         j["source"] = j.get("source") or "live"
-        j["level"] = _infer_level(j.get("title", ""))
     # Embedding is mostly waiting on Ollama, so a thread is enough here.
     added, refreshed = (await asyncio.to_thread(jobs_db.add_jobs, live)) if live else (0, 0)
     logger.info("discovery %r/%r: %d found, %d added, %d refreshed in %.1fs",

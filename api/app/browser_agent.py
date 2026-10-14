@@ -277,6 +277,54 @@ async def _interactive_session(
         yield interactive(label, again, await _screenshot_b64(browser_session))
 
 
+# Yes/no facts stated on the candidate's behalf. Unanswered (None/missing) ones are left out of
+# the prompt entirely, so the agent never asserts something the user hasn't told us.
+_YES_NO_QUESTIONS = (
+    ("core_info", "right_to_work_uk", "Right to work / work authorisation in the UK"),
+    ("core_info", "require_sponsorship", "Require visa sponsorship"),
+    ("core_info", "has_government_ties", "Has government ties"),
+    ("preferences", "relocation_willingness", "Willing to relocate"),
+    ("preferences", "can_work_in_person", "Can work in-person"),
+    ("preferences", "can_start_immediately", "Can start immediately"),
+    ("preferences", "has_reliable_transportation", "Has reliable transportation"),
+    ("preferences", "needs_accommodations", "Needs accommodations"),
+)
+
+_DISABILITY_ANSWERS = {"yes": "Yes", "no": "No", "prefer_not_to_say": "Prefer not to say"}
+
+
+def _known_answers(persona: dict) -> list[tuple[str, str]]:
+    core = persona.get("core_info") or {}
+    prefs = persona.get("preferences") or {}
+    screening = persona.get("screening") or {}
+    diversity = persona.get("diversity") or {}
+    sections = {"core_info": core, "preferences": prefs}
+
+    answers = []
+    for section, field, question in _YES_NO_QUESTIONS:
+        value = sections[section].get(field)
+        if isinstance(value, bool):
+            answers.append((question, "Yes" if value else "No"))
+
+    # Declining to answer is always a true statement, so it's the fallback for diversity questions.
+    answers += [
+        ("Gender", diversity.get("gender") or "Prefer not to say"),
+        ("Ethnicity / diversity questions", diversity.get("ethnicity") or "Prefer not to say"),
+        ("Disability", _DISABILITY_ANSWERS.get(diversity.get("disability_status") or "", "Prefer not to say")),
+        ("Salary expectations (Annual)", screening.get("salary_canonical") or prefs.get("min_salary") or "Negotiable"),
+        ("Salary expectations (Hourly)", prefs.get("expected_hourly_rate") or "Negotiable"),
+        ("Remote/Hybrid preference", prefs.get("remote_preference") or "No preference"),
+    ]
+    locations = ", ".join(loc for loc in prefs.get("preferred_locations") or [] if loc)
+    if locations:
+        answers.append(("Preferred work locations", locations))
+    if persona.get("history"):
+        employed = any(job.get("is_current") for job in persona["history"])
+        answers.append(("Are you currently employed", "Yes" if employed else "No"))
+    answers.append(("How did you hear about us", "Website / Internet search"))
+    return answers
+
+
 def _build_task(job_url: str, persona: dict, cover_letter: str,
                 job_email: str, job_password: str, cv_path: str) -> str:
     lines = []
@@ -365,9 +413,6 @@ def _build_task(job_url: str, persona: dict, cover_letter: str,
         for k, v in screening.items():
             if v: screening_block += f"- {k.replace('_', ' ').title()}: {v}\n"
 
-    # Diversity & Inclusion
-    diversity = persona.get("diversity", {})
-    
     creds_block = "\n".join(lines)
     profile_block = "\n".join(profile_lines)
     task = f"Apply for the job at: {job_url}"
@@ -380,43 +425,13 @@ def _build_task(job_url: str, persona: dict, cover_letter: str,
     if stories_block:
         task += stories_block
 
-    rtw_uk = "Yes" if core.get("right_to_work_uk", True) else "No"
-    sponsorship = "Yes" if core.get("require_sponsorship", False) else "No"
-    salary = screening.get("salary_canonical") or f"{prefs.get('min_salary', 'Negotiable')}"
-    hourly = f"{prefs.get('expected_hourly_rate', 'Negotiable')}"
-    remote = prefs.get("remote_preference", "remote")
-    relocate = "Yes" if prefs.get("relocation_willingness", False) else "No"
-    pref_locs = ", ".join(prefs.get("preferred_locations", []))
-    in_person = "Yes" if prefs.get("can_work_in_person", True) else "No"
-    immediate = "Yes" if prefs.get("can_start_immediately", False) else "No"
-    transport = "Yes" if prefs.get("has_reliable_transportation", True) else "No"
-    accommodations = "Yes" if prefs.get("needs_accommodations", False) else "No"
-    gov_ties = "Yes" if core.get("has_government_ties", False) else "No"
-
-    # Diversity defaults
-    gender = diversity.get("gender") or "Prefer not to say"
-    disability = diversity.get("disability_status") or "No"
-    ethnicity = diversity.get("ethnicity") or "Prefer not to say"
-
+    task += "\n\nFor dropdown / multiple-choice questions use these answers:\n" + "\n".join(
+        f"- {question}: {answer}" for question, answer in _known_answers(persona)
+    )
     task += (
-        f"\n\nFor dropdown / multiple-choice questions use these answers:"
-        f"\n- Right to work / work authorisation in the UK: {rtw_uk}"
-        f"\n- Require visa sponsorship: {sponsorship}"
-        f"\n- Gender: {gender}"
-        f"\n- Ethnicity / diversity questions: {ethnicity}"
-        f"\n- Disability: {disability}"
-        f"\n- Salary expectations (Annual): {salary}"
-        f"\n- Salary expectations (Hourly): {hourly}"
-        f"\n- Remote/Hybrid preference: {remote}"
-        f"\n- Willing to relocate: {relocate}"
-        f"\n- Preferred work locations: {pref_locs}"
-        f"\n- Can work in-person: {in_person}"
-        f"\n- Can start immediately: {immediate}"
-        f"\n- Has reliable transportation: {transport}"
-        f"\n- Needs accommodations: {accommodations}"
-        f"\n- Has government ties: {gov_ties}"
-        f"\n- How did you hear about us: Website / Internet search"
-        f"\n- Are you currently employed: Yes if experience list is non-empty, else No"
+        "\n\nOnly state facts given above. If a question asks for a fact about the candidate that isn't "
+        "covered (for example work authorisation, sponsorship, criminal record, notice period), do NOT guess: "
+        "leave it unanswered and list it in your final summary under 'Needs your input'."
     )
 
     if persona.get("custom_directives"):

@@ -85,6 +85,9 @@ def init_db(db_path: str = "") -> None:
             except sqlite3.OperationalError:
                 pass
         _migrate_plaintext_job_passwords(con)
+        if con.execute("PRAGMA user_version").fetchone()[0] < 1:
+            _clear_default_eligibility_answers(con)
+            con.execute("PRAGMA user_version = 1")
         # Create index after migrations so user_id column is guaranteed to exist
         try:
             con.execute(_CREATE_INDEX)
@@ -163,6 +166,33 @@ def _migrate_plaintext_job_passwords(con: sqlite3.Connection) -> None:
         con.execute("UPDATE users SET persona=? WHERE id=?", (json.dumps(persona), user_id))
     if rows:
         logger.info("Moved job passwords for %d user(s) out of persona JSON into encrypted storage", len(rows))
+
+
+# No version of the UI could set these, so any stored value is an old model default
+# (right to work: yes, sponsorship: no, in person: yes) rather than the user's answer.
+_NEVER_USER_SET = (("core_info", "right_to_work_uk"), ("core_info", "require_sponsorship"),
+                   ("preferences", "can_work_in_person"))
+
+
+def _clear_default_eligibility_answers(con: sqlite3.Connection) -> None:
+    """One-off: forget yes/no answers that were only ever defaults, so they read as unanswered."""
+    cleared = 0
+    for user_id, raw in con.execute("SELECT id, persona FROM users").fetchall():
+        try:
+            persona = json.loads(raw or "{}")
+        except json.JSONDecodeError:
+            continue
+        changed = False
+        for section, field in _NEVER_USER_SET:
+            block = persona.get(section)
+            if isinstance(block, dict) and block.get(field) is not None:
+                block[field] = None
+                changed = True
+        if changed:
+            con.execute("UPDATE users SET persona=? WHERE id=?", (json.dumps(persona), user_id))
+            cleared += 1
+    if cleared:
+        logger.info("Cleared default right-to-work/sponsorship answers for %d user(s)", cleared)
 
 
 def update_user_persona(user_id: str, persona: dict) -> bool:
