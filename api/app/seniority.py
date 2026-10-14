@@ -2,9 +2,11 @@
 Seniority of a job listing: "junior", "mid" or "senior".
 
 The title decides when it says so, matching whole words, strongest signal first:
-  1. unmistakably senior   — "Senior …", "Principal …", "Head of …", "… Director"
-  2. unmistakably junior   — "Graduate …", "… Interns", "Junior …", "Apprenticeships"
-  3. associate / "… I"     — "Associate Product Manager", "Software Engineer I", "SDE I"
+  1. unmistakably senior   — "Senior …", "Principal …", "Head of …", "… Director", "Associate Partner"
+  2. unmistakably junior   — "Graduate …", "… Interns", "Junior …", "Apprenticeships", "Summer
+                             Analyst", "Vacation Scheme", "Werkstudent", "Class of 2027"
+  3. associate / "… I"     — "Associate Product Manager", "Software Engineer I", "SDE I"; junior
+                             unless the description asks for 3+ years
   4. lead / manager        — "Engineering Manager", "Tech Lead"
 so "Associate Director" is senior and "Graduate Project Manager" is junior. Before matching, words
 that are not this role's rank are dropped:
@@ -16,24 +18,28 @@ that are not this role's rank are dropped:
     any other job is still the trainee: "Graduate Administrator", "Graduate Manager".
 
 A neutral title falls back to the description:
-  1. Years of experience asked of the candidate. "5+ years (of) … experience" and "Experience: 2-4
-     years" count from their lower bound ("between 2 and 5"; "up to 2" is 0; months round down; more
-     than 15 is company age). A figure does not count when it is someone else's — the nearest subject
-     before it in its clause is the employer or its people ("we have", "our", "a firm with", "engineers
-     have", "learn from", "mentored by", "alongside") rather than the candidate ("you", "someone",
-     "candidates", "looking for", "must"), or it opens "With 10 years of experience, we …" — or is a
-     span of time ("graduated in the last 3 years"). Figures marked preferred / desirable / a plus /
-     ideally count only when no required one does. The largest gives senior at 5+, mid at 3-4 and
-     junior at 0-1, whatever the wording.
+  1. Years of experience asked of the candidate. "5+ years (of) … experience", "7+ yrs exp", "6 PQE",
+     "6+ years in a similar role" and "Experience: 2-4 years" count from their lower bound ("between 2
+     and 5"; an upper bound — "up to", "no more than", "less than", "under", "maximum" — is 0; months
+     round down; more than 15 is company age). A figure does not count when it is someone else's — the
+     nearest subject before it in its clause is the employer or its people ("we have", "our", "a firm
+     with", "engineers have", "engineers with", "the team has", "learn from", "mentored by",
+     "alongside") rather than the candidate ("you", "someone", "candidates", "looking for", "must",
+     "we are hiring engineers with", "will have"), or it opens "With 10 years of experience, we …" — or
+     is a span of time ("graduated in the last 3 years"), or the candidate is told they do not need it
+     ("you don't need 5+ years"). Figures marked preferred / desirable / a plus / ideally count only
+     when no required one does. The largest gives senior at 5+, mid at 3-4 and junior at 0-1, whatever
+     the wording. With no figure in the description, one in the title counts ("Engineer (0-1 yrs)").
   2. Otherwise junior wording ("graduate scheme", "recent graduates", "entry-level", "no experience
-     required") gives junior, unless a negation governs it ("not an entry-level role", "not suitable
+     required", "industrial placement", "a … apprenticeship", "graduating in 2027", "this is a junior
+     position") gives junior, unless a negation governs it ("not an entry-level role", "not suitable
      for recent graduates", but not "sponsorship is not available for this graduate role") or it is
      the role's own duty ("you will mentor recent graduates", "help onboard new grads", but not "we
      are hiring recent graduates").
-  3. Anything else is mid.
+  3. Anything else is mid, or junior for an "Associate" / "… I" title.
 """
 import re
-from bisect import bisect_right
+from bisect import bisect_left, bisect_right
 
 # Senior-looking words that name a place, a team or a non-senior job, and "office of the CTO" /
 # "reporting to the Head of X" phrases, whose rank is someone else's. The phrase stops at the next
@@ -44,9 +50,11 @@ _NOT_A_RANK = re.compile(
     r"|\b(?:office of|reporting to)\b(?:(?! [-/] )[^,:;()\[\]|–—])*"
 )
 # The scheme word in the title of someone who runs a scheme: "Apprenticeship Manager",
-# "Graduate Recruitment Partner", "Internship Program Coordinator", "Graduate Recruiter". A person
-# word before any other job is the trainee doing it: "Graduate Administrator", "Graduate Manager".
-_SCHEME = r"(?:apprenticeships?|internships?|placements?|early careers?)"
+# "Graduate Recruitment Partner", "Internship Program Coordinator", "Graduate Recruiter", "Early
+# Talent Recruitment Partner", "Vacation Scheme Coordinator". A person word before any other job is
+# the trainee doing it: "Graduate Administrator", "Graduate Manager".
+_SCHEME = (r"(?:apprenticeships?|internships?|placements?|early careers?|(?:early|emerging) talent|fast stream|"
+           r"vac(?:ation)? schemes?)")
 _PERSON = r"(?:graduates?|grads?|interns?|apprentices?)"
 _SCHEME_TEAM = (r"(?:programmes?|programs?|schemes?|recruitment|recruiting|talent|acquisition|outreach|"
                 r"attraction|hiring|engagement|relations|skills)")
@@ -57,13 +65,24 @@ _PROGRAMME_STAFF = re.compile(
     rf"|\b{_SCHEME}(?= {_STAFF_OR_LEAD}\b)|\b{_PERSON}(?= (?:recruiters?|assessors?)\b)"
 )
 
-_STRONG_SENIOR = re.compile(r"\b(senior|sr|principal|staff|head|director|vp|vice president|chief)\b")
+# Partner and professor grades outrank the "associate" / "junior" before them.
+_STRONG_SENIOR = re.compile(r"\b(senior|sr|principal|staff|head|director|vp|vice president|chief|"
+                            r"(?:associate|junior) partner|associate professor)\b")
 _STRONG_JUNIOR = re.compile(
     r"\b(junior|jr|graduates?|grads?|entry[ -]level|interns?|internships?|apprentices?|apprenticeships?|"
-    r"trainees?|placements?|new grads?|early careers?|industrial year|year in industry)\b"
+    r"trainees?|placements?|new grads?|early careers?|industrial year|year in industry|"
+    # Graduate cohorts and entry grades: "Emerging Talent Programme", "Class of 2027", "Newly Qualified"
+    r"(?:early|emerging) talent|fast stream|class of 20\d\d|analyst (?:programmes?|programs?)|newly qualified|"
+    # Student work-experience programmes, including German and French ones; "Stage" only as the
+    # title's first part ("Stage – Développeur"), not "Stage Manager".
+    r"summer analysts?|(?:spring|summer|winter) insights?|insight (?:days?|weeks?|programmes?|programs?)|"
+    r"vac(?:ation)? schemes?|working students?|co-?op students?|werkstudent(?:in)?|"
+    r"praktik(?:um|ant(?:in)?)|alternan(?:ce|t)|stage(?= ?[-–—:|(]))\b"
 )
+# A weak signal: a figure in the description of 3+ years outranks it ("Associate" at a bank is the
+# rung after Analyst). Associate Solicitor is a qualified lawyer.
 _WEAK_JUNIOR = re.compile(
-    r"\bassociate\b"
+    r"\bassociate\b(?! (?:partner|professor|solicitor)\b)"
     # "Software Engineer I" / "SDE 1" — the first rung of a numbered ladder, but not "I/II" or "1-2".
     r"|\b(?:engineer|developer|analyst|scientist|consultant|swe|sde) (?:i|1)\b"
     r"(?! ?[-/–] ?(?:i{1,3}|iv|v|\d)\b)"
@@ -71,10 +90,19 @@ _WEAK_JUNIOR = re.compile(
 _WEAK_SENIOR = re.compile(r"\b(lead|manager|architect)\b")
 
 _JUNIOR_DESCRIPTION = re.compile(
-    r"\b(graduate (?:schemes?|programmes?|programs?|roles?|positions?)|recent graduates?|new grads?|"
+    r"\b(graduate (?:(?:development|training|leadership|engineering|trainee) )?"
+    r"(?:schemes?|programmes?|programs?|roles?|positions?|intakes?|cohorts?)|"
+    r"(?:recent|new|20\d\d) graduates?|new grads?|on track to graduate|"
+    r"graduat(?:ing|e) in (?:(?:the )?(?:summer|autumn|spring|winter|june|july) (?:of )?)?20\d\d|"
     r"entry[\s-]level|no (?:prior |previous )?(?:professional |commercial )?experience (?:is )?"
     r"(?:required|needed|necessary)|experience: none|early careers? (?:programmes?|programs?)|"
-    r"final[\s-]year students?)\b"
+    r"final[\s-]year students?|"
+    # Narrow phrases only: a bare "apprentices" or "internships" is as often someone else
+    # ("mentoring graduates and apprentices", "we are not offering internships").
+    r"(?:paid|summer|seniority level) internships?|industrial placements?|placement (?:years?|students?)|"
+    r"year in industry|(?:an?|this|the) (?:[\w-]+ ){0,4}apprenticeship|school[\s-]leavers?|"
+    r"trainee (?:positions?|roles?|posts?)|"
+    r"junior (?:roles?|positions?|posts?|opportunit(?:y|ies))|(?:hiring|recruiting|looking for|seeking) an? junior)\b"
 )
 # A negation that governs the junior phrase straight after it: "not an entry-level role", "no
 # graduates or entry-level applicants", "not suitable for recent graduates", "unable to consider
@@ -100,44 +128,81 @@ _NUMBER_WORDS = {w: i for i, w in enumerate(
     "one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen".split(), 1)}
 # Not part of a bigger figure ("100 years" is not 0, "150 years" is not 50, "2.5" is not 5).
 _NUMBER = r"(?:(?<![\d.,])\d{1,2}(?!\d)|\b(?:" + "|".join(_NUMBER_WORDS) + r")\b)"
-# "5 years", "5+ yrs", "5 or more years", "2-4 years'", "between two and five years", "up to 2
-# years", "6 months". Text is whitespace-collapsed first and each optional space is followed by its
-# own literal, so a long run of spaces cannot make the engine backtrack.
+# "5 years", "5+ yrs", "5yrs+", "5 or more years", "2-4 years'", "between two and five years", "up to
+# 2 years", "less than 2 years", "6 months", "0-2 YOE", "7 PQE". An upper bound ("up to", "no more
+# than", "under", "maximum") counts from 0. Text is whitespace-collapsed first and each optional
+# space is followed by its own literal, so a long run of spaces cannot make the engine backtrack.
 _AMOUNT = (
-    rf"(?P<up_to>up to )?(?P<n>{_NUMBER})(?: ?\+| plus| or more)?(?: ?(?:-|–|—|to|and) ?{_NUMBER}\+?)?"
-    r" ?(?P<unit>years?|yrs?|months?)['’]?"
+    r"(?P<up_to>(?:up to|no more than|not more than|less than|fewer than|under|maximum(?: of)?|max\.?) )?"
+    rf"(?P<n>{_NUMBER})(?: ?\+| plus| or more)?(?: ?(?:-|–|—|to|and) ?{_NUMBER}\+?)?"
+    r"(?: ?(?P<unit>years?|yrs?|months?)(?: ?\+)?['’]?|(?= (?:yoe|pqe)\b))"
 )
 # A pronoun or preposition between the figure and "experience" means they are not one phrase:
 # "3 years you'll gain experience", "after 3 years based on experience".
 _GAP_STOP = r"(?:you|your|we|our|they|their|it|its|in|on|at|for|from|with|by|as|after|to)(?![\w-])"
 # "3+ years of non-internship professional software development experience", "at least five
-# years' experience", "a minimum of 7 years commercial experience" — but not "Programme length: 3
-# years / Experience: none", where "Experience:" starts the next field.
+# years' experience", "a minimum of 7 years commercial experience", "7+ yrs exp", "6+ years in a
+# similar position" — but not "Programme length: 3 years / Experience: none", where "Experience:"
+# starts the next field.
 _AMOUNT_THEN_EXPERIENCE = re.compile(
-    _AMOUNT + rf"(?: of)?(?: (?!{_GAP_STOP})[\w'’/-]+){{0,4}}? experience(?! ?:)"
+    _AMOUNT + rf"(?:(?: of)?(?: (?!{_GAP_STOP})[\w'’/-]+){{0,4}}? (?:experience|(?:exp|yoe|pqe)\b)(?! ?:)"
+    r"| (?:in|as) (?:an? |the )?(?:similar|comparable|relevant|equivalent|related|same) "
+    r"(?:roles?|positions?|capacity)\b)"
 )
-# "Experience: 5+ years", "Experience required: 3 years", "experience of at least 5 years"
+# "Experience: 5+ years", "Experience required: 3 years", "experience of at least 5 years",
+# "Experience: between 1 and 2 years", "Experience of 5 years+", and Indeed's "Experience: • Python:
+# 1 year".
 _EXPERIENCE_THEN_AMOUNT = re.compile(
-    r"\bexperience(?: [a-z]+){0,2}(?: ?[:–—-] ?| (?=at least |a minimum |minimum |min\b))"
-    r"(?:at least |a minimum of |minimum (?:of )?|min\.? )?" + _AMOUNT
+    r"\bexperience(?: [a-z]+){0,2}(?: ?[:–—-] ?(?:• ?[\w /+#.&-]{1,40}?: ?)?"
+    r"| (?=at least |a minimum |minimum |min\b|between )| of (?=\S+ ?\+? ?(?:years?|yrs?)\b))"
+    r"(?:at least |a minimum of |minimum (?:of )?|min\.? |between )?" + _AMOUNT
 )
 
+# Other people, plural or collective: "engineers with 10+ years", "experts who have", "the team
+# has", "senior engineers bring". Not "an engineer with 5+ years", which is the candidate.
+_PEOPLE = (r"(?:engineers|developers|experts|mentors|colleagues|consultants|professionals|specialists|"
+           r"leaders|managers|scientists|analysts|peers|founders|partners|people)(?: who| that)?")
+_THEIR_PEOPLE = rf"(?:{_PEOPLE}|(?:team|staff|mentor|buddy)(?: who| that)?) (?:with|ha(?:ve|s|d)|bring)"
 # Whose experience a figure is: the candidate's, or the employer's and its people's. The last of
 # these before a figure in its clause decides.
 _SUBJECT = re.compile(
-    r"\b(?:(?P<candidate>you(?:rs?|rself)?|someone|somebody|candidates?|applicants?|individuals?|"
-    r"looking for|seek\w*|requir\w*|need\w*|want\w*|expect\w*|must|should|ideal\w*)"
-    r"|we|our|they|their|its|firm|company|agency|alongside|[a-z]+s ha(?:ve|d)"
+    r"\b(?:(?P<candidate>"
+    # People a hiring word is after are the candidate: "hiring engineers with 5+ years", "looking
+    # for backend developers who have", "£120k for engineers with", "applications from people with".
+    r"(?:looking for|seek\w*|hir(?:e|es|ed|ing)|recruit(?:s|ed|ing)?|want\w*|need\w*|welcom\w*|consider\w*|"
+    rf"hear from|for)(?: (?!(?:our|their|its) )[\w-]+){{0,3}}? {_PEOPLE} (?:with|ha(?:ve|d)|bring)|"
+    r"you(?:rs?|rself)?|someone|somebody|candidates?|applicants?|individuals?|"
+    r"looking for|seek\w*|requir\w*|need\w*|want\w*|expect\w*|must|should|ideal\w*|"
+    # The employer hiring is about the candidate: "we are hiring engineers with", "the person we
+    # hire will have", "we'd love to hear from". Not "recruitment", so "a recruitment firm with
+    # over 10 years" stays the employer's.
+    r"hir(?:e|es|ed|ing)|recruit(?:s|ed|ing)?|welcom\w*|consider\w*|open to|hear from|speak (?:to|with)|"
+    r"will have|['’]ll have)"
+    rf"|we|our|they|their|its|firm|company|agency|alongside|[a-z]+s ha(?:ve|d)|{_THEIR_PEOPLE}"
     r"|(?:learn\w*|mentored|coached|supported|trained|taught|guided|led|managed)(?: \w+)? (?:from|by))\b"
 )
 _OPENER = re.compile(r" ?with\b")
 _TIME_SPAN = re.compile(r"\b(?:after|(?:in|within|during|over) the (?:last|past|next|first)) $")
-# A figure marked as optional: in its sentence before it ("Nice to have: 3+ years") or in its clause
-# after it ("5 years experience preferred").
+# A figure the candidate is told they do not need: "you don't need 5+ years", "no need for 3+ years".
+_NEGATED_FIGURE = re.compile(
+    r"(?:\b(?:not|no|never)|n['’]t) (?:\w+ )?(?:need|requir|expect|ask)\w*"
+    r"(?: (?:for|of|you|to|have|had|any|a|an|the|at least|a minimum of))* $"
+)
+# A figure marked as optional: in its clause after it ("5 years experience preferred"), or before it
+# in its sentence by a soft word that points forward ("Ideally 3+ years", "Nice to have: 3+ years",
+# "Desirable - 3+ years") with no requirement word in between. A soft word said of something else
+# ("Knowledge of Kafka is a plus and you must have 5+ years") does not make the figure optional.
 _SOFT = re.compile(
     r"\b(?:ideally|preferabl[ey]|preferred|desirable|desired|nice to have|bonus|a plus|advantageous|"
     r"an advantage|beneficial)(?![\w-])"
 )
+_SOFT_FORWARD = re.compile(r"\b(?:ideally|preferabl[ey]|bonus|nice to have)\b")
+_SOFT_HEADING = re.compile(_SOFT.pattern + r"(?: [\w-]+){0,2}(?: ?[:,]| [-–—] )")
+_HARD = re.compile(r"(?<!not )(?<!n't )(?<!n’t )\b(?:must|need\w*|requir\w*|essential|mandatory)\b")
+
+# A bare figure closing a title or its bracket is its experience bar: "Software Engineer (0-1 yrs)".
+# Not "12 Month Contract" or "2 Year Fixed Term".
+_TITLE_YEARS = re.compile(r"\b(yrs?|years?)(?=\)|$)")
 
 # Where clauses and sentences end. Not at a bracket: "5+ years of experience (preferred)".
 _CLAUSE_END = re.compile(r"[.!?;:,•|]| [-–—] ")
@@ -171,7 +236,7 @@ def _years(m: re.Match) -> int:
     """A figure's lower bound in whole years: "2-4 years" is 2, "up to 2 years" 0, "18 months" 1."""
     n = m["n"]
     years = 0 if m["up_to"] else int(n) if n.isdigit() else _NUMBER_WORDS[n]
-    return years // 12 if m["unit"].startswith("month") else years
+    return years // 12 if (m["unit"] or "").startswith("month") else years  # no unit: "3 PQE"
 
 
 def _years_required(d: str, clauses: list[int]) -> int | None:
@@ -185,10 +250,13 @@ def _years_required(d: str, clauses: list[int]) -> int | None:
     subjects = list(_SUBJECT.finditer(d))
     subject_ends = [s.end() for s in subjects]
     softs = [m.start() for m in _SOFT.finditer(d)]
+    hards = [m.start() for m in _HARD.finditer(d)]
 
     def asked_of_candidate(m: re.Match) -> bool:
         clause = _start_of(clauses, m.start())
         if _TIME_SPAN.search(d, max(clause, m.start() - 20), m.start()):
+            return False
+        if _NEGATED_FIGURE.search(d, max(clause, m.start() - 50), m.start()):
             return False
         k = bisect_right(subject_ends, m.start()) - 1
         if k >= 0 and subjects[k].start() >= clause:  # the nearest subject before it in its clause
@@ -200,8 +268,18 @@ def _years_required(d: str, clauses: list[int]) -> int | None:
         return bool(after and after.start() < _end_of(sentences, m.end()) and after["candidate"])
 
     def is_soft(m: re.Match) -> bool:
-        return (_any_in(softs, _start_of(sentences, m.start()), m.start())
-                or _any_in(softs, m.end(), _end_of(clauses, m.end())))
+        end = _end_of(clauses, m.end())
+        if _any_in(hards, m.end(), end):  # "6+ years of Java is essential"
+            return False
+        if _any_in(softs, m.end(), end):  # "5 years experience preferred"
+            return True
+        # At most _REACH characters back, so only a few soft words to look at.
+        for s in softs[bisect_left(softs, _start_of(sentences, m.start())):bisect_left(softs, m.start())]:
+            forward = _SOFT_FORWARD.match(d, s) or (
+                _SOFT_HEADING.match(d, s) and not d[_start_of(clauses, s):s].strip())
+            if forward and not _any_in(hards, s, m.start()):
+                return True
+        return False
 
     # The largest required figure ("5+ years of engineering, 1+ year of AWS" is a 5-year role), or
     # failing that the largest optional one.
@@ -235,18 +313,26 @@ def _has_junior_wording(d: str, clauses: list[int]) -> bool:
 def infer_level(title: str, description: str = "") -> str:
     t = " ".join((title or "").split()).lower()
     t = _PROGRAMME_STAFF.sub("", _NOT_A_RANK.sub("", t))
+    weak_junior = False
     for pattern, level in ((_STRONG_SENIOR, "senior"), (_STRONG_JUNIOR, "junior"),
                            (_WEAK_JUNIOR, "junior"), (_WEAK_SENIOR, "senior")):
         if pattern.search(t):
-            return level
+            if pattern is not _WEAK_JUNIOR:
+                return level
+            weak_junior = True  # "Associate", "Engineer I": a stated 3+ years outranks it
+            break
 
     d = " ".join((description or "").split()).lower()
     clauses = _starts(_CLAUSE_END, d)
     need = _years_required(d, clauses)
+    if need is None and t:
+        # The title's own figure: "Software Engineer (0-1 yrs)", "Developer, 0–2 YOE".
+        tt = _TITLE_YEARS.sub(r"\1 experience", t)
+        need = _years_required(tt, _starts(_CLAUSE_END, tt))
     if need is not None and need >= 5:
         return "senior"
     if need is not None and need >= 3:
         return "mid"
-    if (need is not None and need <= 1) or _has_junior_wording(d, clauses):
+    if weak_junior or (need is not None and need <= 1) or _has_junior_wording(d, clauses):
         return "junior"
     return "mid"

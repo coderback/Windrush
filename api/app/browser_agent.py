@@ -312,8 +312,16 @@ _YES_NO_QUESTIONS = (
 
 _DISABILITY_ANSWERS = {"yes": "Yes", "no": "No", "prefer_not_to_say": "Prefer not to say"}
 
-# A year (19xx/20xx) in a role's end date: the role has actually ended.
+# A year (19xx/20xx) in a role's end date: the role has actually ended — unless a present word is
+# in it too, as when "Mid-2019-Present" splits at its first hyphen or a CV lists stints ("Nov 2012,
+# Dec 2012 – Present").
 _END_YEAR = re.compile(r"(?<!\d)(?:19|20)\d{2}(?!\d)")
+_PRESENT_WORD = re.compile(r"\b(?:present|current(?:ly)?|now|ongoing|today|(?:to|till|until)\s+date)\b", re.I)
+
+
+def _has_ended(end_date) -> bool:
+    end = str(end_date or "")
+    return bool(_END_YEAR.search(end)) and not _PRESENT_WORD.search(end)
 
 
 def _known_answers(persona: dict) -> list[tuple[str, str]]:
@@ -348,7 +356,7 @@ def _known_answers(persona: dict) -> list[tuple[str, str]]:
     history = [job for job in persona.get("history") or [] if isinstance(job, dict)]
     if any(job.get("is_current") or is_present_end_date(job.get("end_date")) for job in history):
         answers.append(("Are you currently employed", "Yes"))
-    elif history and all(_END_YEAR.search(str(job.get("end_date") or "")) for job in history):
+    elif history and all(_has_ended(job.get("end_date")) for job in history):
         answers.append(("Are you currently employed", "No"))
     answers.append(("How did you hear about us", "Website / Internet search"))
     return answers

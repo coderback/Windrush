@@ -58,6 +58,10 @@ def test_upload_merges_persona_and_stores_one_file_per_user(client, user, db, fa
     ("Jan 2020 till date", ("Jan 2020", "", True)),
     ("June 2022 – Today", ("June 2022", "", True)),
     ("2019 - Currently", ("2019", "", True)),
+    # The end is itself a range or a list of stints that ends in a present word: still current.
+    ("Mid-2019-Present", ("Mid", "2019-Present", True)),
+    ("2010 – Nov 2012, Dec 2012 – Present", ("2010", "Nov 2012, Dec 2012 – Present", True)),
+    ("2016 – 2018, 2019 – 2020", ("2016", "2018, 2019 – 2020", False)),
 ])
 def test_cv_role_dates_split_and_present_means_current(dates, expected):
     assert main._split_cv_dates(dates) == expected

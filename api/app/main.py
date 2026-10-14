@@ -173,6 +173,8 @@ async def health():
 # so "2020-01 - 2021-03" and "2020-01–2021-06" split between the dates rather than inside the first one.
 _DATE_RANGE_SEPS = (re.compile(r"\s+(?:-|–|—|to|till|until)\s+", re.I), re.compile(r"\s*[–—]\s*"),
                     re.compile(r"\s*-\s*"))
+# The pieces of an end date that is itself a range or a list of stints.
+_END_DATE_PIECES = re.compile(r"[-–—,]|\s+(?:to|till|until)\s+", re.I)
 
 
 def _split_cv_dates(dates) -> tuple[str, str, bool]:
@@ -183,7 +185,12 @@ def _split_cv_dates(dates) -> tuple[str, str, bool]:
         parts = sep.split(text, maxsplit=1)
         if len(parts) == 2:
             start, end = parts[0].strip(), parts[1].strip()
-            return (start, "", True) if is_present_end_date(end) else (start, end, False)
+            if is_present_end_date(end):
+                return start, "", True
+            # "Mid-2019-Present" splits at its first hyphen and "2010 – 2012, 2013 – Present" lists
+            # stints: still current when the end's last piece is a present word. The end is kept, as
+            # it holds a date the user may want.
+            return start, end, is_present_end_date(_END_DATE_PIECES.split(end)[-1].strip())
     return "", "", is_present_end_date(text)
 
 
@@ -552,8 +559,9 @@ _THIN_FEED = 5
 # It runs once per top target title, each run covering their first few preferred locations;
 # capped because each run is a full multi-source search in the worker pool.
 _DISCOVERY_TITLES = 3
-# Each location is one Adzuna call per title: 3 titles x 4 locations = 12 calls per feed load,
-# well under Adzuna's default ~25 calls/minute.
+# Each location is one Adzuna call per title, or two when a title with a seniority word finds nothing
+# and is retried without it: 3 titles x 4 locations = 12 to 24 calls per feed load, just under
+# Adzuna's default ~25 calls/minute.
 _DISCOVERY_LOCATIONS = 4
 # Request-path embedding budget: past this the feed falls back to recency ranking rather than
 # making the user wait on Ollama loading the model (background work still allows 600s).

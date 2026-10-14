@@ -102,6 +102,13 @@ export default function BrowserView({
     return () => img.removeEventListener("wheel", onWheel);
   }, [interactive, hasScreenshot]);
 
+  // Focus the input when the controls appear, without scrolling to it: autoFocus would scroll the
+  // overlay down to the input and push the header and Agent notes off screen.
+  const inputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (blocked) inputRef.current?.focus({ preventScroll: true });
+  }, [blocked]);
+
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
@@ -116,7 +123,8 @@ export default function BrowserView({
     // Scrollable, and centred by the inner column's auto margins rather than justify-center: those
     // collapse to 0 once the notes + screenshot outgrow a short viewport, so the column starts at the
     // top and scrolls, instead of overflowing both ends with the header and controls out of reach.
-    <div className="fixed inset-0 bg-black/92 backdrop-blur-sm z-50 overflow-y-auto overscroll-contain flex p-4">
+    // bg-black/92 is not on Tailwind 3's opacity scale and generates no CSS; the arbitrary value does.
+    <div className="fixed inset-0 bg-black/[.92] backdrop-blur-sm z-50 overflow-y-auto overscroll-contain flex p-4">
       <div className="m-auto w-full max-w-5xl flex flex-col items-center gap-3">
         {/* Header */}
         <div className="w-full max-w-5xl flex items-center justify-between shrink-0">
@@ -179,7 +187,7 @@ export default function BrowserView({
                     ? 'Type text to send to browser, or "submit" / "skip"…'
                     : 'Type an instruction, "submit" to confirm, or "skip" to cancel…'
                 }
-                autoFocus
+                ref={inputRef}
                 className="flex-1 bg-zinc-900 border border-zinc-700 rounded-lg px-4 py-2 text-sm text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:border-teal-500 transition-colors"
               />
               <button

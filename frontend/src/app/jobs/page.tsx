@@ -101,14 +101,20 @@ export default function JobsPage() {
     fetchJobs(1);
   }, [fetchJobs]);
 
-  // While discovery is running, refresh page 1 every 15s (up to ~2 min). Skipped once the user
-  // has scrolled past page 1 so a refresh can't wipe the pages they've loaded.
+  // While discovery is running, refresh page 1: every 15s for the first 2 minutes, then every 60s,
+  // since a run queued behind others can finish minutes later. After 20 polls (~14 min, past the
+  // background embedding budget) give up and drop the spinner rather than leave it up for good.
+  // Skipped once the user has scrolled past page 1 so a refresh can't wipe the pages they've loaded.
   useEffect(() => {
-    if (!discovering || page !== 1 || discoveryPolls.current >= 8) return;
+    if (!discovering || page !== 1) return;
+    if (discoveryPolls.current >= 20) {
+      setDiscovering(false);
+      return;
+    }
     const t = setTimeout(() => {
       discoveryPolls.current += 1;
       fetchJobs(1, false, true);
-    }, 15000);
+    }, discoveryPolls.current < 8 ? 15000 : 60000);
     return () => clearTimeout(t);
   }, [discovering, page, jobs, fetchJobs]);
 

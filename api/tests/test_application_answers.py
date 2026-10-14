@@ -99,6 +99,21 @@ def test_currently_employed_is_no_only_when_every_role_has_really_ended():
         assert "Are you currently employed" not in _answers(unread), end_date
 
 
+@pytest.mark.parametrize("end_date", [
+    # What a bare-hyphen split ("Mid-2019-Present") or a list of stints leaves in the end date.
+    "2019-Present", "Nov 2012, Dec 2012 – Present", "2019 – Now (3 yrs)", "2021 - current", "2018 till date",
+])
+def test_an_end_date_with_a_year_and_a_present_word_has_not_ended(end_date):
+    persona = {"history": [{"employer": "A", "end_date": "2018"}, {"employer": "B", "end_date": end_date}]}
+    assert "Are you currently employed" not in _answers(persona)
+
+
+@pytest.mark.parametrize("end_date", ["Nov 2022", "2016 - 2018", "Nowtel Ltd 2020", "Known as of 2021"])
+def test_a_year_without_a_present_word_has_ended(end_date):
+    persona = {"history": [{"employer": "A", "end_date": "2018"}, {"employer": "B", "end_date": end_date}]}
+    assert _answers(persona)["Are you currently employed"] == "No"
+
+
 def test_remote_preference_is_stated_only_when_the_user_picked_one():
     assert "Remote/Hybrid preference" not in _answers({"preferences": {"remote_preference": ""}})
     assert _answers({"preferences": {"remote_preference": "hybrid"}})["Remote/Hybrid preference"] == "hybrid"
