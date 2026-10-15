@@ -84,6 +84,140 @@ def test_upload_rejects_prompt_injection(client, fake_extract):
     assert r.status_code == 422 and "GUARDRAIL" in r.json()["detail"]
 
 
+RICH_CV = {
+    "name": "Ada Lovelace", "summary": "Engineer who ships ML products.",
+    "skills": [{"category": "Languages", "skills": ["Python", "SQL"]}],
+    "experience": [
+        {"employer": "Acme Ltd", "title": "ML Engineer", "dates": "Jan 2024 – Present", "summary": "Built models.",
+         "achievements": ["Cut churn 12% with a LightGBM model", "Shipped a FastAPI scoring service"],
+         "tech_stack": ["Python", "LightGBM", "FastAPI"]},
+        {"employer": "Babbage & Co", "title": "Intern", "dates": "Jun 2023 - Sep 2023",
+         "achievements": ["Automated a weekly report"], "tech_stack": "Excel"},
+    ],
+    "education": [{"institution": "University of London", "degree": "BSc Computer Science", "dates": "2025",
+                   "grade": "First Class Honours"}],
+    "projects": [{"name": "Engine Sim", "url": "https://github.com/ada/engine", "description": "Simulates the engine.",
+                  "outcomes": "10x faster than the 1843 notes", "technologies": ["Python", "Numba"]}],
+    "certifications": [{"name": "AWS Cloud Practitioner", "issuer": "Amazon", "date": "2024"}],
+}
+
+
+def _extract_returning(monkeypatch, data, seen=None):
+    async def extract(name, tool_input):
+        if seen is not None:
+            seen.append(tool_input["cv_text"])
+        return dict(data)
+    monkeypatch.setattr(main, "execute_tool", extract)
+
+
+def test_upload_keeps_bullets_stack_projects_and_certifications(client, user, monkeypatch):
+    _extract_returning(monkeypatch, RICH_CV)
+    p = _upload(client, _pdf("cv")).json()["persona"]
+
+    acme = p["history"][0]
+    assert acme["achievements"] == ["Cut churn 12% with a LightGBM model", "Shipped a FastAPI scoring service"]
+    assert acme["tech_stack"] == ["Python", "LightGBM", "FastAPI"] and acme["is_current"]
+    assert p["history"][1]["tech_stack"] == ["Excel"]                      # a lone string is a one-item list
+    assert {"grade": "First Class Honours", "end_date": "2025"}.items() <= p["education"][0].items()  # a lone year ends it
+    assert p["projects"] == [{"name": "Engine Sim", "url": "https://github.com/ada/engine",
+                              "problem_solved": "Simulates the engine.", "technologies": ["Python", "Numba"],
+                              "outcomes": "10x faster than the 1843 notes", "summary": "", "is_ongoing": False}]
+    assert p["certifications"][0]["issuing_organization"] == "Amazon"
+    assert p["summary"] == "Engineer who ships ML products."
+
+
+def test_reupload_fills_blanks_and_never_overwrites_edits(client, user, monkeypatch):
+    from app import tracker
+    tracker.update_user_persona(user, {
+        "summary": "My own words.",
+        "core_info": {"first_name": "Ada", "linkedin": "https://linkedin.com/in/edited"},
+        "skills": [{"category": "languages", "skills": ["python"]}, {"category": "Data", "skills": ["sql"]}],
+        # An earlier, thinner import: no bullets or stack, and the user reworded the title.
+        "history": [{"employer": "Acme", "title": "Machine Learning Engineer", "start_date": "Jan 2024",
+                     "is_current": True, "summary": "I edited this."}],
+        "education": [{"institution": "University of London", "degree": "BSc CS (edited)"}],
+    })
+    _extract_returning(monkeypatch, {**RICH_CV, "linkedin": "https://linkedin.com/in/from-cv", "skills": [
+        {"category": "Languages", "skills": ["Python", "Go"]},
+        {"category": "Tooling", "skills": ["SQL", "Docker", "docker"]},
+        {"category": "Databases", "skills": ["sql"]}]})
+    p = _upload(client, _pdf("cv")).json()["persona"]
+
+    assert p["summary"] == "My own words."
+    assert p["core_info"]["linkedin"] == "https://linkedin.com/in/edited"
+    # A skill already held in any category isn't added again; a category with nothing new isn't added.
+    assert p["skills"] == [{"category": "languages", "skills": ["python", "Go"]}, {"category": "Data", "skills": ["sql"]},
+                           {"category": "Tooling", "skills": ["Docker"]}]
+    assert [h["employer"] for h in p["history"]] == ["Acme", "Babbage & Co"]        # "Acme Ltd" is the same employer
+    acme = p["history"][0]
+    assert acme["title"] == "Machine Learning Engineer" and acme["summary"] == "I edited this."
+    assert acme["achievements"][0] == "Cut churn 12% with a LightGBM model" and acme["tech_stack"]
+    assert p["education"] == [{"institution": "University of London", "degree": "BSc CS (edited)", "start_date": "",
+                               "end_date": "2025", "grade": "First Class Honours", "is_currently_enrolled": False}]
+
+    again = _upload(client, _pdf("cv")).json()["persona"]                         # idempotent
+    assert len(again["history"]) == 2 and len(again["projects"]) == 1 and len(again["certifications"]) == 1
+
+
+def test_two_roles_at_one_employer_stay_two(client, user, monkeypatch):
+    from app import tracker
+    tracker.update_user_persona(user, {"history": [{"employer": "Acme", "title": "Engineer"}]})
+    _extract_returning(monkeypatch, {"experience": [
+        {"employer": "Acme", "title": "Senior Engineer", "dates": "2023 - Present", "achievements": ["Led a team"]},
+        {"employer": "Acme", "title": "Engineer", "dates": "2021 - 2023", "achievements": ["Built the API"]}]})
+    history = _upload(client, _pdf("cv")).json()["persona"]["history"]
+    assert [(h["title"], h["achievements"]) for h in history] == [
+        ("Engineer", ["Built the API"]), ("Senior Engineer", ["Led a team"])]
+
+
+def _pdf_with_links(links: dict[str, str], extra_text: str = "") -> bytes:
+    doc = fitz.open()
+    page = doc.new_page()
+    y = 72
+    for anchor, uri in links.items():
+        page.insert_text((72, y), anchor)
+        page.insert_link({"kind": fitz.LINK_URI, "from": fitz.Rect(70, y - 12, 200, y + 4), "uri": uri})
+        y += 24
+    if extra_text:
+        page.insert_text((72, y), extra_text)
+    return doc.tobytes()
+
+
+def test_links_only_clickable_in_the_pdf_reach_the_model_and_the_profile(client, user, monkeypatch):
+    seen = []
+    _extract_returning(monkeypatch, {"name": "Ada Lovelace"}, seen)
+    pdf = _pdf_with_links({"LinkedIn": "https://www.linkedin.com/in/ada-l/", "GitHub": "https://github.com/ada",
+                           "Engine repo": "https://github.com/babbage/engine", "Email": "mailto:ada@example.com"},
+                          extra_text="Portfolio: www.ada.dev")
+    core = _upload(client, pdf).json()["persona"]["core_info"]
+
+    assert "- LinkedIn -> https://www.linkedin.com/in/ada-l/" in seen[0]
+    assert "- Engine repo -> https://github.com/babbage/engine" in seen[0]
+    assert "www.ada.dev" in seen[0] and "mailto:" not in seen[0]
+    assert core["linkedin"] == "https://www.linkedin.com/in/ada-l/" and core["github"] == "https://github.com/ada"
+
+
+def test_profile_links_skip_repositories_and_company_pages():
+    from app.cv_parser import profile_links
+    assert profile_links([("", "https://github.com/someone-else/repo"),
+                          ("", "https://www.linkedin.com/company/acme"),
+                          ("", "github.com/ada"), ("", "https://uk.linkedin.com/in/ada")]) == {
+        "github": "github.com/ada", "linkedin": "https://uk.linkedin.com/in/ada"}
+
+
+def test_extraction_sees_a_whole_two_page_cv(monkeypatch):
+    import asyncio
+    sent = {}
+
+    async def fake_llm(system, user, max_tokens=2048):
+        sent.update(user=user, max_tokens=max_tokens)
+        return '{"name": "Ada"}'
+    monkeypatch.setattr(agent, "_llm", fake_llm)
+    cv_text = "x" * 9000 + " PROJECTS: Engine Sim"
+    assert asyncio.run(agent.execute_tool("extract_cv_profile", {"cv_text": cv_text})) == {"name": "Ada"}
+    assert sent["user"].endswith("PROJECTS: Engine Sim") and sent["max_tokens"] >= 4000
+
+
 @pytest.fixture
 def apply_cv_path(monkeypatch, client):
     """apply_cv_path(cv_doc_id) → the cv_path /apply hands to the browser agent."""

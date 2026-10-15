@@ -717,26 +717,43 @@ async def _research_company(company: str, role: str = "") -> str:
     return research
 
 
+# CV text sent for extraction. A dense two-page CV runs to ~10k characters; the old 4k cap cut off
+# whatever came last (often projects or education).
+_CV_TEXT_LIMIT = 15000
+
+
 async def execute_tool(name: str, tool_input: dict) -> dict:
     if name == "extract_cv_profile":
         cv_text = tool_input.get("cv_text", "")
-        text = await _llm(
+        # The persona is the source every CV, cover letter and form answer is written from, so this
+        # keeps the CV's detail: each role's bullet points and stack, projects, certifications.
+        data = await _llm_json(
             system=(
-                "Extract a structured profile from this CV. Return ONLY valid JSON with no markdown fences. "
-                "Include: name, email, phone, address (full postal address if present), "
-                "location (city/region), linkedin (URL or username), github (URL or username), "
-                "skills (array of {category: string, skills: array of strings}, e.g. [{category: 'Languages', skills: ['Python']}]), "
-                "job_titles (array, max 3), experience_years (number), summary (1 sentence only), "
-                "education (array of {institution, degree, dates}), "
-                "experience (array of {employer, title, dates, summary} — max 5 most recent)."
+                "Extract a structured profile from this CV. Return ONLY one valid JSON object with no "
+                "markdown fences. Copy facts from the CV; never invent, embellish or merge entries. Use "
+                "\"\" or [] when the CV does not say. Keys:\n"
+                "name, email, phone, address (full postal address if present), location (city/region),\n"
+                "linkedin, github, website: the candidate's own profile URLs, from the CV text or the "
+                "'Links in this CV' list at the end (\"\" if absent),\n"
+                "summary: 1-2 sentences on who the candidate is professionally, from the CV's own "
+                "profile section when it has one,\n"
+                "skills: [{category, skills: [string]}], e.g. [{category: 'Languages', skills: ['Python']}],\n"
+                "job_titles: [string] (max 3), experience_years: number,\n"
+                "experience: every role, most recent first: [{employer, title, location, dates, "
+                "summary (one sentence), achievements: [each bullet point for the role, in full and "
+                "in the CV's words], tech_stack: [technologies the CV names for that role]}],\n"
+                "education: [{institution, degree (without the grade), dates, grade (e.g. '2:1', "
+                "'First Class Honours', '3.8 GPA')}],\n"
+                "projects: [{name, url (its link from the CV, else \"\"), description (what it is and "
+                "the problem it solves, in the CV's words), outcomes (results and metrics the CV "
+                "states), technologies: [string]}],\n"
+                "certifications: [{name, issuer, date}]."
             ),
-            user=cv_text[:4000],
+            user=cv_text[:_CV_TEXT_LIMIT],
+            max_tokens=6000,
+            label="extract_cv_profile",
         )
-        text = text.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
-        try:
-            return json.loads(text or "{}")
-        except json.JSONDecodeError:
-            return {}
+        return data or {}
 
     elif name == "score_ai_risk":
         skills = tool_input.get("skills", [])
