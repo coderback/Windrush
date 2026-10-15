@@ -39,6 +39,9 @@ export default function JobsPage() {
   // Filter state
   const [level, setLevel] = useState("");
   const [remote, setRemote] = useState(false);
+  // "" lets the server choose: "possible" when the profile needs sponsorship, else "any".
+  const [sponsorship, setSponsorship] = useState("");
+  const [sponsorshipApplied, setSponsorshipApplied] = useState("any");
 
   // Paste-your-own-link state
   const [linkOpen, setLinkOpen] = useState(false);
@@ -69,6 +72,7 @@ export default function JobsPage() {
         if (committedLocation) params.set("location", committedLocation);
         if (level) params.set("level", level);
         if (remote) params.set("remote", "true");
+        if (sponsorship) params.set("sponsorship", sponsorship);
         params.set("page", String(pageNum));
         params.set("limit", "20");
 
@@ -77,7 +81,10 @@ export default function JobsPage() {
         const data = await res.json();
         const incoming: Job[] = data.jobs ?? [];
         setHasMore(data.has_more ?? incoming.length === 20);
-        if (pageNum === 1) setDiscovering(!!data.discovering);
+        if (pageNum === 1) {
+          setDiscovering(!!data.discovering);
+          setSponsorshipApplied(data.sponsorship ?? "any");
+        }
 
         if (append) {
           setJobs((prev) => [...prev, ...incoming]);
@@ -91,7 +98,7 @@ export default function JobsPage() {
         setLoadingMore(false);
       }
     },
-    [committedQuery, selectedTags, committedLocation, level, remote]
+    [committedQuery, selectedTags, committedLocation, level, remote, sponsorship]
   );
 
   // Fetch when committed search params or filters change
@@ -200,6 +207,7 @@ export default function JobsPage() {
     setCommittedQuery("");
     setLevel("");
     setRemote(false);
+    setSponsorship("");
     setSelectedTags([]);
     setPage(1);
   };
@@ -342,6 +350,21 @@ export default function JobsPage() {
           🌍 Remote
         </button>
 
+        {/* Visa sponsorship */}
+        <select
+          value={sponsorship || sponsorshipApplied}
+          onChange={(e) => {
+            setSponsorship(e.target.value);
+            setPage(1);
+          }}
+          title="Possible hides jobs that say they can't sponsor or need SC/DV clearance. Likely shows only jobs that offer sponsorship or whose employer is a licensed sponsor."
+          className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs text-zinc-300 focus:outline-none focus:border-teal-500 transition-colors cursor-pointer"
+        >
+          <option value="any">Sponsorship: any</option>
+          <option value="possible">Sponsorship possible</option>
+          <option value="likely">Sponsorship likely</option>
+        </select>
+
         {/* Role Suggestion Quick-Chips (Only show when input is empty) */}
         {!queryInput && (
           <div className="flex flex-wrap gap-2 items-center">
@@ -359,7 +382,7 @@ export default function JobsPage() {
         )}
 
         {/* Clear filters (only show when active) */}
-        {(committedQuery || selectedTags.length > 0 || level || remote || committedLocation) && (
+        {(committedQuery || selectedTags.length > 0 || level || remote || committedLocation || sponsorship) && (
           <button
             onClick={clearSearch}
             className="text-xs px-3 py-1.5 rounded-lg border border-zinc-800 text-zinc-500 hover:text-zinc-300 hover:border-zinc-600 transition-colors ml-auto"

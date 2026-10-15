@@ -11,7 +11,7 @@ Built with FastAPI, Next.js, [browser-use](https://github.com/browser-use/browse
 1. **Accounts & Persona** — sign up, then build a rich persona (contact details, preferences, skills, work history, education, projects, certifications, screening answers, behavioural stories, custom directives).
 2. **Upload a CV (PDF)** — parsed into structured data and merged into your persona; the PDF is kept so the browser agent can attach it.
 3. **AI Exposure Risk** — scores each skill and job title against the Anthropic Economic Index / O\*NET task-penetration data (~18 000 occupational tasks), with LLM-generated reasoning.
-4. **Job Feed** — searches a local job store with real filters (search terms, role/domain tags, level, location, remote) and ranks results by semantic similarity to your persona. When results are thin, live discovery across job boards runs in the background and the feed fills in as it finishes.
+4. **Job Feed** — searches a local job store with real filters (search terms, role/domain tags, level, location, remote, visa sponsorship) and ranks results by semantic similarity to your persona. When results are thin, live discovery across job boards runs in the background and the feed fills in as it finishes.
 5. **Paste any job link** — scrape an arbitrary listing into the same analysis flow.
 6. **Per-job analysis** — fit score (LLM semantic match) and AI risk for a single role.
 7. **Tailored CV + Cover Letter** — structured, ATS-aware documents with a live in-app preview and PDF export (HTML/CSS → WeasyPrint).
@@ -121,6 +121,7 @@ cd frontend && npm run dev                   # needs API_URL (below)
 | `BRAVE_SEARCH_API_KEY` | Optional | Enables the Brave `site:` search job source |
 | `ECONOMIC_INDEX_PATH` / `TASK_PENETRATION_PATH` | No | Data file paths (default `/data/...`) |
 | `APP_DATA_PATH` | No | SQLite DBs, PDFs and uploaded CVs (compose: `/appdata`) |
+| `SPONSOR_REGISTER_REFRESH` | No | `0` stops the weekly download of the Home Office register of licensed sponsors (the stored copy is still used) |
 | `API_URL` | Frontend, without nginx | Base URL of the API that the frontend's `/api/*` proxy forwards to (e.g. `http://localhost:8000`). Set in the frontend's environment, not the root `.env`; not needed under Docker Compose |
 
 Job-site login details are set per user on the Profile page, not via env vars.
@@ -138,7 +139,8 @@ Long-running endpoints stream **Server-Sent Events (SSE)**. Protected endpoints 
 | `GET` / `PUT` | `/persona` | Read / update the persona (the job-site password is write-only — GET returns a mask) |
 | `GET` | `/persona/export?format=json\|md\|pdf` | Download the persona |
 | `POST` | `/upload` | Parse a CV PDF and merge it into the persona |
-| `GET` | `/jobs` | Filtered, semantically-ranked job feed; `discovering: true` while background discovery runs |
+| `GET` | `/jobs` | Filtered, semantically-ranked job feed; `discovering: true` while background discovery runs; `sponsorship=any\|possible\|likely` |
+| `GET` / `PUT` | `/jobs/{id}/sponsorship` | What the ad and the sponsor register say about visa sponsorship / clearance; mark the job as sponsoring or not (your mark wins) |
 | `POST` | `/jobs/from-url` | Scrape a pasted job link into a job object |
 | `POST` | `/jobs/save` | Bookmark a job into the tracker as `Saved` |
 | `POST` | `/jobs/analyze` | SSE: fit + AI-risk analysis for one job |
@@ -178,6 +180,7 @@ Labels: **High ≥ 65 %**, **Medium 35–65 %**, **Low < 35 %**. **Job fit** (`s
 - **Search** (`jobs_db.get_jobs`) filters in SQL: free-text terms (the search box sends them as tags) must appear in title/company/description; role tags (`ml`, `backend`, …) match any; domain tags (`fintech`, `sponsorship`, …) must all match; location uses whole-word aliases (`uk`, `us`, …). Results are ranked by cosine similarity between your persona-plus-search embedding and each job's stored embedding (the 2 000 most recent matches are ranked), and jobs you've applied to or discarded are removed before pagination.
 - **Discovery** (`discovery.py` → `job_searcher.py`) runs when page 1 is thin — in a background **worker process**, so the API stays responsive — with one run per query/location at a time and a 30-minute cooldown. Sources: Playwright scraping of curated career pages; Greenhouse / Ashby / Lever / Workable / SmartRecruiters public APIs (60+ companies); Brave `site:` search; Adzuna. If every source is empty it shows bundled fixture jobs, which are never stored.
 - **Embeddings** are computed only for new jobs, in batched Ollama `/api/embed` calls.
+- **Visa sponsorship** — each ad is read for what it says (`sponsorship.py`: offered / ruled out, e.g. "we are unable to sponsor", "without sponsorship", "UK nationals only", with the deciding sentence kept as evidence) and for SC / DV security clearance, which usually needs years of UK residence. The employer is matched against the Home Office **register of licensed sponsors** (Skilled Worker route), downloaded weekly from gov.uk (`sponsor_register.py`); a licence means it *can* sponsor, so an ad that rules it out still wins. The feed's sponsorship filter: `possible` hides jobs that rule a sponsored candidate out, `likely` keeps only those that offer it or whose employer is licensed; it defaults to `possible` when your profile says you need sponsorship. You can mark any job as sponsoring or not, and your mark wins. Snippet-only listings often say nothing; opening a job fetches the full ad and re-reads it.
 
 ---
 

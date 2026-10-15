@@ -23,6 +23,40 @@ export interface Job {
   posted_at?: string;
   created_at?: string;
   tracker_status?: string;
+  sponsorship?: string;            // "offered" | "not_offered" | "" (the ad doesn't say)
+  sponsorship_evidence?: string;
+  clearance?: string;              // "DV" | "SC" | "NPPV" | "unspecified" | ""
+  licensed_sponsor?: boolean;      // the employer is on the Home Office sponsor register
+  sponsorship_mark?: string;       // the user's own call, which wins
+}
+
+export interface Badge { label: string; cls: string; title?: string }
+
+const GREEN = "text-emerald-400 border-emerald-400/30 bg-emerald-400/10";
+const RED = "text-red-400 border-red-400/30 bg-red-400/10";
+const AMBER = "text-amber-400 border-amber-400/30 bg-amber-400/10";
+const MUTED = "text-zinc-400 border-zinc-700 bg-zinc-800";
+
+/** Visa sponsorship and clearance badges: the user's mark, else what the ad says, else the register. */
+export function sponsorshipBadges(job: Pick<Job, "sponsorship" | "sponsorship_evidence" | "clearance" |
+                                  "licensed_sponsor" | "sponsorship_mark">): Badge[] {
+  const badges: Badge[] = [];
+  const quote = job.sponsorship_evidence ? `From the ad: "${job.sponsorship_evidence}"` : undefined;
+  if (job.sponsorship_mark === "offered") badges.push({ label: "Sponsors visas (your mark)", cls: GREEN });
+  else if (job.sponsorship_mark === "not_offered") badges.push({ label: "No sponsorship (your mark)", cls: RED });
+  else if (job.sponsorship === "offered") badges.push({ label: "Visa sponsorship", cls: GREEN, title: quote });
+  else if (job.sponsorship === "not_offered") badges.push({ label: "No sponsorship", cls: RED, title: quote });
+  else if (job.licensed_sponsor) {
+    badges.push({ label: "Licensed sponsor", cls: MUTED,
+                  title: "On the Home Office register of Skilled Worker sponsors; the ad doesn't say whether this role is sponsored" });
+  }
+  if (job.clearance === "SC" || job.clearance === "DV") {
+    badges.push({ label: `${job.clearance} clearance`, cls: AMBER,
+                  title: "Security vetting at this level usually needs years of UK residence" });
+  } else if (job.clearance) {
+    badges.push({ label: job.clearance === "NPPV" ? "NPPV vetting" : "Security clearance", cls: MUTED });
+  }
+  return badges;
 }
 
 function formatSalary(min?: number | null, max?: number | null): string | null {
@@ -132,6 +166,16 @@ export default function JobCard({ job }: { job: Job }) {
           )}
         </div>
       </div>
+
+      {sponsorshipBadges(job).length > 0 && (
+        <div className="flex flex-wrap gap-1.5 mb-2">
+          {sponsorshipBadges(job).map((b) => (
+            <span key={b.label} title={b.title} className={`text-[10px] px-2 py-0.5 rounded-full border font-medium ${b.cls}`}>
+              {b.label}
+            </span>
+          ))}
+        </div>
+      )}
 
       <div className="flex items-center flex-wrap gap-x-3 gap-y-1 text-xs text-zinc-600 mb-3">
         <span>{job.location}</span>

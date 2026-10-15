@@ -33,7 +33,29 @@ CREATE TABLE IF NOT EXISTS jobs (
     semantic_vector BLOB,
     created_at      TEXT NOT NULL,
     updated_at      TEXT,
-    expires_at      TEXT
+    expires_at      TEXT,
+    sponsorship     TEXT,
+    sponsorship_evidence TEXT,
+    clearance       TEXT,
+    sponsor_key     TEXT
+);
+"""
+
+# The Home Office register of licensed sponsors, Skilled Worker route (see sponsor_register.py),
+# keyed by company_names.normalise_company_name — what jobs.sponsor_key holds.
+_CREATE_SPONSORS_TABLE = """
+CREATE TABLE IF NOT EXISTS sponsors (
+    norm_name TEXT PRIMARY KEY,
+    name      TEXT NOT NULL,
+    town      TEXT
+);
+"""
+_CREATE_SPONSOR_REGISTER_TABLE = """
+CREATE TABLE IF NOT EXISTS sponsor_register (
+    id            INTEGER PRIMARY KEY CHECK (id = 1),
+    fetched_at    TEXT NOT NULL,
+    source_url    TEXT,
+    organisations INTEGER
 );
 """
 
@@ -64,7 +86,12 @@ def init_db(db_path: str = "") -> None:
         except sqlite3.OperationalError: pass
         try: con.execute("ALTER TABLE jobs ADD COLUMN semantic_vector BLOB")
         except sqlite3.OperationalError: pass
-        
+        for column in ("sponsorship TEXT", "sponsorship_evidence TEXT", "clearance TEXT", "sponsor_key TEXT"):
+            try: con.execute(f"ALTER TABLE jobs ADD COLUMN {column}")
+            except sqlite3.OperationalError: pass
+        con.execute(_CREATE_SPONSORS_TABLE)
+        con.execute(_CREATE_SPONSOR_REGISTER_TABLE)
+
         # Ensure older rows have a normalized_company before we create/recreate the index
         con.execute("UPDATE jobs SET normalized_company = lower(company) WHERE normalized_company IS NULL")
         
@@ -72,9 +99,12 @@ def init_db(db_path: str = "") -> None:
         con.execute("DROP INDEX IF EXISTS idx_dedup_jobs")
         con.execute(_CREATE_INDEX)
 
-        if con.execute("PRAGMA user_version").fetchone()[0] < 1:
+        version = con.execute("PRAGMA user_version").fetchone()[0]
+        if version < 1:
             _reclassify_levels(con)
-            con.execute("PRAGMA user_version = 1")
+        if version < 2:
+            _classify_sponsorship(con)
+            con.execute("PRAGMA user_version = 2")
 
         con.commit()
         con.close()
@@ -91,6 +121,23 @@ def _reclassify_levels(con: sqlite3.Connection) -> None:
     con.executemany("UPDATE jobs SET level = ? WHERE id = ?", changes)
     if changes:
         logger.info("Reclassified the seniority of %d of %d stored jobs", len(changes), len(rows))
+
+
+def _sponsorship_columns(company: str, title: str, description: str) -> tuple[str, str, str, str]:
+    """(sponsorship, sponsorship_evidence, clearance, sponsor_key) for a job."""
+    found = signals.classify(title, description)
+    return found.sponsorship, found.evidence, found.clearance, normalise_company_name(company)
+
+
+def _classify_sponsorship(con: sqlite3.Connection) -> None:
+    """One-off: sponsorship / clearance signals and sponsor keys for jobs stored before they existed."""
+    rows = con.execute("SELECT id, company, title, description FROM jobs").fetchall()
+    con.executemany(
+        "UPDATE jobs SET sponsorship = ?, sponsorship_evidence = ?, clearance = ?, sponsor_key = ? WHERE id = ?",
+        [(*_sponsorship_columns(company or "", title or "", desc or ""), row_id)
+         for row_id, company, title, desc in rows])
+    if rows:
+        logger.info("Read the sponsorship signals of %d stored jobs", len(rows))
 
 
 def _now() -> str:
@@ -127,13 +174,17 @@ def _extract_tags(job: dict) -> str:
     # Domains & Traits
     if any(w in text for w in ["fintech", "finance", "trading", "quant", "banking"]): tags.add("fintech")
     if any(w in text for w in ["startup", "start-up", "series a", "series b"]): tags.add("startup")
-    if any(w in text for w in ["visa", "sponsorship", "relocation"]): tags.add("sponsorship")
+    # Only an ad that offers it: "we cannot sponsor" mentions sponsorship too.
+    if signals.classify(job.get("title", ""), job.get("description", "")).sponsorship == signals.OFFERED:
+        tags.add("sponsorship")
     if any(w in text for w in ["remote", "work from home", "telecommute", "anywhere"]): tags.add("remote")
     
     return json.dumps(list(tags))
 
 from . import semantic
 from . import seniority
+from . import sponsorship as signals
+from .company_names import normalise_company_name
 
 # Tags recognised in the `tags` filter (must match what _extract_tags writes). Role tags are
 # OR'd ("ml or data"); domain tags are AND'd ("fintech and sponsorship"). Any other tag is
@@ -142,6 +193,27 @@ from . import seniority
 ROLE_TAGS = frozenset({"software", "ml", "ai", "data", "backend", "frontend", "fullstack",
                        "devops", "security", "analyst", "engineer", "developer"})
 DOMAIN_TAGS = frozenset({"fintech", "startup", "sponsorship", "remote"})
+
+# The feed's sponsorship filter, for a candidate who needs a visa sponsored:
+#   any      - no filter
+#   possible - hide jobs that rule them out (the ad says no sponsorship, or needs SC/DV clearance)
+#   likely   - only jobs that offer it or whose employer is a licensed sponsor, and don't rule it out
+SPONSORSHIP_FILTERS = ("any", "possible", "likely")
+_LICENSED = "(sponsor_key IN (SELECT norm_name FROM sponsors))"
+# SQL twin of sponsorship.rules_out_sponsored_candidates.
+_NOT_RULED_OUT = "(coalesce(sponsorship, '') != 'not_offered' AND coalesce(clearance, '') NOT IN ('SC', 'DV'))"
+
+
+def _sponsorship_filter(mode: str, marks: dict[str, str]) -> tuple[str, list]:
+    """WHERE clause for a sponsorship filter mode; the user's marks win over the ad and the register."""
+    auto = _NOT_RULED_OUT if mode == "possible" else f"({_NOT_RULED_OUT} AND (sponsorship = 'offered' OR {_LICENSED}))"
+    marked_yes = [job_id for job_id, mark in marks.items() if mark == signals.OFFERED]
+    marked_no = [job_id for job_id, mark in marks.items() if mark == signals.NOT_OFFERED]
+    if marked_no:
+        auto = f"(id NOT IN ({','.join('?' * len(marked_no))}) AND {auto})"
+    if marked_yes:
+        auto = f"(id IN ({','.join('?' * len(marked_yes))}) OR {auto})"
+    return auto, marked_yes + marked_no
 
 # Most-recent matching rows that are ranked per request. Bounds per-request work (rows,
 # vector BLOBs, numpy) as the table grows; matches older than this aren't reachable.
@@ -216,8 +288,9 @@ def add_jobs(jobs: list[dict]) -> tuple[int, int]:
             con.execute(
                 """INSERT INTO jobs
                    (id, job_id, title, company, normalized_company, location, description, url,
-                    salary_min, salary_max, exposure_score, level, source, tags, semantic_vector, created_at, updated_at, expires_at)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    salary_min, salary_max, exposure_score, level, source, tags, semantic_vector, created_at, updated_at,
+                    expires_at, sponsorship, sponsorship_evidence, clearance, sponsor_key)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     uuid.uuid4().hex, str(job.get("job_id", "")), job.get("title", ""), job.get("company", ""),
                     _normalize_company(job.get("company", "")), job.get("location", ""), job.get("description", ""),
@@ -225,6 +298,7 @@ def add_jobs(jobs: list[dict]) -> tuple[int, int]:
                     job.get("level") or seniority.infer_level(job.get("title", ""), job.get("description", "")),
                     job.get("source", "unknown"), _extract_tags(job), blob_for.get(id(job)),
                     now_str, now_str, job.get("expires_at"),
+                    *_sponsorship_columns(job.get("company", ""), job.get("title", ""), job.get("description", "")),
                 ),
             )
             added += 1
@@ -305,6 +379,8 @@ def get_jobs(
     limit: int = 20,
     offset: int = 0,
     exclude: set[tuple[str, str]] | None = None,
+    sponsorship: str = "",
+    marks: dict[str, str] | None = None,
 ) -> tuple[list[dict], bool]:
     """
     Filter in SQL, then rank (semantic similarity to `persona_vector` when given, else
@@ -312,7 +388,9 @@ def get_jobs(
     in it means remote jobs too). `query`, `category` and free-text `tags` are hard filters; role
     tags are OR'd, domain tags AND'd. `exclude` holds (lower company, lower title) pairs to
     drop *before* pagination (jobs the user already applied to / discarded), so pages stay
-    full. Returns (jobs, has_more). Blocking: call via asyncio.to_thread() from async code.
+    full. `sponsorship` is one of SPONSORSHIP_FILTERS ("" = any); `marks` ({job id: OFFERED or
+    NOT_OFFERED}) are the user's own calls, which win over the ad and the register.
+    Returns (jobs, has_more). Blocking: call via asyncio.to_thread() from async code.
     """
     if not _DB_PATH:
         init_db()
@@ -337,6 +415,10 @@ def get_jobs(
     for d in domains:
         where.append("tags LIKE ?")
         params.append(f'%"{d}"%')
+    if sponsorship in SPONSORSHIP_FILTERS and sponsorship != "any":
+        sql, sql_params = _sponsorship_filter(sponsorship, marks or {})
+        where.append(sql)
+        params += sql_params
 
     locations = [loc.strip() for loc in ([location] if isinstance(location, str) else location or [])
                  if loc and loc.strip()]
@@ -360,14 +442,17 @@ def get_jobs(
 
     columns = "*" if persona_vector else (
         "id, job_id, title, company, normalized_company, location, description, url, salary_min, salary_max, "
-        "exposure_score, level, source, tags, created_at, updated_at, expires_at")
-    sql = (f"SELECT {columns} FROM jobs WHERE {' AND '.join(where)} "
+        "exposure_score, level, source, tags, created_at, updated_at, expires_at, sponsorship, sponsorship_evidence, "
+        "clearance, sponsor_key")
+    sql = (f"SELECT {columns}, {_LICENSED} AS licensed_sponsor FROM jobs WHERE {' AND '.join(where)} "
            f"ORDER BY coalesce(updated_at, created_at) DESC LIMIT {_CANDIDATE_POOL}")
 
     con = sqlite3.connect(_DB_PATH)
     con.row_factory = sqlite3.Row
     rows = [dict(r) for r in con.execute(sql, params).fetchall()]
     con.close()
+    for job in rows:
+        job["licensed_sponsor"] = bool(job["licensed_sponsor"])
 
     exclude = exclude or set()
     candidates = []
@@ -430,7 +515,48 @@ def get_job(job_db_id: str) -> dict | None:
         return None
     job = dict(row)
     job.pop("semantic_vector", None)
+    sponsor = licensed_sponsor(job.get("sponsor_key") or "")
+    job["licensed_sponsor"] = bool(sponsor)
+    job["sponsor_name"] = sponsor[0] if sponsor else ""
     return job
+
+
+# ── The sponsor register (see sponsor_register.py) ───────────────────────────
+
+def licensed_sponsor(sponsor_key: str) -> tuple[str, str] | None:
+    """(organisation name, town) of the licensed Skilled Worker sponsor with this key, else None."""
+    if not sponsor_key:
+        return None
+    if not _DB_PATH:
+        init_db()
+    con = sqlite3.connect(_DB_PATH)
+    row = con.execute("SELECT name, town FROM sponsors WHERE norm_name = ?", (sponsor_key,)).fetchone()
+    con.close()
+    return (row[0], row[1] or "") if row else None
+
+
+def replace_sponsors(sponsors: dict[str, tuple[str, str]], source_url: str) -> None:
+    """Swap in a freshly parsed register ({normalised name: (name, town)}) in one transaction."""
+    if not _DB_PATH:
+        init_db()
+    con = sqlite3.connect(_DB_PATH)
+    with con:
+        con.execute("DELETE FROM sponsors")
+        con.executemany("INSERT INTO sponsors (norm_name, name, town) VALUES (?, ?, ?)",
+                        [(key, name, town) for key, (name, town) in sponsors.items()])
+        con.execute("INSERT OR REPLACE INTO sponsor_register (id, fetched_at, source_url, organisations) "
+                    "VALUES (1, ?, ?, ?)", (_now(), source_url, len(sponsors)))
+    con.close()
+
+
+def sponsor_register_fetched_at() -> datetime | None:
+    """When the stored register was downloaded, or None if there isn't one."""
+    if not _DB_PATH:
+        init_db()
+    con = sqlite3.connect(_DB_PATH)
+    row = con.execute("SELECT fetched_at FROM sponsor_register WHERE id = 1").fetchone()
+    con.close()
+    return datetime.fromisoformat(row[0]) if row else None
 
 
 def update_description(job_db_id: str, description: str) -> None:
@@ -439,10 +565,14 @@ def update_description(job_db_id: str, description: str) -> None:
         init_db()
     try:
         con = sqlite3.connect(_DB_PATH)
-        title = (con.execute("SELECT title FROM jobs WHERE id = ?", (job_db_id,)).fetchone() or ("",))[0]
+        title, company = con.execute("SELECT title, company FROM jobs WHERE id = ?", (job_db_id,)).fetchone() or ("", "")
+        # The full ad often says what the stored snippet didn't (sponsorship is usually near the end).
+        status, evidence, clearance, sponsor_key = _sponsorship_columns(company or "", title or "", description)
         con.execute(
-            "UPDATE jobs SET description = ?, level = ?, updated_at = ? WHERE id = ?",
-            (description, seniority.infer_level(title, description), _now(), job_db_id),
+            "UPDATE jobs SET description = ?, level = ?, updated_at = ?, sponsorship = ?, sponsorship_evidence = ?, "
+            "clearance = ?, sponsor_key = ? WHERE id = ?",
+            (description, seniority.infer_level(title, description), _now(), status, evidence, clearance,
+             sponsor_key, job_db_id),
         )
         con.commit()
         con.close()

@@ -35,6 +35,7 @@ services:
       - ADZUNA_APP_ID=${ADZUNA_APP_ID}
       - ADZUNA_API_KEY=${ADZUNA_API_KEY}
       - BRAVE_SEARCH_API_KEY=${BRAVE_SEARCH_API_KEY:-}
+      - SPONSOR_REGISTER_REFRESH=${SPONSOR_REGISTER_REFRESH:-1}
       # Quoted: an unquoted ": " inside the message would make YAML read the item as a mapping.
       - "JWT_SECRET=${JWT_SECRET:?JWT_SECRET must be set in .env (generate with: openssl rand -hex 32)}"
       - "CREDENTIALS_KEY=${CREDENTIALS_KEY:?CREDENTIALS_KEY must be set in .env (see .env.example)}"

@@ -400,4 +400,4 @@ def test_existing_rows_are_reclassified_once(db, ollama, tmp_path):
 
     con = sqlite3.connect(path)
     assert con.execute("SELECT level FROM jobs WHERE id='a'").fetchone()[0] == "mid"
-    assert con.execute("PRAGMA user_version").fetchone()[0] == 1
+    assert con.execute("PRAGMA user_version").fetchone()[0] >= 1      # recorded, so it runs once
