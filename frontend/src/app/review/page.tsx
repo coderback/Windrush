@@ -132,7 +132,7 @@ function ReviewQueue() {
                   <dl className="m-0 p-4 grid grid-cols-2 gap-2">
                     {[
                       ["Fit", current.fit_score ? `${Math.round(current.fit_score)} / 100` : "Not analysed"],
-                      ["Level match", current.level_match ? ({ strong: "Strong", ok: "Reasonable", reach: "Stretch" } as Record<string, string>)[current.level_match] ?? current.level_match : "–"],
+                      ["Level match", (current.fit_score ?? 0) > 0 ? ({ strong: "Strong", ok: "Reasonable", reach: "Stretch" } as Record<string, string>)[current.level_match] ?? "–" : "–"],
                       ["Location", current.location || "–"],
                       ["Filled", longAgo(current.created_at) ?? "–"],
                     ].map(([k, v]) => (

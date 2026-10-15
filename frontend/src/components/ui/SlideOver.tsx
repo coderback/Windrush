@@ -17,6 +17,9 @@ export default function SlideOver({ open, onClose, label, header, footer, childr
 }) {
   const panel = useRef<HTMLDivElement>(null);
   const opener = useRef<HTMLElement | null>(null);
+  // Read through a ref so a new onClose each render doesn't re-run the effect (and steal focus).
+  const close = useRef(onClose);
+  close.current = onClose;
 
   useEffect(() => {
     if (!open) return;
@@ -26,7 +29,7 @@ export default function SlideOver({ open, onClose, label, header, footer, childr
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.preventDefault();
-        onClose();
+        close.current();
         return;
       }
       if (e.key !== "Tab" || !panel.current) return;
@@ -49,7 +52,7 @@ export default function SlideOver({ open, onClose, label, header, footer, childr
       document.body.style.overflow = prevOverflow;
       opener.current?.focus?.();
     };
-  }, [open, onClose]);
+  }, [open]);
 
   if (!open) return null;
   return (

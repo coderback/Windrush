@@ -49,11 +49,11 @@ export function AnalyseLinkButton() {
 }
 
 /** Page body: the content column under the top bar. */
-export function Page({ children, wide, className }: { children: React.ReactNode; wide?: "feed" | "job"; className?: string }) {
+export function Page({ children, wide, className }: { children: React.ReactNode; wide?: "feed" | "job" | "full"; className?: string }) {
   return (
     <div className={cx(
       "w-full box-border px-4 sm:px-8 pt-6 sm:pt-7 pb-14 flex flex-col",
-      wide === "feed" ? "max-w-[1320px]" : wide === "job" ? "max-w-[1280px]" : "max-w-[1240px]",
+      wide === "full" ? "" : wide === "feed" ? "max-w-[1320px]" : wide === "job" ? "max-w-[1280px]" : "max-w-[1240px]",
       className,
     )}>
       {children}
