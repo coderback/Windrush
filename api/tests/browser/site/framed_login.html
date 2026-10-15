@@ -1,0 +1,8 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Job page with an embedded sign-in</title></head>
+<body style="margin:0;font-family:sans-serif">
+<h1 style="margin:20px">Senior Engineer</h1>
+<!-- A frame from another origin (?frame=…), like a job page embedding a third-party widget -->
+<iframe id="signin" title="Sign in" style="position:absolute;left:20px;top:100px;width:600px;height:300px;border:1px solid #888"></iframe>
+<script>document.getElementById('signin').src = new URLSearchParams(location.search).get('frame');</script>
+</body></html>

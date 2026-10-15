@@ -78,7 +78,7 @@ def test_fill_review_takeover_then_submit(ba, site, monkeypatch):
 
     review = next(e for e in events if e.get("interactive"))
     assert "review" in review["action"].lower() and review["screenshot"]
-    assert any(e["action"].startswith("Typed: Grace") for e in events)
+    assert any(e["action"] == "Typed 12 characters" for e in events)   # the length, never the text
     assert llm.tasks == ["fill", "submit"]
     assert events[-1]["done"] and events[-1]["submitted"] is True
     assert not frames.empty()

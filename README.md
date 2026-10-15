@@ -181,7 +181,8 @@ Labels: **High ≥ 65 %**, **Medium 35–65 %**, **Low < 35 %**. **Job fit** (`s
 
 - **Fill, then review** — the agent is told never to click the final submit button. When it's done you get the live view; `submit` runs a short follow-up agent that clicks it and checks for a confirmation, `done` records that you submitted it yourself, `skip` abandons it. Only a confirmed submission marks the application *Applied*.
 - **Live view & takeover** — CDP screencast frames over a separate SSE endpoint; your clicks/typing/scrolling are replayed onto the page via CDP.
-- **Credentials** — your job-site password is passed as browser-use `sensitive_data`: the model only ever sees `<secret>job_password</secret>`, and the real value is typed only on the job site's own host over HTTPS. The browser-use "judge" call is disabled because it sees unredacted step history.
+- **Credentials** — your job-site password is passed as browser-use `sensitive_data` to both the fill and the submit agent: the models only ever see `<secret>job_password</secret>` (also when the page copies the typed value into its HTML). The real value is only ever *typed* (`input`) into a field whose own document is on the job site's host over HTTPS — not into an iframe from elsewhere; any other action carrying the placeholder (navigate, evaluate, done…) is refused rather than substituted, so a prompt-injected page can't send it to another site. While a run is active the password is masked in browser-use's and the app's log lines, and text you type during takeover is echoed back only as a character count. The browser-use "judge" call is disabled because it sees unredacted step history.
+- **No telemetry** — browser-use's product telemetry (PostHog) and cloud sync default to on and would send each run's task prompt, actions and visited URLs to browser-use; `browser_agent.py` defaults `ANONYMIZED_TELEMETRY` / `BROWSER_USE_CLOUD_SYNC` to `false` and `docker-compose.yml` sets both.
 - **Network limits** — the agent's browser can't open raw-IP URLs, `localhost` or the internal service hostnames.
 - **CV upload** — the tailored CV PDF if you generated one, otherwise your uploaded original.
 
@@ -193,6 +194,7 @@ Labels: **High ≥ 65 %**, **Medium 35–65 %**, **Low < 35 %**. **Job fit** (`s
 |---|---|
 | Required `JWT_SECRET` (no default) | `auth.py` |
 | Job-site password encrypted at rest, never returned to the browser | `crypto.py`, `tracker.py`, `main.py` |
+| Job-site password only typed into the job site's own fields, masked in prompts and logs; browser-use telemetry off | `browser_agent.py` |
 | Persona sent to LLMs is an allowlist — no credentials, DOB, contact details, diversity data or salary | `agent._llm_persona` |
 | Server-side fetches of user-influenced URLs only reach public IPs, re-checked on every redirect | `net_guard.py` |
 | Shared job descriptions can only be refreshed from the stored job's own URL | `main._ensure_full_description` |
