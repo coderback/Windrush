@@ -17,6 +17,7 @@ import re
 import threading
 from typing import AsyncGenerator, Awaitable, Callable
 
+from . import azure_config
 from .models import is_present_end_date
 
 # browser-use's product telemetry (PostHog) and cloud sync are ON unless these say otherwise: every
@@ -31,6 +32,9 @@ logger = logging.getLogger("windrush.browser_agent")
 _BACKEND = os.environ.get("LLM_BACKEND", "ollama").lower()
 _OLLAMA_HOST  = os.environ.get("OLLAMA_HOST",  "http://ollama:11434")
 _OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen3.5:4b")
+# Visible output budget per agent step (the claude backend's max_tokens). A measured step — fill a
+# made-up application form, strict JSON-schema output — used 353 tokens at reasoning effort 'low'.
+_STEP_OUTPUT_TOKENS = 4096
 
 # Viewport the agent browses at. BrowserView.tsx maps clicks on the live frame onto these
 # exact dimensions (BROWSER_W / BROWSER_H) — keep the two in sync.
@@ -182,8 +186,30 @@ def _make_browser_llm():
         return ChatAnthropic(
             model=os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-6"),
             api_key=os.environ.get("ANTHROPIC_API_KEY", ""),
-            max_tokens=4096,
+            max_tokens=_STEP_OUTPUT_TOKENS,
             timeout=120.0,
+        )
+    if _BACKEND == "azure":
+        from browser_use import ChatAzureOpenAI
+        cfg = azure_config.load()
+        return ChatAzureOpenAI(
+            model=cfg.deployment,
+            azure_deployment=cfg.deployment,
+            azure_endpoint=cfg.endpoint,
+            api_key=cfg.api_key,
+            api_version=cfg.api_version,
+            # Chat Completions (works for this deployment); 'auto' only switches for codex models.
+            use_responses_api=False,
+            # A reasoning model 400s on any of these, and ChatOpenAI sends temperature=0.2 and
+            # frequency_penalty=0.3 by default (it only drops them for model names on its own list).
+            temperature=None,
+            frequency_penalty=None,
+            top_p=None,
+            # Listing the deployment as a reasoning model is what makes browser-use send reasoning_effort.
+            reasoning_models=[cfg.deployment],
+            reasoning_effort=cfg.reasoning_effort,
+            # Sent as max_completion_tokens (never max_tokens), which hidden reasoning also counts against.
+            max_completion_tokens=_STEP_OUTPUT_TOKENS + cfg.reasoning_headroom,
         )
     from browser_use import ChatOllama
     return ChatOllama(model=_OLLAMA_MODEL, host=_OLLAMA_HOST)

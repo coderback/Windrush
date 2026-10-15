@@ -1,4 +1,3 @@
-version: "3.9"
 services:
   nginx:
     image: nginx:alpine
@@ -22,6 +21,11 @@ services:
       - GROQ_API_KEY=${GROQ_API_KEY}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - ANTHROPIC_MODEL=${ANTHROPIC_MODEL:-claude-sonnet-4-6}
+      - AZURE_OPENAI_ENDPOINT=${AZURE_OPENAI_ENDPOINT:-}
+      - AZURE_OPENAI_API_KEY=${AZURE_OPENAI_API_KEY:-}
+      - AZURE_OPENAI_DEPLOYMENT=${AZURE_OPENAI_DEPLOYMENT:-}
+      - AZURE_OPENAI_API_VERSION=${AZURE_OPENAI_API_VERSION:-}
+      - AZURE_OPENAI_REASONING_EFFORT=${AZURE_OPENAI_REASONING_EFFORT:-}
       - LLM_BACKEND=${LLM_BACKEND:-groq}
       - OLLAMA_HOST=http://ollama:11434
       - OLLAMA_MODEL=${OLLAMA_MODEL:-qwen3.5:4b}
@@ -31,8 +35,9 @@ services:
       - ADZUNA_APP_ID=${ADZUNA_APP_ID}
       - ADZUNA_API_KEY=${ADZUNA_API_KEY}
       - BRAVE_SEARCH_API_KEY=${BRAVE_SEARCH_API_KEY:-}
-      - JWT_SECRET=${JWT_SECRET:?JWT_SECRET must be set in .env (generate with: openssl rand -hex 32)}
-      - CREDENTIALS_KEY=${CREDENTIALS_KEY:?CREDENTIALS_KEY must be set in .env (see .env.example)}
+      # Quoted: an unquoted ": " inside the message would make YAML read the item as a mapping.
+      - "JWT_SECRET=${JWT_SECRET:?JWT_SECRET must be set in .env (generate with: openssl rand -hex 32)}"
+      - "CREDENTIALS_KEY=${CREDENTIALS_KEY:?CREDENTIALS_KEY must be set in .env (see .env.example)}"
       - APP_DATA_PATH=/appdata
       # browser-use telemetry / cloud sync default to ON and would send each run's task prompt
       # (the applicant's personal data), actions and visited URLs to browser-use. Keep them off.
