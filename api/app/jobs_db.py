@@ -37,7 +37,11 @@ CREATE TABLE IF NOT EXISTS jobs (
     sponsorship     TEXT,
     sponsorship_evidence TEXT,
     clearance       TEXT,
-    sponsor_key     TEXT
+    sponsor_key     TEXT,
+    years_min       INTEGER,
+    degree          TEXT,
+    attributes_version INTEGER,
+    attributes_tries   INTEGER
 );
 """
 
@@ -86,7 +90,8 @@ def init_db(db_path: str = "") -> None:
         except sqlite3.OperationalError: pass
         try: con.execute("ALTER TABLE jobs ADD COLUMN semantic_vector BLOB")
         except sqlite3.OperationalError: pass
-        for column in ("sponsorship TEXT", "sponsorship_evidence TEXT", "clearance TEXT", "sponsor_key TEXT"):
+        for column in ("sponsorship TEXT", "sponsorship_evidence TEXT", "clearance TEXT", "sponsor_key TEXT",
+                       "years_min INTEGER", "degree TEXT", "attributes_version INTEGER", "attributes_tries INTEGER"):
             try: con.execute(f"ALTER TABLE jobs ADD COLUMN {column}")
             except sqlite3.OperationalError: pass
         con.execute(_CREATE_SPONSORS_TABLE)
@@ -185,6 +190,7 @@ from . import semantic
 from . import seniority
 from . import sponsorship as signals
 from .company_names import normalise_company_name
+from .job_attributes import ATTRIBUTES_VERSION
 
 # Tags recognised in the `tags` filter (must match what _extract_tags writes). Role tags are
 # OR'd ("ml or data"); domain tags are AND'd ("fintech and sponsorship"). Any other tag is
@@ -443,7 +449,7 @@ def get_jobs(
     columns = "*" if persona_vector else (
         "id, job_id, title, company, normalized_company, location, description, url, salary_min, salary_max, "
         "exposure_score, level, source, tags, created_at, updated_at, expires_at, sponsorship, sponsorship_evidence, "
-        "clearance, sponsor_key")
+        "clearance, sponsor_key, years_min, degree")
     sql = (f"SELECT {columns}, {_LICENSED} AS licensed_sponsor FROM jobs WHERE {' AND '.join(where)} "
            f"ORDER BY coalesce(updated_at, created_at) DESC LIMIT {_CANDIDATE_POOL}")
 
@@ -570,7 +576,7 @@ def update_description(job_db_id: str, description: str) -> None:
         status, evidence, clearance, sponsor_key = _sponsorship_columns(company or "", title or "", description)
         con.execute(
             "UPDATE jobs SET description = ?, level = ?, updated_at = ?, sponsorship = ?, sponsorship_evidence = ?, "
-            "clearance = ?, sponsor_key = ? WHERE id = ?",
+            "clearance = ?, sponsor_key = ?, attributes_version = NULL, attributes_tries = 0 WHERE id = ?",
             (description, seniority.infer_level(title, description), _now(), status, evidence, clearance,
              sponsor_key, job_db_id),
         )
@@ -588,3 +594,42 @@ def job_count() -> int:
     row = con.execute("SELECT COUNT(*) FROM jobs").fetchone()
     con.close()
     return row[0] if row else 0
+
+
+# ── LLM-read attributes (see job_attributes.py) ───────────────────────────────
+
+_MAX_ATTRIBUTE_TRIES = 3
+
+
+def jobs_needing_attributes(limit: int) -> list[dict]:
+    """Newest jobs not yet read by the current attribute extractor, skipping ones it has given up on."""
+    if not _DB_PATH:
+        init_db()
+    con = sqlite3.connect(_DB_PATH)
+    con.row_factory = sqlite3.Row
+    rows = con.execute(
+        "SELECT id, title, company, description FROM jobs "
+        "WHERE coalesce(attributes_version, 0) < ? AND coalesce(attributes_tries, 0) < ? "
+        "ORDER BY created_at DESC LIMIT ?", (ATTRIBUTES_VERSION, _MAX_ATTRIBUTE_TRIES, limit)).fetchall()
+    con.close()
+    return [dict(r) for r in rows]
+
+
+def store_attributes(job_db_id: str, attributes: dict | None) -> None:
+    """Save a job's merged attributes (job_attributes.merge), or, for None, count a failed read: after
+    _MAX_ATTRIBUTE_TRIES the job keeps its regex values and isn't tried again until its ad changes."""
+    if not _DB_PATH:
+        init_db()
+    con = sqlite3.connect(_DB_PATH)
+    with con:
+        if attributes is None:
+            con.execute("UPDATE jobs SET attributes_tries = coalesce(attributes_tries, 0) + 1 WHERE id = ?",
+                        (job_db_id,))
+        else:
+            con.execute(
+                "UPDATE jobs SET level = ?, sponsorship = ?, sponsorship_evidence = ?, clearance = ?, years_min = ?, "
+                "degree = ?, attributes_version = ? WHERE id = ?",
+                (attributes["level"], attributes["sponsorship"], attributes["sponsorship_evidence"],
+                 attributes["clearance"], attributes["years_min"], attributes["degree"], ATTRIBUTES_VERSION,
+                 job_db_id))
+    con.close()
