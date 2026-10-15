@@ -31,6 +31,8 @@ class FakeOllama(http.server.BaseHTTPRequestHandler):
 
     @classmethod
     def reset(cls):
+        # A fresh list rather than clear(): a request still sleeping from an earlier test (one that
+        # simulated a hung embedder) records into its own test's list, not the current one.
         cls.calls, cls.delay, cls.embed_404 = [], 0.0, False
 
     def log_message(self, *args):
@@ -38,12 +40,13 @@ class FakeOllama(http.server.BaseHTTPRequestHandler):
 
     def do_POST(self):
         body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        calls = FakeOllama.calls  # the list of the test that sent this request
         time.sleep(FakeOllama.delay)
         if self.path == "/api/embed" and not FakeOllama.embed_404:
-            FakeOllama.calls.append(("embed", len(body["input"])))
+            calls.append(("embed", len(body["input"])))
             payload = {"embeddings": [fake_vector(t) for t in body["input"]]}
         elif self.path == "/api/embeddings":
-            FakeOllama.calls.append(("embeddings", 1))
+            calls.append(("embeddings", 1))
             payload = {"embedding": fake_vector(body["prompt"])}
         else:
             self.send_response(404)
