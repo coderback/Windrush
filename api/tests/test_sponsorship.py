@@ -27,6 +27,9 @@ CASES = [
     ("Candidates must not require sponsorship to work in the UK.", NOT_OFFERED),
     ("We are not currently able to sponsor candidates.", NOT_OFFERED),
     ("This position is open to UK nationals only.", NOT_OFFERED),
+    ("You must be able to work in the UK without restrictions in accordance with UK National Law.", NOT_OFFERED),
+    ("Applicants need an unrestricted right to work in the UK.", NOT_OFFERED),
+    ("You can work in the UK without restrictions on your hours once you start.", UNKNOWN),   # not about the visa
     ("You must be a British citizen to apply.", NOT_OFFERED),
     ("We do not provide visa support.", NOT_OFFERED),
     ("We are unable to support visa applications.", NOT_OFFERED),

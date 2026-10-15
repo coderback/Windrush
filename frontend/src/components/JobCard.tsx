@@ -28,6 +28,8 @@ export interface Job {
   clearance?: string;              // "DV" | "SC" | "NPPV" | "unspecified" | ""
   licensed_sponsor?: boolean;      // the employer is on the Home Office sponsor register
   sponsorship_mark?: string;       // the user's own call, which wins
+  years_min?: number | null;       // minimum years of experience the ad asks for (LLM-read)
+  degree?: string;                 // "required" | "preferred" | "not_mentioned" | ""
 }
 
 export interface Badge { label: string; cls: string; title?: string }
@@ -102,6 +104,8 @@ export default function JobCard({ job }: { job: Job }) {
   const salary = job.salary ?? formatSalary(job.salary_min, job.salary_max);
   const badge = levelBadge(job.level);
   const ago = timeAgo(job.created_at ?? job.posted_at);
+  const experience = job.years_min == null ? null
+    : job.years_min === 0 ? "No experience needed" : `${job.years_min}+ yrs exp`;
 
   // Parse tags if they are a JSON string
   const tags: string[] = typeof job.tags === 'string' ? JSON.parse(job.tags) : (job.tags || []);
@@ -180,6 +184,8 @@ export default function JobCard({ job }: { job: Job }) {
       <div className="flex items-center flex-wrap gap-x-3 gap-y-1 text-xs text-zinc-600 mb-3">
         <span>{job.location}</span>
         {salary && <><span>·</span><span className="text-zinc-400">{salary}</span></>}
+        {experience && <><span>·</span><span className="text-zinc-400">{experience}</span></>}
+        {job.degree === "required" && <><span>·</span><span>Degree required</span></>}
         {job.source && <><span>·</span><span className="capitalize">{job.source}</span></>}
         {ago && <><span>·</span><span>{ago}</span></>}
       </div>

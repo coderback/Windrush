@@ -26,6 +26,9 @@ _NOT_OFFERED = [re.compile(p, re.I) for p in (
     r"\bsponsorship\s+(?:is\s+|will\s+be\s+)?(?:not\b|unavailable\b)",           # "sponsorship is not available"
     r"\bwithout\s+(?:the\s+)?(?:need\s+(?:for|of)\s+|requiring\s+|requirement\s+(?:for|of)\s+)?(?:any\s+)?"
     r"(?:current\s+or\s+future\s+|future\s+)?(?:visa\s+|employer\s+|company\s+)?sponsorship",  # "...without sponsorship"
+    # "able to work in the UK without restrictions": a visa (Graduate, Skilled Worker) is a restriction
+    r"\b(?:right|able|eligible|entitled|permitted)\s+to\s+work\s+in\s+the\s+uk\s+without\s+(?:any\s+)?restrictions?\b",
+    r"\bunrestricted\s+(?:right|permission|entitlement)\s+to\s+work\b",
     r"\b(?:british|uk)\s+(?:nationals?|citizens?|citizenship|passport\s+holders?)\s+only\b",   # "UK nationals only"
     r"\bmust\s+(?:be|hold)\s+(?:a\s+)?(?:sole\s+)?(?:british|uk)\s+(?:national|citizen|citizenship|passport)",
 )]

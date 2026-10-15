@@ -26,6 +26,7 @@ from . import jobs_db
 from . import net_guard
 from . import seniority
 from . import sponsor_register
+from . import job_attributes
 from .models import (Persona, WorkExperience, Education, Project, Certification, SkillCategory,
                      is_present_end_date)
 
@@ -46,9 +47,11 @@ async def lifespan(app: FastAPI):
     tracker.init_db()
     jobs_db.init_db()
     pdf_generator.init_pdf_dir(data_dir)
-    register_task = asyncio.create_task(sponsor_register.keep_fresh())
+    background = [asyncio.create_task(sponsor_register.keep_fresh()),
+                  asyncio.create_task(job_attributes.keep_extracting())]
     yield
-    register_task.cancel()
+    for task in background:
+        task.cancel()
     from . import discovery
     discovery.shutdown()
 
