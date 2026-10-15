@@ -31,8 +31,9 @@ services:
       - ADZUNA_APP_ID=${ADZUNA_APP_ID}
       - ADZUNA_API_KEY=${ADZUNA_API_KEY}
       - BRAVE_SEARCH_API_KEY=${BRAVE_SEARCH_API_KEY:-}
-      - JWT_SECRET=${JWT_SECRET:?JWT_SECRET must be set in .env (generate with: openssl rand -hex 32)}
-      - CREDENTIALS_KEY=${CREDENTIALS_KEY:?CREDENTIALS_KEY must be set in .env (see .env.example)}
+      # Quoted: an unquoted ": " inside the message would make YAML read the item as a mapping.
+      - "JWT_SECRET=${JWT_SECRET:?JWT_SECRET must be set in .env (generate with: openssl rand -hex 32)}"
+      - "CREDENTIALS_KEY=${CREDENTIALS_KEY:?CREDENTIALS_KEY must be set in .env (see .env.example)}"
       - APP_DATA_PATH=/appdata
       # browser-use telemetry / cloud sync default to ON and would send each run's task prompt
       # (the applicant's personal data), actions and visited URLs to browser-use. Keep them off.
