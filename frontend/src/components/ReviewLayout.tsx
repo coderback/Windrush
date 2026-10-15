@@ -89,7 +89,7 @@ export default function ReviewLayout({ tone, status, title, subtitle, meta, fram
         <div className="flex-[1.7_1_560px] min-w-0 flex">{frame}</div>
         {side}
       </div>
-      <div className="sticky bottom-3 z-10 flex flex-wrap items-center gap-[10px] px-4 py-[14px] bg-surface border border-border rounded-card shadow-[0_8px_24px_rgba(20,20,15,0.08)]">
+      <div className="md:sticky md:bottom-3 z-10 flex flex-wrap items-center gap-[10px] px-4 py-[14px] bg-surface border border-border rounded-card md:shadow-[0_8px_24px_rgba(20,20,15,0.08)]">
         <button type="button" onClick={skip.onClick} disabled={skip.disabled || skip.busy} className={buttonClass("destructive", "lg", "px-[14px] font-normal")}>
           {skip.busy ? <Spinner /> : null}{skip.label ?? "Skip this application"}
         </button>

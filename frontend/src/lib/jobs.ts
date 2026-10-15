@@ -56,11 +56,11 @@ export function jobFromApplication(app: Application): Job | null {
   return job;
 }
 
-export function openApplicationJob(app: Application): string | null {
+/** Where a tracked application's job opens, and the call that stores the job for that page. */
+export function applicationLink(app: Application): { href: string; remember: () => void } | null {
   const job = jobFromApplication(app);
   if (!job) return null;
-  const id = rememberJob(job);
-  return jobHref(id);
+  return { href: jobHref(jobKey(job)), remember: () => { rememberJob(job); } };
 }
 
 /* "Check my fit" results, cached per job for this session: the analysis is an LLM call. */
