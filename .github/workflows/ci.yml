@@ -43,6 +43,18 @@ jobs:
       - run: python -m playwright install --with-deps chromium
       - run: pytest -m browser
 
+  compose:
+    name: docker-compose.yml resolves
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Placeholder values for the two secrets the file requires: this only parses and resolves
+      # the file (a YAML slip once left it unusable on main), nothing is started.
+      - run: docker compose config -q
+        env:
+          JWT_SECRET: ci
+          CREDENTIALS_KEY: ci
+
   frontend:
     name: Frontend type-check + build
     runs-on: ubuntu-latest
