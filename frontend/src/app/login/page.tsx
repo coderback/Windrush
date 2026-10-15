@@ -3,6 +3,9 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import AuthLayout from "@/components/AuthLayout";
+import { buttonClass, Callout, inputClass, Spinner } from "@/components/ui/kit";
+import { clearStore } from "@/lib/store";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -27,75 +30,52 @@ export default function LoginPage() {
       });
 
       if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.detail || "Login failed");
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.detail || "Sign in failed");
       }
 
       const { access_token } = await res.json();
+      clearStore();
       localStorage.setItem("windrush_token", access_token);
       router.push("/");
-    } catch (err: any) {
-      setError(err.message);
-    } finally {
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Sign in failed");
       setLoading(false);
     }
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-6">
-      <div className="w-full max-w-md space-y-8 bg-zinc-900/50 p-8 rounded-2xl border border-zinc-800 backdrop-blur-sm">
-        <div className="text-center">
-          <h1 className="text-3xl font-bold tracking-tight text-white mb-2">Welcome Back</h1>
-          <p className="text-zinc-400">Sign in to your Windrush account</p>
+    <AuthLayout>
+      <form onSubmit={handleSubmit} className="flex flex-col gap-[22px]">
+        <div className="flex flex-col gap-2">
+          <h1 className="m-0 text-[30px] font-semibold tracking-[-0.03em]">Welcome back</h1>
+          <p className="m-0 text-[14.5px] text-ink-2">Sign in to see your matches and anything waiting for your review.</p>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-6">
-          {error && (
-            <div className="p-3 bg-red-500/10 border border-red-500/20 text-red-500 rounded-lg text-sm">
-              {error}
-            </div>
-          )}
+        {error && <Callout>{error}</Callout>}
 
-          <div className="space-y-2">
-            <label className="text-sm font-medium text-zinc-300">Email Address</label>
-            <input
-              type="email"
-              required
-              className="w-full px-4 py-2 bg-zinc-950 border border-zinc-800 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/50 text-white"
-              placeholder="you@example.com"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-            />
-          </div>
+        <div className="flex flex-col gap-[6px]">
+          <label htmlFor="email" className="text-[13px] font-semibold">Email</label>
+          <input id="email" type="email" required autoComplete="email" placeholder="you@example.com"
+            value={email} onChange={(e) => setEmail(e.target.value)} className={`${inputClass} h-11 px-[14px] text-[14.5px]`} />
+        </div>
 
-          <div className="space-y-2">
-            <label className="text-sm font-medium text-zinc-300">Password</label>
-            <input
-              type="password"
-              required
-              className="w-full px-4 py-2 bg-zinc-950 border border-zinc-800 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/50 text-white"
-              placeholder="••••••••"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-            />
-          </div>
+        <div className="flex flex-col gap-[6px]">
+          {/* "Forgot password?" goes here once there is a reset flow. */}
+          <label htmlFor="password" className="text-[13px] font-semibold">Password</label>
+          <input id="password" type="password" required autoComplete="current-password"
+            value={password} onChange={(e) => setPassword(e.target.value)} className={`${inputClass} h-11 px-[14px] text-[14.5px]`} />
+        </div>
 
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full py-3 bg-white text-black font-bold rounded-lg hover:bg-zinc-200 transition-colors disabled:opacity-50"
-          >
-            {loading ? "Signing in..." : "Sign In"}
-          </button>
-        </form>
+        <button type="submit" disabled={loading} className={buttonClass("primary", "xl", "h-[46px] text-[15px]")}>
+          {loading ? <><Spinner /> Signing in…</> : "Sign in"}
+        </button>
 
-        <p className="text-center text-zinc-500 text-sm">
-          Don&apos;t have an account?{" "}
-          <Link href="/signup" className="text-white hover:underline">
-            Sign up
-          </Link>
+        <p className="m-0 text-[14px] text-ink-2 text-center">
+          New to Windrush?{" "}
+          <Link href="/signup" className="font-medium text-teal hover:text-teal-deep underline-offset-2 hover:underline">Create an account</Link>
         </p>
-      </div>
-    </div>
+      </form>
+    </AuthLayout>
   );
 }
