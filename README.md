@@ -248,7 +248,24 @@ pytest                      # fast suite — no network, LLM or browser
 pytest -m browser           # real headless Chromium (needs: playwright install chromium)
 ```
 
-CI (`.github/workflows/ci.yml`) runs both, plus a frontend type-check and build.
+The CV and cover-letter PDF tests need WeasyPrint's Pango libraries; where those are missing (Windows) they skip, except in CI. To run them locally, use the API image: `docker run --rm -v "$PWD/api:/app" -w /app windrush-api sh -c "pip install -r requirements-dev.txt && pytest tests/test_documents.py"`.
+
+**Model evaluation** (`api/evals/`) scores the LLM's reading of job ads (seniority, sponsorship) against labelled data, so a prompt or model change that makes it worse shows up. It calls the real LLM (about 500 calls, a few minutes), so it only runs when asked for:
+
+```bash
+cd api && set -a && . ../.env && set +a
+WINDRUSH_LLM_EVAL=1 pytest evals -s   # -s prints the scores; per-item answers go to evals/last_run.json
+```
+
+**Frontend smoke tests** (`frontend/e2e/`) drive the built app in Chromium with the API mocked:
+
+```bash
+cd frontend
+npm run build && npx playwright install chromium
+npm run test:e2e
+```
+
+CI (`.github/workflows/ci.yml`) runs the API suite, the browser suite, the frontend type-check, build and smoke tests, and checks the Docker config. The model evaluation is not in CI.
 
 **Switching backend:** set `LLM_BACKEND` and the matching key (see above).
 
