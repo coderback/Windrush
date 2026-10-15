@@ -1,5 +1,5 @@
 /* Windrush document base stylesheet — shared by the live preview (iframe) and the
-   WeasyPrint PDF. Tuned to keep a mid-career CV to 2 pages and a junior CV to 1.
+   WeasyPrint PDF. The CV follows the candidate's own CV design; doc_render fits it to its page target.
    Inlined into each template via a <style> block so it resolves identically in a
    browser srcDoc preview and in WeasyPrint (no external URL needed). */
 
@@ -38,82 +38,54 @@ ul { margin: 2pt 0 0; padding: 0 0 0 14pt; }
 li { margin: 0 0 2pt; }
 a { color: inherit; text-decoration: none; }
 
-/* ── Header ─────────────────────────────────────────────────────────── */
-.head { margin-bottom: 8pt; }
-.name {
-  margin: 0;
-  font-size: 22pt;
-  font-weight: 700;
-  letter-spacing: 0.3pt;
-  line-height: 1.1;
+/* ── CV ─────────────────────────────────────────────────────────────── */
+/* The candidate's own CV design: Cambria (Caladea, its metric twin, in the container),
+   a large plain name, sentence-case bold headings over a light rule, grey dates on a
+   tab stop, Word-style bullets (bullet at 0.25in, text at 0.5in), grey detail lines. */
+@page cv {
+  size: A4;
+  margin: 7mm 14mm 10mm 15mm;
 }
-.headline {
-  margin: 1pt 0 0;
-  font-size: 11pt;
-  color: #333;
-  font-weight: 600;
-}
-.contact {
-  margin: 4pt 0 0;
-  font-size: 9pt;
-  color: #555;
-  font-family: Arial, "Liberation Sans", "DejaVu Sans", sans-serif;
-}
-.contact a, .letter-contact a, .letter-contact-line a { color: inherit; text-decoration: underline; }
-
-/* ── Sections ───────────────────────────────────────────────────────── */
-.section { margin-top: 11pt; }
-.section h2 {
-  margin: 0 0 5pt;
-  padding-bottom: 2pt;
-  font-size: 10.5pt;
-  font-weight: 700;
-  letter-spacing: 1pt;
-  text-transform: uppercase;
+body.cv {
+  page: cv;
+  font-family: Cambria, Caladea, "Liberation Serif", Georgia, serif;
+  font-size: 10.2pt;
+  line-height: 1.17;
   color: #1a1a1a;
-  border-bottom: 0.8pt solid #555;
+}
+@media screen {
+  body.cv { padding: 7mm 14mm 10mm 15mm; }
+}
+.cv p { margin: 0; }
+.cv-name { margin: 0; font-size: 25.8pt; font-weight: 400; line-height: 1.15; }
+.cv-contact { margin: 1pt 0 0; font-size: 9pt; color: #595959; }
+.cv-contact a { color: #1155cc; text-decoration: underline; }
+.cv-section h2 {
+  margin: 6pt 0 2pt;
+  padding-bottom: 1pt;
+  font-size: 13.2pt;
+  font-weight: 700;
+  border-bottom: 0.75pt solid #bfbfbf;
   break-after: avoid;
 }
-
-.summary { font-size: 10.5pt; }
-
-/* ── Entry lines (experience / education / projects / certifications) ── */
-/* Reference look: an uppercase, bold, pipe-separated heading line per entry
-   (ROLE | EMPLOYER | DATES), with detail beneath. Uppercasing is visual only —
-   the underlying text stays mixed-case so ATS parsers read it correctly. */
-.role { margin-bottom: 8pt; break-inside: avoid; }
-.role:last-child { margin-bottom: 0; }
-.entry { margin-bottom: 6pt; break-inside: avoid; }
-
-.entry-line {
-  font-weight: 700;
-  font-size: 10pt;
-  text-transform: uppercase;
-  letter-spacing: 0.2pt;
-}
-.entry-grade { font-size: 10pt; color: #333; margin: 1pt 0 0 14pt; }
-.entry-desc { font-size: 10pt; margin-top: 1pt; }
-.tech { font-size: 9pt; color: #555; font-style: italic; margin-top: 1pt; }
-.role-bullets { font-size: 10pt; margin-top: 2pt; }
-
-/* ── Skills ─────────────────────────────────────────────────────────── */
-.skill-row { margin-bottom: 3pt; font-size: 10pt; }
-.skill-cat { font-weight: 700; }
+.cv-entry { margin-top: 3pt; break-inside: avoid; }
+.cv-entry-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12pt; }
+.cv-entry-title { font-weight: 700; }
+.cv-dates { flex-shrink: 0; margin-right: 44pt; font-size: 9pt; color: #595959; white-space: nowrap; }
+.cv-bullets { margin: 0; padding: 0 0 0 36pt; list-style: none; }
+.cv-bullets li { position: relative; margin: 0; }
+.cv-bullets li::before { content: "•"; position: absolute; left: -18pt; font-family: Arial, "Liberation Sans", sans-serif; }
+.cv-muted { font-size: 9pt; color: #595959; }
 
 /* ── Fit to page ────────────────────────────────────────────────────── */
 /* Classes doc_render puts on the body element when a CV or letter runs past its page target:
    "tight" closes up the spacing, "small" then brings the body type down to 10pt, the floor. */
-body.tight { line-height: 1.24; }
-body.tight .head { margin-bottom: 5pt; }
-body.tight .section { margin-top: 7pt; }
-body.tight .section h2 { margin-bottom: 3pt; padding-bottom: 1pt; }
-body.tight .role { margin-bottom: 5pt; }
-body.tight .entry { margin-bottom: 4pt; }
-body.tight li { margin-bottom: 1pt; }
-body.tight .skill-row { margin-bottom: 1.5pt; }
-body.small, body.small .summary { font-size: 10pt; }
-body.small .name { font-size: 20pt; }
-body.small .section h2 { font-size: 10pt; }
+body.cv.tight { line-height: 1.12; }
+body.cv.tight .cv-section h2 { margin-top: 4pt; }
+body.cv.tight .cv-entry { margin-top: 2pt; }
+body.cv.small { font-size: 10pt; }
+body.cv.small .cv-section h2 { font-size: 12pt; }
+body.cv.small .cv-name { font-size: 22pt; }
 /* The same two steps for a cover letter. */
 body.tight .letter-head { margin-bottom: 8pt; }
 body.tight .letter-contact-block { margin-top: 6pt; }
@@ -135,6 +107,7 @@ body.small .letter-name { font-size: 16pt; }
   letter-spacing: 0.6pt; margin: 0 0 2pt;
 }
 .letter-contact-line { font-size: 10pt; margin: 0; line-height: 1.35; }
+.letter-contact-line a { color: inherit; text-decoration: underline; }
 .letter-meta { margin: 12pt 0; font-size: 10pt; color: #444; }
 .letter-meta p { margin: 0; line-height: 1.35; }
 .letter-meta .letter-date { margin-bottom: 8pt; }

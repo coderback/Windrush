@@ -44,9 +44,9 @@ _env = Environment(
 _MAX_SUMMARY_CHARS = 420
 _MAX_ROLES = 4
 _MAX_BULLETS = 4
-MAX_SKILL_GROUPS = 6           # rows; skills are never dropped, extra groups fold into "Other"
-_MAX_PROJECTS = 3
-_MAX_PROJECT_DESC_CHARS = 520  # room for 2 full sentences (what it is/does + how it works)
+MAX_SKILL_GROUPS = 5           # rows, as in the candidate's CV design; extra groups fold into "Other"
+_MAX_PROJECTS = 4
+_MAX_PROJECT_DESC_CHARS = 520  # room for 2-3 sentences (what it is, how it works, a result)
 _MAX_EDUCATION = 4
 _MAX_CERTS = 6
 _MAX_PARAGRAPHS = 4
@@ -140,15 +140,6 @@ def _clean_text(text: str) -> str:
     return re.sub(r"\s+", " ", t).strip()
 
 
-def _short_url(url: str) -> str:
-    """Display form for a profile link: drop scheme + leading www."""
-    u = (url or "").strip()
-    if not u:
-        return ""
-    u = u.split("://", 1)[-1]
-    return u[4:] if u.startswith("www.") else u
-
-
 def _abs_url(url: str) -> str:
     """Ensure a profile link is an absolute URL so it is clickable in the PDF."""
     u = (url or "").strip()
@@ -159,28 +150,11 @@ def _abs_url(url: str) -> str:
     return "https://" + u.lstrip("/")
 
 
-def _project_link_label(url: str) -> str:
-    """Human label for a project link, by host, so it renders as a clickable word
-    ("GitHub" / "Live Demo") instead of a long raw URL — consistent with the
-    labelled contact links."""
-    host = _short_url(url).lower()
-    if not host:
-        return ""
-    if "github.com" in host:
-        return "GitHub"
-    if "gitlab.com" in host:
-        return "GitLab"
-    if "bitbucket" in host:
-        return "Bitbucket"
-    return "Live Demo"
-
-
 def _contact_items(contact: dict) -> list[dict]:
     """
-    Header contact entries as {text, href?} objects. Profile links render as
-    labelled, clickable hyperlinks ("LinkedIn Profile" / "GitHub" / "Website")
-    rather than long raw URLs; email/phone become mailto:/tel: links; location is
-    plain text. Order: location, phone, email, then profile links.
+    Header contact entries as {text, href?} objects, in the order of the candidate's CV design:
+    location and phone as plain text, then the email (a mailto: link) and labelled profile links
+    ("LinkedIn" / "GitHub" / "Website") rather than long raw URLs.
     """
     if not isinstance(contact, dict):
         return []
@@ -191,10 +165,10 @@ def _contact_items(contact: dict) -> list[dict]:
     if loc:
         items.append({"text": loc})
     if phone:
-        items.append({"text": phone, "href": "tel:" + re.sub(r"[^\d+]", "", phone)})
+        items.append({"text": phone})
     if email:
         items.append({"text": email, "href": "mailto:" + email})
-    for key, label in (("linkedin", "LinkedIn Profile"), ("github", "GitHub"), ("website", "Website")):
+    for key, label in (("linkedin", "LinkedIn"), ("github", "GitHub"), ("website", "Website")):
         url = _abs_url(contact.get(key, ""))
         if url:
             items.append({"text": label, "href": url})
@@ -250,7 +224,6 @@ def build_cv_template_data(cv: dict, fit: tuple[str, ...] = ()) -> dict:
         experience.append({
             "title": (role.get("title") or "").strip(),
             "employer": (role.get("employer") or "").strip(),
-            "location": (role.get("location") or "").strip(),
             "dates": _role_dates(role),
             "bullets": bullets,
         })
@@ -258,13 +231,13 @@ def build_cv_template_data(cv: dict, fit: tuple[str, ...] = ()) -> dict:
     projects = []
     for p in (cv.get("projects") or [])[:_MAX_PROJECTS]:
         description = _truncate(_clean_text(p.get("description", "")), _MAX_PROJECT_DESC_CHARS)
+        # "Name · context" renders the context as a grey subtitle, as in the candidate's CV.
+        title, _, subtitle = (p.get("name") or "").partition(" · ")
         projects.append({
-            "name": (p.get("name") or "").strip(),
+            "title": title.strip(),
+            "subtitle": subtitle.strip(),
             "description": _first_sentence(description) if "one_sentence" in fit else description,
             "tech": [] if "no_tech" in fit else [t for t in (p.get("tech") or []) if t],
-            "link": _short_url(p.get("link", "")),
-            "link_href": _abs_url(p.get("link", "")),
-            "link_label": _project_link_label(p.get("link", "")),
         })
 
     education = []
@@ -272,7 +245,7 @@ def build_cv_template_data(cv: dict, fit: tuple[str, ...] = ()) -> dict:
         education.append({
             "degree": (e.get("degree") or "").strip(),
             "institution": (e.get("institution") or "").strip(),
-            "year": (e.get("year") or "").strip(),
+            "dates": _role_dates({"start_date": e.get("start_date"), "end_date": e.get("year")}),
             "grade": (e.get("grade") or "").strip(),
         })
 
@@ -284,16 +257,16 @@ def build_cv_template_data(cv: dict, fit: tuple[str, ...] = ()) -> dict:
             "year": (c.get("year") or "").strip(),
         })
 
-    # Section order is seniority-aware (2026 graduate strategy): juniors lead with
-    # Education and place Skills lower; experienced candidates lead with Skills and
-    # keep Education near the end. Falls back to a sensible inference if unset.
+    # Section order is seniority-aware: juniors follow the candidate's CV design (education first,
+    # skills last); experienced candidates lead with experience and keep education near the end.
+    # Certifications are listed under Education. Falls back to a sensible inference if unset.
     seniority = (cv.get("seniority") or "").lower()
     if seniority not in ("junior", "experienced"):
         seniority = "junior" if (education and len(experience) <= 1) else "experienced"
     if seniority == "junior":
-        sections = ["summary", "education", "experience", "projects", "skills", "certifications"]
+        sections = ["summary", "education", "experience", "projects", "skills"]
     else:
-        sections = ["summary", "skills", "experience", "projects", "education", "certifications"]
+        sections = ["summary", "experience", "projects", "skills", "education"]
 
     return {
         "name": (cv.get("name") or "").strip(),
@@ -454,7 +427,7 @@ def _fallback_pdf(doc_type: str, doc: dict) -> str:
     if data["projects"]:
         lines += ["", "## Projects"]
         for p in data["projects"]:
-            lines.append(f"### {p['name']}")
+            lines.append(f"### {p['title']}" + (f" · {p['subtitle']}" if p["subtitle"] else ""))
             if p["description"]:
                 lines.append(p["description"])
     if data["education"]:

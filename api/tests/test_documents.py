@@ -42,7 +42,7 @@ GRADUATE = {
          "problem_solved": "A web app where students report and claim lost items, with image matching to suggest "
                            "likely owners. Built with Django and PostgreSQL in Docker.",
          "outcomes": "450 items returned in the first term."},
-        {"name": "Chess Engine",
+        {"name": "Chess Engine · Personal project",
          "problem_solved": "I wrote a chess engine in Java using alpha-beta search with move ordering and a "
                            "transposition table. It plays at about 1900 on Lichess."},
     ],
@@ -145,44 +145,59 @@ def test_certifications_keep_issuer_and_date_through_to_the_rendered_cv():
     assert "AWS Solutions Architect" in html and "Amazon" in html and "05/2024" in html
 
 
-def test_a_graduate_cv_leads_with_education_and_links_every_profile(llm):
+def _entry(html: str, title: str) -> str:
+    """The dates shown beside an entry title ("" when none)."""
+    m = re.search(rf'<span class="cv-entry-title">{re.escape(title)}</span>\s*(?:<span class="cv-dates">(.*?)</span>)?',
+                  html)
+    assert m, f"no entry titled {title!r}"
+    return m.group(1) or ""
+
+
+def test_a_graduate_cv_follows_the_candidates_design(llm):
     llm.reply = "not json"  # the model failed: the CV is built straight from the profile
     html = doc_render.render_cv_html(_tailored_cv())
 
-    assert _headings(html) == ["Professional Summary", "Education", "Work Experience", "Projects", "Skills",
-                               "Certifications"]
-    assert '<h1 class="name">Sam Okafor</h1>' in html
-    for href in ("mailto:sam@example.com", "tel:+447700900456", "https://linkedin.com/in/sam-okafor",
-                 "https://github.com/samokafor", "https://samokafor.dev"):
-        assert f'href="{href}"' in html
-    assert "BSc (Hons) Computer Science | 06/2025 | Northfield University" in html and "Grade: 2:1" in html
-    assert "Software Engineering Intern | Brightwave Analytics | 06/2024 – 09/2024" in html
+    assert _headings(html) == ["Professional Summary", "Education", "Experience", "Projects",
+                               "Skills &amp; Technical Proficiency"]
+    assert '<h1 class="cv-name">Sam Okafor</h1>' in html
+    contact = re.search(r'<p class="cv-contact">(.*?)</p>', html, re.S).group(1)
+    assert re.sub(r"<[^>]+>|\s+", " ", contact).split() == "Bristol | +44 7700 900456 | sam@example.com | LinkedIn | GitHub | Website".split()
+    for href in ("mailto:sam@example.com", "https://linkedin.com/in/sam-okafor", "https://github.com/samokafor",
+                 "https://samokafor.dev"):
+        assert f'href="{href}"' in contact
+    assert "tel:" not in contact                                            # the phone is plain text
+    assert _entry(html, "BSc (Hons) Computer Science | Northfield University") == "09/2022 – 06/2025"
+    assert "<p>Grade: 2:1</p>" in html
+    assert _entry(html, "Software Engineering Intern | Brightwave Analytics") == "06/2024 – 09/2024"
     assert "Cut dashboard load time from 6 s to 1.5 s" in html
-    assert "AWS Cloud Practitioner | Amazon Web Services | 03/2025" in html
+    education = html.split("<h2>Education</h2>")[1].split("</section>")[0]
+    assert "AWS Cloud Practitioner | Amazon Web Services" in education    # certifications sit under Education
+    assert _entry(education, "AWS Cloud Practitioner | Amazon Web Services") == "03/2025"
 
 
 def test_the_summary_loses_its_pronouns(llm):
     llm.reply = "{}"
-    summary = re.search(r'<p class="summary">(.*?)</p>', doc_render.render_cv_html(_tailored_cv())).group(1)
+    summary = re.search(r"<h2>Professional Summary</h2>\s*<p>(.*?)</p>", doc_render.render_cv_html(_tailored_cv())).group(1)
     assert summary == "Computer Science graduate who builds full-stack web apps and data pipelines."
 
 
-def test_portfolio_prose_becomes_two_clean_sentences_with_labelled_links(llm):
+def test_projects_show_a_titled_paragraph_and_a_technologies_line(llm):
     llm.reply = "{}"
     html = doc_render.render_cv_html(_tailored_cv())
     projects = html.split("<h2>Projects</h2>")[1].split("</section>")[0]
 
-    assert re.findall(r'<div class="entry-line">(.*?)</div>', projects) == [
-        "Pantry Planner", "Rail Delay Forecaster", "Campus Lost &amp; Found"]   # three at most, escaped
+    assert re.findall(r'<span class="cv-entry-title">(.*?)</span>', projects) == [
+        "Pantry Planner", "Rail Delay Forecaster", "Campus Lost &amp; Found", "Chess Engine"]   # four, escaped
+    assert '<span class="cv-entry-title">Chess Engine</span><span class="cv-muted"> · Personal project</span>' in projects
     assert ("Built a meal planner that turns the food already in a kitchen into a week of recipes, so less of it "
             "is thrown away. It matches pantry items against 12,000 recipes with TF-IDF similarity and ranks them "
             "by what expires first.") in projects
     assert "What problem" not in projects and "How it works" not in projects and "&lt;br" not in projects
-    assert '<a href="https://github.com/samokafor/pantry-planner">GitHub</a>' in projects
-    assert '<a href="https://rail-delays.example.app">Live Demo</a>' in projects
+    assert '<p class="cv-muted">Technologies: Python, PyTorch</p>' in projects
+    assert "<a " not in projects                                            # no project links in this design
 
 
-def test_the_model_tailors_the_cv_but_cannot_touch_contact_details_skills_or_links(llm):
+def test_the_model_tailors_the_cv_but_cannot_touch_contact_details_education_or_links(llm):
     llm.reply = "Here is the CV:\n```json\n" + json.dumps({
         "name": "Sam Okafor", "headline": "",
         "contact": {"email": "invented@example.org", "phone": "+1 555 0100"},
@@ -202,7 +217,8 @@ def test_the_model_tailors_the_cv_but_cannot_touch_contact_details_skills_or_lin
 
     assert cv["summary"] == "Computer Science graduate specialising in Python back-end services."  # tailored
     assert cv["contact"] == base["contact"]
-    assert cv["skills"] == base["skills"]                       # the model dropped seven groups
+    assert cv["education"] == base["education"]                 # the model was sent the profile's own shape
+    assert cv["skills"] == base["skills"]                       # one skill is too few to be a choice
     assert [(p["name"], p["link"], p["tech"]) for p in cv["projects"]] == [
         ("Rail Delay Forecaster", "rail-delays.example.app", ["Python", "PyTorch"]),
         ("Pantry Planner (meal planning)", "https://github.com/samokafor/pantry-planner", ["Next.js"]),
@@ -211,52 +227,80 @@ def test_the_model_tailors_the_cv_but_cannot_touch_contact_details_skills_or_lin
     assert "sam@example.com" not in llm.prompts[-1] and "7700 900456" not in llm.prompts[-1]
 
 
-def test_every_skill_in_the_profile_reaches_the_cv(llm):
+def test_roles_keep_the_profiles_dates(llm):
+    llm.reply = json.dumps(agent._persona_to_cvdoc(GRADUATE) | {"experience": [
+        {"title": "Software Engineering Intern", "employer": "Brightwave Analytics", "start_date": "Jun 2024",
+         "end_date": "Sep 2024", "bullets": ["Built a FastAPI service"]}]})
+    role = _tailored_cv()["experience"][0]
+    assert (role["start_date"], role["end_date"], role["bullets"]) == ("06/2024", "09/2024", ["Built a FastAPI service"])
+
+
+def test_without_the_models_choice_every_profile_skill_reaches_the_cv(llm):
     html = doc_render.render_cv_html(_tailored_cv())   # the model failed: the profile's 8 groups as they are
-    skills = html.split("<h2>Skills</h2>")[1].split("</section>")[0]
+    skills = html.split("<h2>Skills &amp; Technical Proficiency</h2>")[1].split("</section>")[0]
     missing = [s for grp in GRADUATE["skills"] for s in grp["skills"] if s not in skills]
-    assert missing == [] and skills.count('class="skill-row"') == doc_render.MAX_SKILL_GROUPS
+    assert missing == [] and skills.count("<p>") == doc_render.MAX_SKILL_GROUPS
 
 
-def _regrouping(groups: dict[str, list[str]]) -> str:
-    """The model's reply: the base CV with its skills regrouped as given."""
+def _choosing(groups: dict[str, list[str]]) -> str:
+    """The model's reply: the base CV with the skills it chose for the job."""
     cv = agent._persona_to_cvdoc(GRADUATE)
     return json.dumps(cv | {"skills": [{"category": c, "items": items} for c, items in groups.items()]})
 
 
-ALL_SKILLS = {
-    "Languages": ["Python", "TypeScript", "Java", "SQL"],
-    "Web": ["React", "Next.js", "Tailwind CSS", "FastAPI", "Node.js", "Spring Boot"],
-    "Data & Machine Learning": ["PostgreSQL", "Redis", "pandas", "scikit-learn", "PyTorch"],
-    "Cloud & Tools": ["AWS", "Docker", "Git", "GitHub Actions", "CI/CD"],
-    "Testing": ["pytest", "Jest", "Playwright"],
+CHOSEN = {   # 13 of the profile's 23 skills, the way the candidate's own CV groups them
+    "Languages": ["Python", "SQL"],
+    "Backend & Data": ["FastAPI", "PostgreSQL", "Redis"],
+    "ML & AI": ["scikit-learn", "PyTorch", "pandas"],
+    "Tools": ["Docker", "Git", "GitHub Actions", "AWS", "pytest"],
 }
 
 
-def test_the_models_regrouping_is_used_when_it_keeps_every_skill(llm):
-    llm.reply = _regrouping({**ALL_SKILLS, "Languages": ["python", "TypeScript", "Java", "SQL"]})
+def test_the_model_chooses_the_skills_for_the_job(llm):
+    llm.reply = _choosing({**CHOSEN, "Languages": ["python", "SQL"]})
     cv = _tailored_cv()
-    assert cv["skills"] == [{"category": c, "items": items} for c, items in ALL_SKILLS.items()]   # profile spelling
-    assert "at most 6 categories" in llm.prompts[-1]
+    assert cv["skills"] == [{"category": c, "items": items} for c, items in CHOSEN.items()]   # profile spelling
+    assert "choose the 20-30 skills" in llm.prompts[-1] and "Leave out spoken languages" in llm.prompts[-1]
 
 
 @pytest.mark.parametrize("change", [
-    pytest.param(lambda g: g["Testing"].remove("Jest"), id="drops a skill"),
-    pytest.param(lambda g: g["Testing"].append("Selenium"), id="adds one"),
-    pytest.param(lambda g: g["Testing"].append("Python"), id="repeats one"),
-    pytest.param(lambda g: g.update({"Misc": [g["Web"].pop()], "More": [g["Web"].pop()]}), id="7 groups"),
-    pytest.param(lambda g: g.update({"": g.pop("Testing")}), id="unnamed group"),
+    pytest.param(lambda g: g["Tools"].append("Kubernetes"), id="invents one"),
+    pytest.param(lambda g: g["Tools"].append("Python"), id="repeats one"),
+    pytest.param(lambda g: g["Tools"].append("GitHub Actions CI/CD pipelines"), id="renames one"),
 ])
-def test_a_regrouping_that_changes_the_skills_is_ignored(llm, change):
-    groups = copy.deepcopy(ALL_SKILLS)
+def test_skills_the_model_invents_renames_or_repeats_are_dropped(llm, change):
+    groups = copy.deepcopy(CHOSEN)
     change(groups)
-    llm.reply = _regrouping(groups)
-    assert _tailored_cv()["skills"] == agent._persona_to_cvdoc(GRADUATE)["skills"]
+    llm.reply = _choosing(groups)
+    assert _tailored_cv()["skills"] == [{"category": c, "items": items} for c, items in CHOSEN.items()]
+
+
+def test_an_unnamed_row_is_called_other():
+    base = [{"category": "All", "items": [f"Skill {i}" for i in range(12)]}]
+    chosen = agent._chosen_skills([{"category": "", "items": [f"Skill {i}" for i in range(12)]}], base)
+    assert chosen == [{"category": "Other", "items": [f"Skill {i}" for i in range(12)]}]
+
+
+@pytest.mark.parametrize("n, used", [(9, False), (10, True), (40, True), (41, False)])
+def test_too_few_real_skills_or_too_many_falls_back_to_the_full_list(n, used):
+    base = [{"category": "All", "items": [f"Skill {i}" for i in range(50)]}]
+    chosen = agent._chosen_skills([{"category": "All", "items": [f"Skill {i}" for i in range(n)]}], base)
+    assert (chosen is not None) is used
+
+
+@pytest.mark.parametrize("core, location", [
+    ({"city": "Bristol", "country": "United Kingdom"}, "Bristol, United Kingdom"),
+    ({"city": "London, United Kingdom", "country": "United Kingdom"}, "London, United Kingdom"),
+    ({"city": "Bristol"}, "Bristol"),
+    ({"country": "United Kingdom"}, "United Kingdom"),
+])
+def test_the_cv_shows_city_and_country(core, location):
+    assert agent._cv_location(core) == location
 
 
 @pytest.mark.parametrize("categories, rows", [
-    (["A", "B", "C", "D", "E", "F", "G", "H"], ["A", "B", "C", "D", "E", "Other"]),
-    (["A", "Other", "B", "C", "D", "E", "F"], ["A", "B", "C", "D", "E", "Other"]),   # absorbs, moves last
+    (["A", "B", "C", "D", "E", "F", "G", "H"], ["A", "B", "C", "D", "Other"]),
+    (["A", "Other", "B", "C", "D", "E", "F"], ["A", "B", "C", "D", "Other"]),   # absorbs, moves last
     (["A", "B", "C"], ["A", "B", "C"]),
 ])
 def test_extra_skill_groups_fold_into_other(categories, rows):
@@ -284,7 +328,7 @@ def test_length_limits_hold_whatever_the_model_returns():
     data = doc_render.build_cv_template_data(cv)
     assert [r["title"] for r in data["experience"]] == ["Engineer 3", "Engineer 2", "Engineer 1", "Engineer 0"]
     assert max(len(r["bullets"]) for r in data["experience"]) == 4
-    assert len(data["projects"]) == 3 and len(data["education"]) == 4 and len(data["certifications"]) == 6
+    assert len(data["projects"]) == 4 and len(data["education"]) == 4 and len(data["certifications"]) == 6
     assert len(data["skills"][0]["items"]) == 15                                    # skills are never cut
     assert len(data["summary"]) <= 420 and data["summary"].endswith(".")          # ends on a whole sentence
     assert len(data["projects"][0]["description"]) <= 520 and data["projects"][0]["description"].endswith(".")
@@ -306,7 +350,8 @@ def pages(monkeypatch):
         steps: list[str] = []
 
     def count(html):
-        Pages.steps.append(re.search(r"<body(?: class=\"([^\"]*)\")?>", html).group(1) or "")
+        classes = re.search(r"<body(?: class=\"([^\"]*)\")?>", html).group(1) or ""
+        Pages.steps.append(classes.removeprefix("cv").strip())
         return Pages.rule(html)
     monkeypatch.setattr(doc_render, "_page_count", count)
     return Pages
@@ -314,11 +359,11 @@ def pages(monkeypatch):
 
 def test_a_cv_that_fits_is_left_as_written(pages):
     html = doc_render.render_cv_html(_one_role_junior())
-    assert pages.steps == [""] and "<body>" in html and html.count("<li>") == 4 and "Technologies:" in html
+    assert pages.steps == [""] and '<body class="cv">' in html and html.count("<li>") == 4 and "Technologies:" in html
 
 
 def test_spacing_then_type_tighten_before_anything_is_trimmed(pages):
-    pages.rule = staticmethod(lambda html: 1 if 'class="tight small"' in html else 2)
+    pages.rule = staticmethod(lambda html: 1 if 'tight small"' in html else 2)
     html = doc_render.render_cv_html(_one_role_junior())
     assert pages.steps == ["", "tight", "tight small"]
     assert html.count("<li>") == 4 and "Technologies:" in html
@@ -350,7 +395,7 @@ def test_when_nothing_fits_every_trim_is_applied_and_logged(pages, caplog):
 
 def test_an_experienced_cv_may_run_to_two_pages(pages):
     pages.rule = staticmethod(lambda html: 2)
-    assert "<body>" in doc_render.render_cv_html(_full_cvdoc("experienced")) and pages.steps == [""]
+    assert '<body class="cv">' in doc_render.render_cv_html(_full_cvdoc("experienced")) and pages.steps == [""]
 
 
 def test_a_long_letter_tightens_its_layout_but_keeps_every_paragraph(pages):
@@ -361,9 +406,9 @@ def test_a_long_letter_tightens_its_layout_but_keeps_every_paragraph(pages):
 
 
 def test_the_preview_is_fitted_like_the_pdf(client, pages):
-    pages.rule = staticmethod(lambda html: 1 if 'class="tight"' in html else 2)
+    pages.rule = staticmethod(lambda html: 1 if 'class="cv tight"' in html else 2)
     html = client.post("/documents/preview", json={"type": "cv", "doc": _one_role_junior()}).json()["html"]
-    assert '<body class="tight">' in html
+    assert '<body class="cv tight">' in html
 
 
 def test_text_is_escaped_not_rendered_as_markup():
@@ -470,27 +515,35 @@ def _weasy(doc_type: str, doc: dict) -> fitz.Document:
 
 
 @needs_weasyprint
-def test_the_graduate_cv_is_one_page_in_the_template_font_with_live_links(pdf_dir):
+def test_the_graduate_cv_is_one_page_in_the_designs_type_with_live_links(pdf_dir):
     cv = agent._persona_to_cvdoc(GRADUATE) | {"seniority": "junior"}
-    assert "<body>" in doc_render.render_cv_html(cv)                     # fits without tightening
+    assert '<body class="cv">' in doc_render.render_cv_html(cv)          # fits without tightening
     pdf = _weasy("cv", cv)
     assert pdf.page_count == 1
-    text = pdf[0].get_text().lower()  # entry lines are set in capitals
-    assert "sam okafor" in text and "pantry planner" in text and "northfield university" in text
-    assert any(f[3].endswith("+Liberation-Serif") for f in pdf[0].get_fonts())   # not a fallback font
+    text = pdf[0].get_text()
+    assert "Sam Okafor" in text and "Pantry Planner" in text and "Northfield University" in text
+    assert any(f[3].endswith("+Caladea") for f in pdf[0].get_fonts())    # Cambria's metric twin, not a fallback
+    spans = {s["text"].strip(): (round(s["size"], 1), "Bold" in s["font"], f"#{s['color']:06x}")
+             for b in pdf[0].get_text("dict")["blocks"] for line in b.get("lines", []) for s in line["spans"]}
+    assert spans["Sam Okafor"] == (25.8, False, "#1a1a1a")              # the candidate's CV, measured
+    assert spans["Professional Summary"] == (13.2, True, "#1a1a1a")
+    assert spans["Software Engineering Intern | Brightwave Analytics"] == (10.2, True, "#1a1a1a")
+    assert spans["06/2024 – 09/2024"] == (9.0, False, "#595959")
     uris = {link.get("uri") for link in pdf[0].get_links()}
-    assert {"mailto:sam@example.com", "https://github.com/samokafor/pantry-planner"} <= uris
+    assert {"mailto:sam@example.com", "https://github.com/samokafor"} <= uris
 
 
 @needs_weasyprint
 def test_a_full_graduate_cv_fits_one_page(pdf_dir):
-    # Everything the tailoring prompt allows a junior: 3-sentence summary, one role with 4 bullets of ~24
-    # words, 3 projects of 2 sentences with 8 technologies, 6 skill groups, 3 certificates.
+    # Everything the tailoring prompt allows a junior: a 3-sentence summary, three roles with 2 bullets of
+    # ~35 words, 4 projects of ~60 words with 8 technologies, 35 skills in 5 rows, 3 certificates.
     cv = _full_cvdoc("junior")
-    cv["experience"] = cv["experience"][:1]
-    cv["skills"] = [{"category": f"Group {g}", "items": [f"Skill{g}{i}" for i in range(6)]} for g in range(6)]
-    for p in cv["projects"]:
-        p["description"] = _sentence(25, 1) + ". " + _sentence(25, 2) + "."
+    cv["experience"] = cv["experience"][:3]
+    for r in cv["experience"]:
+        r["bullets"] = [_sentence(35, 1) + ".", _sentence(35, 2) + "."]
+    cv["skills"] = [{"category": f"Group {g}", "items": [f"Skill{g}{i}" for i in range(7)]} for g in range(5)]
+    cv["projects"] = [dict(cv["projects"][0], name=f"Project {i}", description=_sentence(30, 1) + ". " + _sentence(30, 2) + ".")
+                      for i in range(4)]
     assert _weasy("cv", cv).page_count == 1
 
 
