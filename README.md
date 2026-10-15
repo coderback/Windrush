@@ -2,7 +2,7 @@
 
 AI career advisor that analyses CVs, scores AI automation-exposure risk, finds matching jobs, generates tailored CVs and cover letters, and fills in job applications with a browser agent — which you review before anything is sent.
 
-Built with FastAPI, Next.js, [browser-use](https://github.com/browser-use/browser-use), and a choice of LLM backend: Anthropic Claude, Groq, or a local Ollama model.
+Built with FastAPI, Next.js, [browser-use](https://github.com/browser-use/browser-use), and a choice of LLM backend: Azure OpenAI, Anthropic Claude, Groq, or a local Ollama model.
 
 ---
 
@@ -42,9 +42,12 @@ Selected with `LLM_BACKEND`:
 
 | `LLM_BACKEND` | Text features (CV parse, fit, cover letter, tailored CV, roadmap) | Browser agent | Needs |
 |---|---|---|---|
+| `azure` | the `AZURE_OPENAI_DEPLOYMENT` reasoning model (e.g. `gpt-6-luna`) via the `openai` SDK on Azure's v1 API | same deployment via browser-use's `ChatAzureOpenAI` | `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_DEPLOYMENT` |
 | `claude` | `ANTHROPIC_MODEL` (default `claude-sonnet-4-6`) via the `anthropic` SDK | same model via browser-use's `ChatAnthropic` | `ANTHROPIC_API_KEY` |
 | `groq` (compose default) | `GROQ_MODEL` (default `meta-llama/llama-4-scout-17b-16e-instruct`) | same model via browser-use's `ChatGroq` | `GROQ_API_KEY` |
 | `ollama` | `OLLAMA_MODEL` (default `qwen3.5:4b`) | same model via browser-use's `ChatOllama` | local resources |
+
+The Azure backend expects a reasoning model: it sends `max_completion_tokens` (the call's answer budget plus headroom for hidden reasoning, scaled by `AZURE_OPENAI_REASONING_EFFORT`) and `reasoning_effort`, and never `temperature`, `top_p` or `frequency_penalty`. With `LLM_BACKEND=azure` the API refuses to start if a required Azure variable is missing.
 
 The Groq browser model must be one browser-use drives with JSON-schema output (see `JsonSchemaModels` in `browser_use/llm/groq/chat.py`). Embeddings always come from Ollama (`nomic-embed-text`), whatever the backend:
 
@@ -107,7 +110,10 @@ cd frontend && npm run dev                   # needs API_URL (below)
 |---|---|---|
 | `JWT_SECRET` | **Yes** | Signs login tokens |
 | `CREDENTIALS_KEY` | **Yes** | Fernet key encrypting stored job-site passwords. Changing it makes saved passwords unreadable (users re-enter them) |
-| `LLM_BACKEND` | No | `claude`, `groq` (compose default) or `ollama` |
+| `LLM_BACKEND` | No | `azure`, `claude`, `groq` (compose default) or `ollama` |
+| `AZURE_OPENAI_ENDPOINT` / `AZURE_OPENAI_API_KEY` / `AZURE_OPENAI_DEPLOYMENT` | For `azure` | Resource endpoint (`https://<resource>.openai.azure.com/`) / key / deployment name (used as the model) |
+| `AZURE_OPENAI_REASONING_EFFORT` | No | `none`, `low` (default), `medium`, `high` or `xhigh` — trades latency and tokens for deliberation |
+| `AZURE_OPENAI_API_VERSION` | No | API version for the browser agent's Azure client (default `2024-12-01-preview`) |
 | `ANTHROPIC_API_KEY` / `ANTHROPIC_MODEL` | For `claude` | Key / model id |
 | `GROQ_API_KEY` / `GROQ_MODEL` | For `groq` | Key / model id |
 | `OLLAMA_HOST` / `OLLAMA_MODEL` / `EMBEDDING_MODEL` | No | Ollama URL (compose: `http://ollama:11434`), local model, embedding model |

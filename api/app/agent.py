@@ -8,8 +8,9 @@ from contextlib import aclosing
 from html.parser import HTMLParser
 from typing import AsyncGenerator
 
-from openai import AsyncOpenAI
+from openai import AsyncOpenAI, BadRequestError
 
+from . import azure_config
 from . import http_client
 from . import tracker
 from .risk_scorer import lookup_by_title
@@ -22,42 +23,82 @@ logger = logging.getLogger("windrush.agent")
 #   LLM_BACKEND=ollama  → local model via Ollama (OpenAI-compat client)
 #   LLM_BACKEND=groq    → Groq cloud (OpenAI-compat client)
 #   LLM_BACKEND=claude  → Anthropic Claude via the native `anthropic` SDK
+#   LLM_BACKEND=azure   → an Azure OpenAI reasoning-model deployment (OpenAI-compat client, v1 surface)
 # Embeddings always come from Ollama (nomic-embed-text) regardless of backend.
 
 _BACKEND = os.environ.get("LLM_BACKEND", "ollama").lower()
 _IS_CLAUDE = _BACKEND == "claude"
-client = None          # OpenAI-compat client (groq/ollama only)
-_anthropic = None      # native Anthropic async client (claude only)
 
-if _BACKEND == "groq":
-    client = AsyncOpenAI(
-        api_key=os.environ.get("GROQ_API_KEY", ""),
-        base_url="https://api.groq.com/openai/v1",
-    )
-    # Overridable via GROQ_MODEL. NOTE: reasoning models (e.g. qwen3.x) emit
-    # <think>…</think> in content and need think-stripping + higher max_tokens, and
-    # smaller-tier models may have low TPM limits that reject full-persona payloads.
-    _GROQ_MODEL = os.environ.get("GROQ_MODEL", "meta-llama/llama-4-scout-17b-16e-instruct")
-    LLM_MODEL   = _GROQ_MODEL
-elif _BACKEND == "claude":
-    # Native Anthropic SDK (not an OpenAI-compat shim). Sonnet 4.6 by default;
-    # override with ANTHROPIC_MODEL. No Groq-style TPM wall on the standard tier.
-    import anthropic
-    _anthropic = anthropic.AsyncAnthropic(
-        api_key=os.environ.get("ANTHROPIC_API_KEY", ""),
-        timeout=120.0,
-    )
-    _CLAUDE_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-6")
-    LLM_MODEL   = _CLAUDE_MODEL
-else:
+# Request timeout for Azure. The slowest call measured was 21 s (tailored CV at reasoning effort
+# 'high'); the margin covers larger personas and the 'xhigh' effort.
+_AZURE_TIMEOUT_S = 180.0
+
+
+def _make_client(backend: str) -> tuple[AsyncOpenAI | None, object | None, str]:
+    """(OpenAI-compat client, native Anthropic client, model id) for an LLM_BACKEND value."""
+    if backend == "groq":
+        # Overridable via GROQ_MODEL. NOTE: reasoning models (e.g. qwen3.x) emit
+        # <think>…</think> in content and need think-stripping + higher max_tokens, and
+        # smaller-tier models may have low TPM limits that reject full-persona payloads.
+        return (
+            AsyncOpenAI(api_key=os.environ.get("GROQ_API_KEY", ""), base_url="https://api.groq.com/openai/v1"),
+            None,
+            os.environ.get("GROQ_MODEL", "meta-llama/llama-4-scout-17b-16e-instruct"),
+        )
+    if backend == "claude":
+        # Native Anthropic SDK (not an OpenAI-compat shim). Sonnet 4.6 by default;
+        # override with ANTHROPIC_MODEL. No Groq-style TPM wall on the standard tier.
+        import anthropic
+        return (
+            None,
+            anthropic.AsyncAnthropic(api_key=os.environ.get("ANTHROPIC_API_KEY", ""), timeout=120.0),
+            os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-6"),
+        )
+    if backend == "azure":
+        # The versionless v1 surface rather than AsyncAzureOpenAI: the same AsyncOpenAI client and
+        # chat.completions call as groq/ollama, and no dated api-version to keep in step with the
+        # reasoning parameters. On Azure the `model` is the deployment name.
+        cfg = azure_config.load()  # raises at import — i.e. at API startup — if a setting is missing
+        return (
+            AsyncOpenAI(api_key=cfg.api_key, base_url=cfg.v1_base_url, timeout=_AZURE_TIMEOUT_S),
+            None,
+            cfg.deployment,
+        )
     # Ollama — local Qwen 3.5 4B
-    _OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://ollama:11434")
-    _OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen3.5:4b")
-    client = AsyncOpenAI(
-        api_key="ollama",                        # Ollama ignores the key but requires a value
-        base_url=f"{_OLLAMA_HOST}/v1",
+    host = os.environ.get("OLLAMA_HOST", "http://ollama:11434")
+    return (
+        AsyncOpenAI(api_key="ollama", base_url=f"{host}/v1"),  # Ollama ignores the key but requires a value
+        None,
+        os.environ.get("OLLAMA_MODEL", "qwen3.5:4b"),
     )
-    LLM_MODEL   = _OLLAMA_MODEL
+
+
+client, _anthropic, LLM_MODEL = _make_client(_BACKEND)
+_AZURE = azure_config.load() if _BACKEND == "azure" else None
+_AZURE_UNSUPPORTED = ("max_tokens", "temperature", "top_p", "frequency_penalty")
+
+
+def _chat_params(**params) -> dict:
+    """
+    The chat.completions kwargs for the configured backend, translated from the ones the call sites
+    use (max_tokens = the visible-answer budget, optionally temperature). Every per-backend parameter
+    difference of the OpenAI-compatible backends lives here; groq/ollama get `params` unchanged.
+
+    Azure (a reasoning model) 400s on max_tokens, top_p, frequency_penalty and any temperature but
+    the default, and counts its hidden reasoning against max_completion_tokens — so the budget gets
+    reasoning headroom on top, and reasoning_effort is pinned so that headroom holds.
+    """
+    if _BACKEND != "azure":
+        return params
+    out = {k: v for k, v in params.items() if k not in _AZURE_UNSUPPORTED}
+    if "max_tokens" in params:
+        out["max_completion_tokens"] = params["max_tokens"] + _AZURE.reasoning_headroom
+    out["reasoning_effort"] = _AZURE.reasoning_effort
+    # Every _llm caller wants one JSON object (and every prompt says "JSON", which this mode
+    # requires); without it gpt-6-luna returned unparseable JSON for ~1 in 8 roadmaps.
+    out["response_format"] = {"type": "json_object"}
+    return out
+
 
 _HARDCODED_EXPOSURE: dict[str, float] = {
     # Programming languages
@@ -108,15 +149,30 @@ async def _llm(system: str, user: str, max_tokens: int = 2048) -> str:
             messages=[{"role": "user", "content": user}],
         )
         return "".join(b.text for b in resp.content if b.type == "text")
-    resp = await client.chat.completions.create(
-        model=LLM_MODEL,
-        max_tokens=max_tokens,
-        messages=[
-            {"role": "system", "content": system},
-            {"role": "user", "content": user},
-        ],
-    )
-    return resp.choices[0].message.content or ""
+    try:
+        resp = await client.chat.completions.create(
+            model=LLM_MODEL,
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            **_chat_params(max_tokens=max_tokens),
+        )
+    except BadRequestError as exc:
+        # Azure's content filter rejects some inputs outright (e.g. a job ad carrying hidden
+        # instructions aimed at AI tools). Answer empty so the caller's fallback runs instead of
+        # the feature dying mid-stream.
+        if _BACKEND == "azure" and getattr(exc, "code", None) == "content_filter":
+            logger.warning("llm: Azure content filter rejected the input (backend=azure)")
+            return ""
+        raise
+    choice = resp.choices[0]
+    if choice.finish_reason not in (None, "stop"):
+        # 'length' on a reasoning model can mean the hidden reasoning used the whole budget (empty
+        # answer); 'content_filter' is Azure blocking the output itself (HTTP 200, no content).
+        logger.warning("llm: answer ended with finish_reason=%s (max_tokens=%d, backend=%s)",
+                       choice.finish_reason, max_tokens, _BACKEND)
+    return choice.message.content or ""
 
 
 async def _llm_json(system: str, user: str, max_tokens: int = 2048, label: str = "") -> dict | None:
@@ -618,6 +674,19 @@ async def _ddg_search(query: str, max_results: int = 15) -> list[dict]:
         return []
 
 
+_COMPANY_SUFFIXES = {"ltd", "limited", "plc", "inc", "llc", "llp", "corp", "corporation", "co", "uk", "group",
+                     "holdings", "gmbh", "sa", "ag", "bv"}
+
+
+def _normalise_company_name(text: str) -> str:
+    """Lower-case words only, legal / regional suffixes dropped: 'Kestrel Ledger Analytics Ltd.' ->
+    'kestrel ledger analytics'."""
+    words = re.sub(r"[^a-z0-9]+", " ", (text or "").lower()).split()
+    while words and words[-1] in _COMPANY_SUFFIXES:
+        words.pop()
+    return " ".join(words)
+
+
 async def _research_company(company: str, role: str = "") -> str:
     """
     Pull a few public facts about the employer (mission, product, what they do) via the
@@ -632,10 +701,14 @@ async def _research_company(company: str, role: str = "") -> str:
         results = await _ddg_search(f"{company} company mission what they do product", max_results=6)
     except Exception:
         return ""
+    # Only results that name THIS employer: a search on a shared or ambiguous name otherwise returns
+    # other companies' snippets, which the letter would then state as facts about the employer.
+    name = _normalise_company_name(company)
     lines = []
     for r in results:
         snip = (r.get("snippet") or "").strip()
-        if snip and len(snip) > 30:
+        about = _normalise_company_name(f"{r.get('title') or ''} {snip}")
+        if snip and len(snip) > 30 and name and f" {name} " in f" {about} ":
             lines.append(f"- {snip}")
         if len(lines) >= 5:
             break
@@ -899,7 +972,9 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
     elif name == "generate_skill_roadmap":
         skill_risks = tool_input.get("skill_risks", [])
         persona = tool_input.get("persona", {})
-        target_job_title = tool_input.get("target_job_title", "")
+        # Without an explicit target, plan for the roles the user is aiming at, not their last employer's industry.
+        target_job_title = tool_input.get("target_job_title") or ", ".join(
+            (persona.get("preferences") or {}).get("target_titles") or [])
 
         confirmed_high = [s for s in skill_risks if s.get("exposure_score", s.get("exposure", 0) * 100) > 65]
         confirmed_low  = [s for s in skill_risks if 0 < s.get("exposure_score", s.get("exposure", 0) * 100) <= 35]
@@ -929,12 +1004,12 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
                 "Return ONLY valid JSON with no markdown fences. "
                 "JSON key 'items', an array of exactly 6 objects each with: "
                 "skill (string — the skill to develop), "
-                "reason (string — one sentence explaining WHY this skill matters for their specific industry/role), "
+                "reason (string — one sentence explaining WHY this skill matters for their target role), "
                 "action (string — a concrete task: name a specific course, project, certification or open-source contribution), "
                 "timeline (one of: '1 month','2 months','3 months','6 months'), "
                 "resource (string — specific course name or platform). "
                 "STRICT RULES: "
-                "1. Every recommendation must be directly relevant to the candidate's industry and target role. "
+                "1. Plan for the TARGET role when one is given: every recommendation must make the candidate more competitive for that role across the employers who hire for it. Past employers' industries are background only — a short internship or placement does not define the candidate's industry. "
                 "2. Build ON their existing technical strengths — deepen and extend, do not replace them. "
                 "3. For each skill at confirmed high AI risk, suggest a way to apply it at a level AI cannot yet reach "
                 "(novel research, production systems, domain-specific expertise, technical leadership). "
