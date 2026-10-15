@@ -1024,7 +1024,8 @@ async def preview_document(
     doc = body.get("doc", {})
     template_id = body.get("template_id", "classic")
     try:
-        html = doc_render.render_html(doc_type, doc, template_id)
+        # A worker thread: fitting a CV to its page count lays it out in WeasyPrint.
+        html = await asyncio.to_thread(doc_render.render_html, doc_type, doc, template_id)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
     return {"html": html}

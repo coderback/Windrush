@@ -100,6 +100,21 @@ a { color: inherit; text-decoration: none; }
 .skill-row { margin-bottom: 3pt; font-size: 10pt; }
 .skill-cat { font-weight: 700; }
 
+/* ── Fit to page ────────────────────────────────────────────────────── */
+/* Classes doc_render puts on the body element when a CV runs past its page target: "tight"
+   closes up the spacing, "small" then brings the body type down to 10pt, the floor. */
+body.tight { line-height: 1.24; }
+body.tight .head { margin-bottom: 5pt; }
+body.tight .section { margin-top: 7pt; }
+body.tight .section h2 { margin-bottom: 3pt; padding-bottom: 1pt; }
+body.tight .role { margin-bottom: 5pt; }
+body.tight .entry { margin-bottom: 4pt; }
+body.tight li { margin-bottom: 1pt; }
+body.tight .skill-row { margin-bottom: 1.5pt; }
+body.small, body.small .summary { font-size: 10pt; }
+body.small .name { font-size: 20pt; }
+body.small .section h2 { font-size: 10pt; }
+
 /* ── Cover letter ───────────────────────────────────────────────────── */
 .letter-head { margin-bottom: 14pt; }
 .letter-name { font-size: 18pt; font-weight: 700; margin: 0; }

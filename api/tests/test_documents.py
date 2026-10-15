@@ -210,12 +210,62 @@ def test_the_model_tailors_the_cv_but_cannot_touch_contact_details_skills_or_lin
     assert "sam@example.com" not in llm.prompts[-1] and "7700 900456" not in llm.prompts[-1]
 
 
-@pytest.mark.xfail(strict=True, reason="skill groups after the sixth are dropped (doc_render._MAX_SKILL_GROUPS)")
 def test_every_skill_in_the_profile_reaches_the_cv(llm):
-    html = doc_render.render_cv_html(_tailored_cv())
+    html = doc_render.render_cv_html(_tailored_cv())   # the model failed: the profile's 8 groups as they are
     skills = html.split("<h2>Skills</h2>")[1].split("</section>")[0]
     missing = [s for grp in GRADUATE["skills"] for s in grp["skills"] if s not in skills]
-    assert missing == []
+    assert missing == [] and skills.count('class="skill-row"') == doc_render.MAX_SKILL_GROUPS
+
+
+def _regrouping(groups: dict[str, list[str]]) -> str:
+    """The model's reply: the base CV with its skills regrouped as given."""
+    cv = agent._persona_to_cvdoc(GRADUATE)
+    return json.dumps(cv | {"skills": [{"category": c, "items": items} for c, items in groups.items()]})
+
+
+ALL_SKILLS = {
+    "Languages": ["Python", "TypeScript", "Java", "SQL"],
+    "Web": ["React", "Next.js", "Tailwind CSS", "FastAPI", "Node.js", "Spring Boot"],
+    "Data & Machine Learning": ["PostgreSQL", "Redis", "pandas", "scikit-learn", "PyTorch"],
+    "Cloud & Tools": ["AWS", "Docker", "Git", "GitHub Actions", "CI/CD"],
+    "Testing": ["pytest", "Jest", "Playwright"],
+}
+
+
+def test_the_models_regrouping_is_used_when_it_keeps_every_skill(llm):
+    llm.reply = _regrouping({**ALL_SKILLS, "Languages": ["python", "TypeScript", "Java", "SQL"]})
+    cv = _tailored_cv()
+    assert cv["skills"] == [{"category": c, "items": items} for c, items in ALL_SKILLS.items()]   # profile spelling
+    assert "at most 6 categories" in llm.prompts[-1]
+
+
+@pytest.mark.parametrize("change", [
+    pytest.param(lambda g: g["Testing"].remove("Jest"), id="drops a skill"),
+    pytest.param(lambda g: g["Testing"].append("Selenium"), id="adds one"),
+    pytest.param(lambda g: g["Testing"].append("Python"), id="repeats one"),
+    pytest.param(lambda g: g.update({"Misc": [g["Web"].pop()], "More": [g["Web"].pop()]}), id="7 groups"),
+    pytest.param(lambda g: g.update({"": g.pop("Testing")}), id="unnamed group"),
+])
+def test_a_regrouping_that_changes_the_skills_is_ignored(llm, change):
+    groups = copy.deepcopy(ALL_SKILLS)
+    change(groups)
+    llm.reply = _regrouping(groups)
+    assert _tailored_cv()["skills"] == agent._persona_to_cvdoc(GRADUATE)["skills"]
+
+
+@pytest.mark.parametrize("categories, rows", [
+    (["A", "B", "C", "D", "E", "F", "G", "H"], ["A", "B", "C", "D", "E", "Other"]),
+    (["A", "Other", "B", "C", "D", "E", "F"], ["A", "B", "C", "D", "E", "Other"]),   # absorbs, moves last
+    (["A", "B", "C"], ["A", "B", "C"]),
+])
+def test_extra_skill_groups_fold_into_other(categories, rows):
+    groups = [{"category": c, "items": [f"{c}1", f"{c}2", "Shared"]} for c in categories]
+    out = doc_render._skill_rows(groups)
+    assert [r["category"] for r in out] == rows
+    every = {s for g in groups for s in g["items"]}
+    assert {s for r in out for s in r["items"]} == every
+    if len(categories) > doc_render.MAX_SKILL_GROUPS:
+        assert out[-1]["items"].count("Shared") == 1      # folded once, not once per group
 
 
 def test_length_limits_hold_whatever_the_model_returns():
@@ -234,9 +284,78 @@ def test_length_limits_hold_whatever_the_model_returns():
     assert [r["title"] for r in data["experience"]] == ["Engineer 3", "Engineer 2", "Engineer 1", "Engineer 0"]
     assert max(len(r["bullets"]) for r in data["experience"]) == 4
     assert len(data["projects"]) == 3 and len(data["education"]) == 4 and len(data["certifications"]) == 6
-    assert len(data["skills"][0]["items"]) == 14
+    assert len(data["skills"][0]["items"]) == 15                                    # skills are never cut
     assert len(data["summary"]) <= 420 and data["summary"].endswith(".")          # ends on a whole sentence
     assert len(data["projects"][0]["description"]) <= 520 and data["projects"][0]["description"].endswith(".")
+
+
+# ── Fitting a CV to its page target ─────────────────────────────────────────────
+
+def _one_role_junior() -> dict:
+    cv = _full_cvdoc("junior")
+    cv["experience"] = cv["experience"][:1]
+    return cv
+
+
+@pytest.fixture
+def pages(monkeypatch):
+    """Stand-in for WeasyPrint's page count: `pages.rule(html) -> int`; every measured step is recorded."""
+    class Pages:
+        rule = staticmethod(lambda html: 1)
+        steps: list[str] = []
+
+    def count(html):
+        Pages.steps.append(re.search(r"<body(?: class=\"([^\"]*)\")?>", html).group(1) or "")
+        return Pages.rule(html)
+    monkeypatch.setattr(doc_render, "_page_count", count)
+    return Pages
+
+
+def test_a_cv_that_fits_is_left_as_written(pages):
+    html = doc_render.render_cv_html(_one_role_junior())
+    assert pages.steps == [""] and "<body>" in html and html.count("<li>") == 4 and "Technologies:" in html
+
+
+def test_spacing_then_type_tighten_before_anything_is_trimmed(pages):
+    pages.rule = staticmethod(lambda html: 1 if 'class="tight small"' in html else 2)
+    html = doc_render.render_cv_html(_one_role_junior())
+    assert pages.steps == ["", "tight", "tight small"]
+    assert html.count("<li>") == 4 and "Technologies:" in html
+
+
+def test_trimming_goes_tech_lists_then_fourth_bullets_then_descriptions(pages):
+    def rule(html):  # fits once each role has at most 3 bullets
+        return 1 if html.count("<li>") <= 3 else 2
+    pages.rule = staticmethod(rule)
+    cv = _one_role_junior()
+    for p in cv["projects"]:
+        p["description"] = "What it does. How it works."
+    html = doc_render.render_cv_html(cv)
+    assert pages.steps == ["", "tight", "tight small", "tight small", "tight small"]
+    assert "Technologies:" not in html and html.count("<li>") == 3
+    assert "What it does. How it works." in html                           # descriptions kept whole
+
+
+def test_when_nothing_fits_every_trim_is_applied_and_logged(pages, caplog):
+    pages.rule = staticmethod(lambda html: 2)
+    cv = _one_role_junior()
+    for p in cv["projects"]:
+        p["description"] = "What it does. How it works."
+    html = doc_render.render_cv_html(cv)
+    assert len(pages.steps) == 6 and "Technologies:" not in html and html.count("<li>") == 3
+    assert "What it does." in html and "How it works." not in html
+    assert "still runs to 2 pages (target 1)" in caplog.text
+
+
+def test_an_experienced_cv_may_run_to_two_pages(pages):
+    pages.rule = staticmethod(lambda html: 2)
+    assert "<body>" in doc_render.render_cv_html(_full_cvdoc("experienced")) and pages.steps == [""]
+
+
+def test_the_preview_is_fitted_like_the_pdf(client, pages):
+    pages.rule = staticmethod(lambda html: 1 if 'class="tight"' in html else 2)
+    html = client.post("/documents/preview", json={"type": "cv", "doc": _one_role_junior()}).json()["html"]
+    assert '<body class="tight">' in html
 
 
 def test_text_is_escaped_not_rendered_as_markup():
@@ -325,7 +444,9 @@ def _weasy(doc_type: str, doc: dict) -> fitz.Document:
 
 @needs_weasyprint
 def test_the_graduate_cv_is_one_page_in_the_template_font_with_live_links(pdf_dir):
-    pdf = _weasy("cv", agent._persona_to_cvdoc(GRADUATE) | {"seniority": "junior"})
+    cv = agent._persona_to_cvdoc(GRADUATE) | {"seniority": "junior"}
+    assert "<body>" in doc_render.render_cv_html(cv)                     # fits without tightening
+    pdf = _weasy("cv", cv)
     assert pdf.page_count == 1
     text = pdf[0].get_text().lower()  # entry lines are set in capitals
     assert "sam okafor" in text and "pantry planner" in text and "northfield university" in text
@@ -335,7 +456,6 @@ def test_the_graduate_cv_is_one_page_in_the_template_font_with_live_links(pdf_di
 
 
 @needs_weasyprint
-@pytest.mark.xfail(strict=True, reason="a full graduate CV runs about a fifth of a page onto page 2")
 def test_a_full_graduate_cv_fits_one_page(pdf_dir):
     # Everything the tailoring prompt allows a junior: 3-sentence summary, one role with 4 bullets of ~24
     # words, 3 projects of 2 sentences with 8 technologies, 6 skill groups, 3 certificates.

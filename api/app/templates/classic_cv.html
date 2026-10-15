@@ -5,7 +5,7 @@
   <title>{{ cv.name }} — CV</title>
   <style>{% include "base.css" %}</style>
 </head>
-<body>
+<body{% if cv.body_class %} class="{{ cv.body_class }}"{% endif %}>
   <header class="head">
     <h1 class="name">{{ cv.name }}</h1>
     {% if cv.contact_items %}
