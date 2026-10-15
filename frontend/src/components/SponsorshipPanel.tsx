@@ -2,9 +2,11 @@
 
 import { useEffect, useState } from "react";
 import { authFetch } from "@/app/api";
-import { sponsorshipBadges } from "@/components/JobCard";
+import Icon from "./ui/Icon";
+import { buttonClass, Chip, cx, type ChipTone } from "./ui/kit";
+import { sponsorshipVerdict, type SponsorshipVerdict } from "@/lib/sponsorship";
 
-interface SponsorshipView {
+export interface SponsorshipView {
   sponsorship: string;       // "offered" | "not_offered" | ""
   evidence: string;
   clearance: string;
@@ -17,12 +19,14 @@ interface SponsorshipView {
  * What a job's ad says about visa sponsorship and clearance, whether the employer is a licensed
  * sponsor, and the user's own mark (which wins in the feed). `refreshKey` re-reads it, e.g. once
  * analysis has fetched the full ad, which often says what the stored snippet didn't.
+ * The view is null for a job that isn't stored (e.g. one pasted by link).
  */
-export default function SponsorshipPanel({ jobId, refreshKey = 0 }: { jobId: string; refreshKey?: number }) {
+export function useSponsorship(jobId: string | undefined, refreshKey = 0) {
   const [view, setView] = useState<SponsorshipView | null>(null);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
+    if (!jobId) return;
     let live = true;
     authFetch(`/api/jobs/${encodeURIComponent(jobId)}/sponsorship`)
       .then((res) => (res.ok ? res.json() : null))
@@ -31,9 +35,8 @@ export default function SponsorshipPanel({ jobId, refreshKey = 0 }: { jobId: str
     return () => { live = false; };
   }, [jobId, refreshKey]);
 
-  if (!view) return null;   // not a stored job (e.g. one pasted by link)
-
   const mark = async (value: string | null) => {
+    if (!jobId) return;
     setSaving(true);
     try {
       const res = await authFetch(`/api/jobs/${encodeURIComponent(jobId)}/sponsorship`, {
@@ -47,53 +50,74 @@ export default function SponsorshipPanel({ jobId, refreshKey = 0 }: { jobId: str
     }
   };
 
-  const adSays = view.sponsorship === "offered" ? "The ad offers visa sponsorship."
-    : view.sponsorship === "not_offered" ? "The ad rules sponsorship out."
-    : "The ad doesn't say whether it sponsors visas.";
-  const badges = sponsorshipBadges({ ...view, sponsorship_mark: view.mark, sponsorship_evidence: view.evidence });
+  return { view, mark, saving };
+}
+
+export function viewVerdict(view: SponsorshipView) {
+  return sponsorshipVerdict({
+    sponsorship: view.sponsorship, sponsorship_evidence: view.evidence, clearance: view.clearance,
+    licensed_sponsor: view.licensed_sponsor, sponsorship_mark: view.mark,
+  });
+}
+
+export const VERDICT_TONE: Record<SponsorshipVerdict, ChipTone> = {
+  Offered: "positive", Likely: "positive", "Not stated": "neutral", "Ruled out": "danger", Unlikely: "warn",
+};
+
+function Reason({ kind, children }: { kind: "yes" | "no" | "unknown" | "warn"; children: React.ReactNode }) {
+  const icon = kind === "yes" ? <Icon name="check" size={15} strokeWidth={2.4} className="text-teal mt-[2px]" />
+    : kind === "no" ? <Icon name="close" size={15} strokeWidth={2.4} className="text-red mt-[2px]" />
+    : kind === "warn" ? <Icon name="alert" size={15} strokeWidth={2} className="text-amber-text mt-[2px]" />
+    : <span aria-hidden="true" className="w-[15px] h-[15px] mt-[2px] flex items-center justify-center shrink-0"><span className="w-[9px] h-[2px] rounded bg-stone" /></span>;
+  return <li className="flex gap-2">{icon}<span className="min-w-0">{children}</span></li>;
+}
+
+export default function SponsorshipPanel({ view, onMark, saving }: {
+  view: SponsorshipView; onMark: (v: string | null) => void; saving: boolean;
+}) {
+  const { verdict } = viewVerdict(view);
   const button = (value: string, label: string) => (
-    <button
-      disabled={saving}
-      onClick={() => mark(view.mark === value ? null : value)}
-      className={`text-xs px-3 py-1.5 rounded-lg border transition-colors disabled:opacity-50 ${
-        view.mark === value ? "border-teal-500 bg-teal-500/10 text-teal-300" : "border-zinc-800 text-zinc-400 hover:border-zinc-600"
-      }`}
-    >
-      {view.mark === value ? `✓ ${label}` : label}
+    <button type="button" disabled={saving} aria-pressed={view.mark === value}
+      onClick={() => onMark(view.mark === value ? null : value)}
+      className={cx(buttonClass("secondary", "xs", "font-normal"), view.mark === value && "border-teal-line bg-teal-soft text-teal-deep font-medium")}>
+      {view.mark === value && <Icon name="check" size={13} strokeWidth={2.4} />}
+      {label}
     </button>
   );
 
   return (
-    <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-6">
-      <div className="flex items-center justify-between gap-3 mb-3">
-        <h2 className="text-sm font-semibold text-zinc-300 uppercase tracking-widest">Visa sponsorship</h2>
-        <div className="flex flex-wrap gap-1.5 justify-end">
-          {badges.map((b) => (
-            <span key={b.label} title={b.title} className={`text-[10px] px-2 py-0.5 rounded-full border font-medium ${b.cls}`}>
-              {b.label}
-            </span>
-          ))}
-        </div>
+    <section aria-labelledby="visa" className="bg-surface border border-border rounded-card p-[18px] flex flex-col gap-3">
+      <div className="flex justify-between items-center gap-2">
+        <h2 id="visa" className="m-0 text-[15px] font-semibold">Visa sponsorship</h2>
+        <Chip tone={VERDICT_TONE[verdict]} size="sm" className="font-semibold">{verdict}</Chip>
       </div>
-      <div className="space-y-1.5 text-sm text-zinc-400">
-        <p>{adSays}</p>
-        {view.evidence && <p className="text-xs text-zinc-500 italic">&ldquo;{view.evidence}&rdquo;</p>}
-        <p>
-          {view.licensed_sponsor
-            ? `${view.sponsor_name} is on the Home Office register of licensed Skilled Worker sponsors.`
-            : "The employer isn't on the Home Office register of Skilled Worker sponsors under this name."}
-        </p>
-        {(view.clearance === "SC" || view.clearance === "DV") && (
-          <p className="text-amber-400/90">
-            Needs {view.clearance} security clearance, which usually requires years of UK residence.
-          </p>
+      <ul className="m-0 p-0 list-none flex flex-col gap-2 text-[13px] text-ink-2 leading-[1.5]">
+        {view.mark && (
+          <Reason kind={view.mark === "offered" ? "yes" : "no"}>
+            You marked this employer as {view.mark === "offered" ? "sponsoring" : "not sponsoring"} visas
+          </Reason>
         )}
+        {view.sponsorship === "offered" ? (
+          <Reason kind="yes">The ad offers visa sponsorship{view.evidence && <span className="block text-ink-3 italic">&ldquo;{view.evidence}&rdquo;</span>}</Reason>
+        ) : view.sponsorship === "not_offered" ? (
+          <Reason kind="no">The ad rules sponsorship out{view.evidence && <span className="block text-ink-3 italic">&ldquo;{view.evidence}&rdquo;</span>}</Reason>
+        ) : (
+          <Reason kind="unknown">The ad doesn&apos;t say whether it sponsors visas</Reason>
+        )}
+        {view.licensed_sponsor ? (
+          <Reason kind="yes">{view.sponsor_name || "The employer"} is on the Home Office register of licensed sponsors (Skilled Worker)</Reason>
+        ) : (
+          <Reason kind="unknown">Not on the Home Office register of Skilled Worker sponsors under this name</Reason>
+        )}
+        {(view.clearance === "SC" || view.clearance === "DV") && (
+          <Reason kind="warn">Needs {view.clearance} security clearance, which usually requires years of UK residence</Reason>
+        )}
+      </ul>
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className="text-[12.5px] text-ink-3">Know better?</span>
+        {button("offered", "They sponsor")}
+        {button("not_offered", "They don’t")}
       </div>
-      <div className="flex flex-wrap items-center gap-2 mt-4">
-        <span className="text-[10px] text-zinc-600 uppercase tracking-widest font-bold mr-1">Your call:</span>
-        {button("offered", "Sponsors visas")}
-        {button("not_offered", "Doesn't sponsor")}
-      </div>
-    </div>
+    </section>
   );
 }
