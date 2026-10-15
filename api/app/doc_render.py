@@ -2,9 +2,11 @@
 Structured document rendering for Windrush CVs and cover letters.
 
 The LLM emits a typed CVDoc / LetterDoc (see agent.py). This module:
-  1. turns that doc into trimmed, render-ready template data (the *authoritative*
-     1–2 page guarantee — slicing here holds even if the model ignores the prompt),
-  2. renders it to HTML via Jinja (reused by both the live preview and the PDF),
+  1. turns that doc into trimmed, render-ready template data (the length limits hold
+     even if the model ignores the prompt),
+  2. renders it to HTML via Jinja (reused by both the live preview and the PDF), fitting a
+     CV to its page target — one page for a graduate, two otherwise — by measuring it in
+     WeasyPrint and tightening, then trimming, until it fits (_FIT_STEPS),
   3. renders that HTML to a PDF via WeasyPrint, falling back to the legacy fpdf2
      renderer if WeasyPrint is unavailable or errors.
 
@@ -14,6 +16,7 @@ recruiters get (modulo small font-metric differences between Blink and WeasyPrin
 from __future__ import annotations
 
 import asyncio
+import functools
 import logging
 import re
 import uuid
@@ -36,17 +39,35 @@ _env = Environment(
     lstrip_blocks=True,
 )
 
-# ── Length limits (the real 1–2 page guarantee) ─────────────────────────────────
+# ── Length limits ────────────────────────────────────────────────────────────────
+# These bound what any doc can put on the page; fitting a CV to its page target is _fitted_cv_html's job.
 _MAX_SUMMARY_CHARS = 420
 _MAX_ROLES = 4
 _MAX_BULLETS = 4
-_MAX_SKILL_GROUPS = 6
-_MAX_SKILL_ITEMS = 14
+MAX_SKILL_GROUPS = 6           # rows; skills are never dropped, extra groups fold into "Other"
 _MAX_PROJECTS = 3
 _MAX_PROJECT_DESC_CHARS = 520  # room for 2 full sentences (what it is/does + how it works)
 _MAX_EDUCATION = 4
 _MAX_CERTS = 6
 _MAX_PARAGRAPHS = 4
+
+# Pages a CV must fit: one for a graduate / early-career candidate, two otherwise.
+_PAGE_TARGET = {"junior": 1, "experienced": 2}
+
+# When a CV runs over its page target, these steps are tried in order until it fits. Each adds to
+# the one before: tighter spacing, then 10pt type (the floor), then trimming the least important
+# content — project technology lists, each role's 4th bullet, project descriptions after their
+# first sentence. "tight" and "small" are CSS classes on <body> (base.css); the rest trim the data.
+_FIT_STEPS: tuple[tuple[str, ...], ...] = (
+    (),
+    ("tight",),
+    ("tight", "small"),
+    ("tight", "small", "no_tech"),
+    ("tight", "small", "no_tech", "three_bullets"),
+    ("tight", "small", "no_tech", "three_bullets", "one_sentence"),
+)
+_LAYOUT_STEPS = ("tight", "small")
+_OTHER_CATEGORIES = ("other", "others", "additional", "miscellaneous", "misc")
 
 
 # ── helpers ─────────────────────────────────────────────────────────────────────
@@ -186,19 +207,44 @@ def _role_dates(role: dict) -> str:
     return start or end
 
 
+def _skill_rows(groups: list) -> list[dict]:
+    """
+    The CV's skill rows, at most MAX_SKILL_GROUPS of them, without losing a skill: past the limit,
+    the extra groups fold into one "Other" row (an existing "Other"-like group absorbs them, last).
+    """
+    rows = []
+    for grp in groups or []:
+        items = [str(s).strip() for s in (grp.get("items") or []) if s and str(s).strip()]
+        if items:
+            rows.append({"category": (grp.get("category") or "Skills").strip() or "Skills", "items": items})
+    if len(rows) <= MAX_SKILL_GROUPS:
+        return rows
+    other = next((r for r in rows if r["category"].lower() in _OTHER_CATEGORIES), None)
+    rest = [r for r in rows if r is not other]
+    kept, folded = rest[:MAX_SKILL_GROUPS - 1], rest[MAX_SKILL_GROUPS - 1:]
+    items, seen = [], set()
+    for s in (other["items"] if other else []) + [s for r in folded for s in r["items"]]:
+        if s.lower() not in seen:
+            seen.add(s.lower())
+            items.append(s)
+    return kept + [{"category": "Other", "items": items}]
+
+
+def _first_sentence(text: str) -> str:
+    return re.split(r"(?<=[.!?])\s+", text.strip(), maxsplit=1)[0]
+
+
 # ── template-data builders (apply trimming/defaults) ────────────────────────────
 
-def build_cv_template_data(cv: dict) -> dict:
+def build_cv_template_data(cv: dict, fit: tuple[str, ...] = ()) -> dict:
+    """Render-ready CV data. `fit` is a step from _FIT_STEPS: the layout classes and trims to apply."""
     cv = cv or {}
-    skills = []
-    for grp in (cv.get("skills") or [])[:_MAX_SKILL_GROUPS]:
-        items = [s for s in (grp.get("items") or []) if s][:_MAX_SKILL_ITEMS]
-        if items:
-            skills.append({"category": (grp.get("category") or "Skills").strip(), "items": items})
+    skills = _skill_rows(cv.get("skills") or [])
+    max_bullets = 3 if "three_bullets" in fit else _MAX_BULLETS
 
     experience = []
     for role in sorted(cv.get("experience") or [], key=_render_recency, reverse=True)[:_MAX_ROLES]:
-        bullets = [b.strip() for b in (role.get("bullets") or []) if b and b.strip()][:_MAX_BULLETS]
+        bullets = [b.strip() for b in (role.get("bullets") or []) if b and b.strip()][:max_bullets]
         experience.append({
             "title": (role.get("title") or "").strip(),
             "employer": (role.get("employer") or "").strip(),
@@ -209,10 +255,11 @@ def build_cv_template_data(cv: dict) -> dict:
 
     projects = []
     for p in (cv.get("projects") or [])[:_MAX_PROJECTS]:
+        description = _truncate(_clean_text(p.get("description", "")), _MAX_PROJECT_DESC_CHARS)
         projects.append({
             "name": (p.get("name") or "").strip(),
-            "description": _truncate(_clean_text(p.get("description", "")), _MAX_PROJECT_DESC_CHARS),
-            "tech": [t for t in (p.get("tech") or []) if t],
+            "description": _first_sentence(description) if "one_sentence" in fit else description,
+            "tech": [] if "no_tech" in fit else [t for t in (p.get("tech") or []) if t],
             "link": _short_url(p.get("link", "")),
             "link_href": _abs_url(p.get("link", "")),
             "link_label": _project_link_label(p.get("link", "")),
@@ -258,6 +305,8 @@ def build_cv_template_data(cv: dict) -> dict:
         "certifications": certifications,
         "seniority": seniority,
         "sections": sections,
+        "page_target": _PAGE_TARGET[seniority],
+        "body_class": " ".join(s for s in fit if s in _LAYOUT_STEPS),
     }
 
 
@@ -302,9 +351,40 @@ def build_letter_template_data(letter: dict) -> dict:
 
 # ── HTML rendering ───────────────────────────────────────────────────────────────
 
+@functools.lru_cache(maxsize=1)
+def _weasyprint_html():
+    """WeasyPrint's HTML class, or None where it can't load (ImportError, or OSError without Pango)."""
+    try:
+        from weasyprint import HTML
+        return HTML
+    except Exception:
+        return None
+
+
+def _page_count(html: str) -> int | None:
+    """Pages the HTML lays out to in WeasyPrint, or None where WeasyPrint can't load."""
+    weasy = _weasyprint_html()
+    return None if weasy is None else len(weasy(string=html, base_url=_TEMPLATES_DIR).render().pages)
+
+
+def _fitted_cv_html(cv: dict, template: str) -> str:
+    """
+    The CV's HTML at the first step of _FIT_STEPS that keeps it within its page target, so the
+    preview and the PDF agree. Without WeasyPrint to measure with, it's rendered as written.
+    """
+    tpl = _env.get_template(template)
+    for fit in _FIT_STEPS:
+        data = build_cv_template_data(cv, fit)
+        html = tpl.render(cv=data)
+        pages = _page_count(html)
+        if pages is None or pages <= data["page_target"]:
+            return html
+    logger.warning("CV still runs to %d pages (target %d) after every fit step", pages, data["page_target"])
+    return html
+
+
 def render_cv_html(cv: dict, template_id: str | None = None) -> str:
-    tpl = registry.resolve(template_id)
-    return _env.get_template(tpl["cv"]).render(cv=build_cv_template_data(cv))
+    return _fitted_cv_html(cv, registry.resolve(template_id)["cv"])
 
 
 def render_letter_html(letter: dict, template_id: str | None = None) -> str:

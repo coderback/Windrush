@@ -10,7 +10,7 @@ from typing import AsyncGenerator
 
 from openai import AsyncOpenAI, BadRequestError
 
-from . import azure_config
+from . import azure_config, doc_render
 from .company_names import normalise_company_name as _normalise_company_name
 from . import http_client
 from . import tracker
@@ -460,6 +460,33 @@ def _rank_projects_by_relevance(job: dict, projects: list[dict]) -> list[dict]:
         scored.append((score, i, p))
     scored.sort(key=lambda x: (-x[0], x[1]))
     return [p for _, _, p in scored]
+
+
+def _regrouped_skills(groups, base: list[dict]) -> list[dict] | None:
+    """
+    The model's regrouping of the profile's skills, if it holds exactly those skills (none dropped,
+    added or repeated) in at most doc_render.MAX_SKILL_GROUPS named groups; else None. Each skill
+    keeps the profile's spelling.
+    """
+    spelling = {str(s).strip().lower(): str(s).strip()
+                for g in base for s in (g.get("items") or []) if s and str(s).strip()}
+    if not isinstance(groups, list) or not 0 < len(groups) <= doc_render.MAX_SKILL_GROUPS:
+        return None
+    out, seen = [], set()
+    for g in groups:
+        items = g.get("items") if isinstance(g, dict) else None
+        category = str(g.get("category") or "").strip() if isinstance(g, dict) else ""
+        if not category or not isinstance(items, list) or not items:
+            return None
+        row = []
+        for s in items:
+            key = str(s).strip().lower()
+            if key not in spelling or key in seen:
+                return None
+            seen.add(key)
+            row.append(spelling[key])
+        out.append({"category": category, "items": row})
+    return out if seen == set(spelling) else None
 
 
 def _restore_project_depth(cv_projects: list, base_projects: list) -> list:
@@ -1109,6 +1136,10 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
                 "'Results-driven', 'Detail-oriented', 'Passionate') and do NOT close with vague filler ('strong "
                 "problem-solving skills and attention to detail', 'hardworking team player'). Do NOT spend a "
                 "sentence naming assumed or basic tooling (e.g. Git / version control). "
+                f"SKILLS: sort EVERY skill in the candidate data into at most {doc_render.MAX_SKILL_GROUPS} "
+                "categories with short, conventional names (e.g. 'Languages', 'Machine Learning', 'Web', "
+                "'Data & Cloud', 'Tools'), the categories most relevant to this job first. Copy each skill "
+                "exactly as written; do not add, drop, rename or combine any. "
                 "LENGTH: at most 4 most-recent roles; at most 3 projects. "
                 "BANNED words (recruiters flag these as AI-written — never use them in bullets, summary or "
                 "project text): delve, testament, robust, seamless, synergy, leverage, pivotal, intricate, "
@@ -1133,11 +1164,13 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
         if used_fallback:
             cv = base_cv
         # Trust our own structured data — never let the model alter identity/contact, and keep
-        # the candidate's full skills list (the model tends to silently drop groups/items when
-        # tailoring; completeness matters more to the user than reordering).
+        # the candidate's full skills list: the model's regrouping is used only when it holds
+        # exactly the profile's skills (it tends to silently drop some when tailoring).
         cv["contact"] = base_cv["contact"]
+        regrouped = None
         if base_cv.get("skills"):
-            cv["skills"] = base_cv["skills"]
+            regrouped = None if used_fallback else _regrouped_skills(cv.get("skills"), base_cv["skills"])
+            cv["skills"] = regrouped or base_cv["skills"]
         if cv.get("projects") and base_cv.get("projects"):
             cv["projects"] = _restore_project_depth(cv["projects"], base_cv["projects"])
         if not cv.get("name"):
@@ -1148,8 +1181,8 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
         # same projects recur across roles (the model is meant to tailor the selection).
         final_proj_names = [(p.get("name") or "")[:40] for p in (cv.get("projects") or [])][:5]
         (logger.warning if used_fallback else logger.info)(
-            "tailored_cv: fallback=%s, level=%s, projects base=%d model=%d final=%d %s | job=%r",
-            used_fallback, level, base_proj_n, model_proj_n, len(cv.get("projects") or []),
+            "tailored_cv: fallback=%s, level=%s, skills regrouped=%s, projects base=%d model=%d final=%d %s | job=%r",
+            used_fallback, level, regrouped is not None, base_proj_n, model_proj_n, len(cv.get("projects") or []),
             final_proj_names, (job.get("title") or "")[:60],
         )
         return {"cv": cv, "template_id": template_id}
