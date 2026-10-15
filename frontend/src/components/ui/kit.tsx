@@ -284,7 +284,7 @@ export function Switch({ checked, onChange, label, disabled }: {
 
 export function TextLink({ href, children, className }: { href: string; children: React.ReactNode; className?: string }) {
   return (
-    <Link href={href} className={cx("text-teal text-[13.5px] font-medium hover:text-teal-deep hover:underline underline-offset-2", className)}>
+    <Link href={href} className={cx("whitespace-nowrap text-teal text-[13.5px] font-medium hover:text-teal-deep hover:underline underline-offset-2", className)}>
       {children}
     </Link>
   );
