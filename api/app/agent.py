@@ -888,7 +888,7 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
             "headline": "",
             "company": job.get("company", ""),
             "job_title": job.get("title", ""),
-            "company_location": job.get("location", "") or core.get("country", ""),
+            "company_location": job.get("location", ""),   # the employer's, never the candidate's
             "date": datetime.date.today().strftime("%d %B %Y"),
             "contact": {
                 "address_line_1": core.get("address_line_1", ""),

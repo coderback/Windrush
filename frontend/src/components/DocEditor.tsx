@@ -32,6 +32,7 @@ export interface CVDoc {
 export interface LetterDoc {
   candidate_name: string;
   company?: string;
+  company_location?: string;
   job_title?: string;
   date?: string;
   contact?: { email?: string; phone?: string; location?: string };
@@ -307,6 +308,14 @@ function LetterForm({ letter, onChange }: { letter: LetterDoc; onChange: (l: Let
   const set = (patch: Partial<LetterDoc>) => onChange({ ...letter, ...patch });
   return (
     <div className="space-y-2">
+      {/* The dated recipient block above the salutation. */}
+      <div className="grid grid-cols-2 gap-2">
+        <Field label="Date" value={letter.date ?? ""} onChange={(v) => set({ date: v })} />
+        <Field label="Role (Re: line)" value={letter.job_title ?? ""} onChange={(v) => set({ job_title: v })} />
+        <Field label="Company" value={letter.company ?? ""} onChange={(v) => set({ company: v })} />
+        <Field label="Company location" value={letter.company_location ?? ""}
+          onChange={(v) => set({ company_location: v })} />
+      </div>
       <div className="grid grid-cols-2 gap-2">
         <Field label="Salutation" value={letter.salutation} onChange={(v) => set({ salutation: v })} />
         <Field label="Sign-off" value={letter.signoff} onChange={(v) => set({ signoff: v })} />

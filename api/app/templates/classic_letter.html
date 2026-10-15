@@ -5,7 +5,7 @@
   <title>{{ letter.candidate_name }} — Cover Letter</title>
   <style>{% include "base.css" %}</style>
 </head>
-<body>
+<body{% if letter.body_class %} class="{{ letter.body_class }}"{% endif %}>
   <header class="letter-head">
     <h1 class="letter-name">{{ letter.candidate_name }}</h1>
     {% if letter.headline %}<p class="letter-headline">{{ letter.headline }}</p>{% endif %}
@@ -16,6 +16,19 @@
     </div>
     {% endif %}
   </header>
+
+  {% if letter.date or letter.company or letter.job_title %}
+  <div class="letter-meta">
+    {% if letter.date %}<p class="letter-date">{{ letter.date }}</p>{% endif %}
+    {% if letter.company %}
+    <div class="letter-recipient">
+      <p>{{ letter.company }}</p>
+      {% if letter.company_location %}<p>{{ letter.company_location }}</p>{% endif %}
+    </div>
+    {% endif %}
+    {% if letter.job_title %}<p class="letter-subject">Re: {{ letter.job_title }}</p>{% endif %}
+  </div>
+  {% endif %}
 
   <div class="letter-body">
     <p>{{ letter.salutation }}</p>

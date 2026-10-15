@@ -4,9 +4,9 @@ Structured document rendering for Windrush CVs and cover letters.
 The LLM emits a typed CVDoc / LetterDoc (see agent.py). This module:
   1. turns that doc into trimmed, render-ready template data (the length limits hold
      even if the model ignores the prompt),
-  2. renders it to HTML via Jinja (reused by both the live preview and the PDF), fitting a
-     CV to its page target — one page for a graduate, two otherwise — by measuring it in
-     WeasyPrint and tightening, then trimming, until it fits (_FIT_STEPS),
+  2. renders it to HTML via Jinja (reused by both the live preview and the PDF), fitting it
+     to its page target — a cover letter or a graduate's CV to one page, other CVs to two — by
+     measuring it in WeasyPrint and tightening (then, for a CV, trimming) until it fits,
   3. renders that HTML to a PDF via WeasyPrint, falling back to the legacy fpdf2
      renderer if WeasyPrint is unavailable or errors.
 
@@ -67,6 +67,8 @@ _FIT_STEPS: tuple[tuple[str, ...], ...] = (
     ("tight", "small", "no_tech", "three_bullets", "one_sentence"),
 )
 _LAYOUT_STEPS = ("tight", "small")
+# A cover letter is one page and is never trimmed: only its layout tightens.
+_LETTER_FIT_STEPS: tuple[tuple[str, ...], ...] = ((), ("tight",), ("tight", "small"))
 _OTHER_CATEGORIES = ("other", "others", "additional", "miscellaneous", "misc")
 
 
@@ -332,10 +334,13 @@ def _letter_contact_lines(contact: dict) -> list[dict]:
     return lines
 
 
-def build_letter_template_data(letter: dict) -> dict:
+def build_letter_template_data(letter: dict, fit: tuple[str, ...] = ()) -> dict:
+    """Render-ready letter data. `fit` is a step from _LETTER_FIT_STEPS: layout classes only."""
     letter = letter or {}
     paragraphs = [p.strip() for p in (letter.get("paragraphs") or []) if p and p.strip()][:_MAX_PARAGRAPHS]
     return {
+        "page_target": 1,
+        "body_class": " ".join(fit),
         "candidate_name": (letter.get("candidate_name") or "").strip(),
         "headline": (letter.get("headline") or "").strip(),
         "company": (letter.get("company") or "").strip(),
@@ -367,29 +372,33 @@ def _page_count(html: str) -> int | None:
     return None if weasy is None else len(weasy(string=html, base_url=_TEMPLATES_DIR).render().pages)
 
 
-def _fitted_cv_html(cv: dict, template: str) -> str:
+def _fitted_html(doc_type: str, doc: dict, template: str) -> str:
     """
-    The CV's HTML at the first step of _FIT_STEPS that keeps it within its page target, so the
-    preview and the PDF agree. Without WeasyPrint to measure with, it's rendered as written.
+    The document's HTML at the first fit step (_FIT_STEPS for a CV, _LETTER_FIT_STEPS for a
+    letter) that keeps it within its page target, so the preview and the PDF agree. Without
+    WeasyPrint to measure with, it's rendered as written.
     """
     tpl = _env.get_template(template)
-    for fit in _FIT_STEPS:
-        data = build_cv_template_data(cv, fit)
-        html = tpl.render(cv=data)
+    if doc_type == "cover_letter":
+        steps, build, name = _LETTER_FIT_STEPS, build_letter_template_data, "letter"
+    else:
+        steps, build, name = _FIT_STEPS, build_cv_template_data, "cv"
+    for fit in steps:
+        data = build(doc, fit)
+        html = tpl.render(**{name: data})
         pages = _page_count(html)
         if pages is None or pages <= data["page_target"]:
             return html
-    logger.warning("CV still runs to %d pages (target %d) after every fit step", pages, data["page_target"])
+    logger.warning("%s still runs to %d pages (target %d) after every fit step", name, pages, data["page_target"])
     return html
 
 
 def render_cv_html(cv: dict, template_id: str | None = None) -> str:
-    return _fitted_cv_html(cv, registry.resolve(template_id)["cv"])
+    return _fitted_html("cv", cv, registry.resolve(template_id)["cv"])
 
 
 def render_letter_html(letter: dict, template_id: str | None = None) -> str:
-    tpl = registry.resolve(template_id)
-    return _env.get_template(tpl["letter"]).render(letter=build_letter_template_data(letter))
+    return _fitted_html("cover_letter", letter, registry.resolve(template_id)["letter"])
 
 
 def render_html(doc_type: str, doc: dict, template_id: str | None = None) -> str:
@@ -413,14 +422,14 @@ def _fallback_pdf(doc_type: str, doc: dict) -> str:
     """Legacy fpdf2 path used only if WeasyPrint is unavailable/errors."""
     if doc_type == "cover_letter":
         data = build_letter_template_data(doc)
-        head = [data["candidate_name"]]
-        if data["headline"]:
-            head.append(data["headline"])
-        head += [c["text"] for c in data["contact_lines"]]
-        body = [data["salutation"], *data["paragraphs"], data["signoff"], data["candidate_name"]]
+        # fpdf2 prints the name as the heading; the date, employer and role open the text.
+        head = ([data["headline"]] if data["headline"] else []) + [c["text"] for c in data["contact_lines"]]
+        recipient = "\n".join(x for x in (data["company"], data["company_location"]) if x)
+        subject = f"Re: {data['job_title']}" if data["job_title"] else ""
+        body = [x for x in (data["date"], recipient, subject) if x]
+        body += [data["salutation"], *data["paragraphs"], data["signoff"], data["candidate_name"]]
         text = "\n".join(head) + "\n\n" + "\n\n".join(body)
-        meta = {"name": data["candidate_name"], "job_title": data["job_title"], "company": data["company"]}
-        return pdf_generator.generate_pdf("cover_letter", text, meta)
+        return pdf_generator.generate_pdf("cover_letter", text, {"name": data["candidate_name"]})
     data = build_cv_template_data(doc)
     lines: list[str] = []
     if data["name"]:
