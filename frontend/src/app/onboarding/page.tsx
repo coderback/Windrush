@@ -40,7 +40,8 @@ export default function OnboardingPage() {
     job_email: "", job_password: "",
   });
   const [prefs, setPrefs] = useState<PersonaPrefs>({
-    target_titles: [], preferred_locations: [], remote_preference: "hybrid",
+    // "" = not answered: applications only state a work setting the user picked.
+    target_titles: [], preferred_locations: [], remote_preference: "",
   });
   const [fullPersona, setFullPersona] = useState<Record<string, unknown>>({});
 
@@ -306,6 +307,7 @@ export default function OnboardingPage() {
                   onChange={(e) => setPrefs((p) => ({ ...p, remote_preference: e.target.value }))}
                   className="w-full bg-zinc-950 border border-zinc-800 rounded px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-teal-500"
                 >
+                  <option value="">Not answered</option>
                   <option value="remote">Remote only</option>
                   <option value="hybrid">Hybrid</option>
                   <option value="onsite">On-site</option>

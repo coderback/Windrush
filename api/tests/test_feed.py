@@ -26,8 +26,8 @@ def feed_user(db):
 def slow_live_search(monkeypatch):
     calls = []
 
-    async def fake_search(query, location):
-        calls.append((query, location))
+    async def fake_search(query, locations):
+        calls.append((query, locations))
         await asyncio.sleep(1.5)
         return [make_job(f"Q{i}", f"Quantum Engineer {i}", f"QCo{i}", "London, UK", "qubits") for i in range(40)]
     monkeypatch.setattr(discovery, "search_jobs", fake_search)
@@ -58,7 +58,7 @@ def test_thin_feed_discovers_in_the_background(feed_user, ollama, slow_live_sear
             first = (await c.get("/jobs", params={"tags": "quantum"})).json()
             latency = time.perf_counter() - t0
             again = (await c.get("/jobs", params={"tags": "quantum"})).json()
-            while discovery.is_running("quantum", "London"):
+            while discovery.is_running("quantum", ["London"]):
                 await asyncio.sleep(0.05)
             after = (await c.get("/jobs", params={"tags": "quantum"})).json()
         stop.set()
@@ -89,8 +89,140 @@ def test_hung_embedder_falls_back_to_unranked_results(feed_user, ollama, monkeyp
 
 
 def test_fixture_jobs_from_discovery_are_never_stored(db, ollama, monkeypatch):
-    async def fixture_only(query, location):
+    async def fixture_only(query, locations):
         return [dict(j) for j in job_searcher._FIXTURE]
     monkeypatch.setattr(discovery, "search_jobs", fixture_only)
-    asyncio.run(discovery._discover("anything", "London"))
+    asyncio.run(discovery._discover("anything", ["London"]))
     assert jobs_db.job_count() == 0
+
+
+@pytest.fixture
+def multi_user(db):
+    uid = tracker.create_user("multi@x.com", "h")
+    # Raw profile text: duplicates that differ only in case / whitespace, and "Remote".
+    tracker.update_user_persona(uid, {"preferences": {
+        "target_titles": ["Graduate Data Analyst", "graduate data analyst ", "Junior Software Engineer",
+                          "Data Engineer", "ML Engineer"],
+        "preferred_locations": ["London", "london ", "LONDON", "Manchester", "Remote"],
+    }})
+    return uid
+
+
+@pytest.fixture
+def recorded_searches(monkeypatch):
+    searches = []
+
+    async def record(query, locations):
+        searches.append((query, locations))
+        return []
+    monkeypatch.setattr(discovery, "search_jobs", record)
+    return searches
+
+
+def _feed_as(uid, params=None):
+    """GET /jobs as `uid`, then wait for the discovery runs it started."""
+    main.app.dependency_overrides[auth.get_current_user] = lambda: auth.User(id=uid, email="multi@x.com")
+    try:
+        async def flow():
+            async with _client() as c:
+                body = (await c.get("/jobs", params=params)).json()
+                while any(not t.done() for t in discovery._running.values()):
+                    await asyncio.sleep(0.01)
+            return body
+        return asyncio.run(flow())
+    finally:
+        main.app.dependency_overrides.clear()
+
+
+def test_feed_uses_every_preferred_location_and_searches_each_target_title_once(multi_user, ollama,
+                                                                               recorded_searches):
+    jobs_db.add_jobs([make_job(1, "Analyst", location="London, UK"),
+                      make_job(2, "Engineer", location="Manchester, UK"),
+                      make_job(3, "Designer", location="Leeds, UK"),
+                      make_job(4, "Analyst", company="Maple", location="London, Ontario, Canada")])
+    body = _feed_as(multi_user)
+
+    assert sorted(j["location"] for j in body["jobs"]) == ["London, UK", "Manchester, UK"]
+    assert body["discovering"] is True and body["location"] == "London, Manchester, Remote"
+    # One run per distinct title (duplicates don't use up the cap of 3), each over every
+    # distinct location except "Remote".
+    assert sorted(recorded_searches) == [(t, ["London", "Manchester"]) for t in
+                                         ("Data Engineer", "Graduate Data Analyst", "Junior Software Engineer")]
+
+
+@pytest.mark.parametrize("params, expected", [
+    ({"query": "quantum"}, [("quantum", ["London", "Manchester"])]),
+    ({"location": "Berlin"}, [(t, ["Berlin"]) for t in
+                              ("Data Engineer", "Graduate Data Analyst", "Junior Software Engineer")]),
+    ({"query": "quantum", "location": "Berlin"}, [("quantum", ["Berlin"])]),
+])
+def test_explicit_search_discovers_only_what_was_asked_for(multi_user, ollama, recorded_searches,
+                                                           params, expected):
+    assert _feed_as(multi_user, params)["discovering"] is True
+    assert sorted(recorded_searches) == expected
+
+
+def test_discovery_covers_at_most_four_preferred_locations(db, ollama, recorded_searches):
+    uid = tracker.create_user("many@x.com", "h")
+    cities = [f"City {i}" for i in range(12)]
+    tracker.update_user_persona(uid, {"preferences": {
+        "target_titles": ["Data Engineer", "ML Engineer", "Data Analyst"],
+        "preferred_locations": ["Remote", *cities],
+    }})
+    _feed_as(uid)
+    _feed_as(uid)  # a reload doesn't reach for the remaining locations either
+    # 3 titles x 4 locations = 12 Adzuna calls per feed load; "Remote" doesn't take a slot.
+    assert sorted(recorded_searches) == [(t, cities[:4]) for t in ("Data Analyst", "Data Engineer", "ML Engineer")]
+
+
+def test_filtering_to_covered_locations_reuses_the_run(multi_user, ollama, recorded_searches):
+    _feed_as(multi_user)  # discovers each title over London + Manchester
+    recorded_searches.clear()
+    assert _feed_as(multi_user, {"location": "london"})["discovering"] is False  # in cooldown
+    assert recorded_searches == []
+    _feed_as(multi_user, {"location": "Leeds"})
+    assert sorted(recorded_searches) == [(t, ["Leeds"]) for t in
+                                         ("Data Engineer", "Graduate Data Analyst", "Junior Software Engineer")]
+
+
+def test_discovery_state_is_per_query_and_location(db, monkeypatch):
+    runs = []
+
+    async def flow():
+        release = asyncio.Event()
+
+        async def held_search(query, locations):
+            runs.append((query, locations))
+            await release.wait()
+            return []
+        monkeypatch.setattr(discovery, "search_jobs", held_search)
+
+        async def settle():
+            while any(not t.done() for t in discovery._running.values()):
+                await asyncio.sleep(0.01)
+
+        assert discovery.ensure("Data Analyst", ["London", "london ", "Manchester"]) is True
+        await asyncio.sleep(0)
+        # While it runs: any subset, in any order / case / spacing, with duplicates, joins it.
+        assert discovery.ensure("data  analyst", ["LONDON"]) is True
+        assert discovery.ensure("Data Analyst", ["manchester", "London", "MANCHESTER"]) is True
+        assert discovery.is_running("Data Analyst", ["Manchester", "Paris"])
+        assert not discovery.is_running("Data Analyst", ["Paris"])
+        assert not discovery.is_running("Data Engineer", ["London"])  # pairs, not locations
+        # A location not yet covered runs alone, not alongside the ones already in flight.
+        assert discovery.ensure("Data Analyst", ["London", "Leeds"]) is True
+        release.set()
+        await settle()
+        # Afterwards every covered pair is in cooldown, however the request spells it.
+        assert discovery.ensure("Data Analyst", ["Manchester"]) is False
+        assert discovery.ensure("DATA ANALYST", ["leeds", "London"]) is False
+        assert not discovery.is_running("Data Analyst", ["London", "Manchester", "Leeds"])
+        # Adding a new location runs only that one.
+        assert discovery.ensure("Data Analyst", ["Manchester", "Bristol", "London"]) is True
+        assert discovery.is_running("Data Analyst", ["Bristol"])
+        await settle()
+        assert discovery._running == {}  # every pair of every run is released when it finishes
+
+    asyncio.run(flow())
+    assert runs == [("Data Analyst", ["London", "Manchester"]), ("Data Analyst", ["Leeds"]),
+                    ("Data Analyst", ["Bristol"])]

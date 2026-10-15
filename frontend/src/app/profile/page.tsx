@@ -76,10 +76,10 @@ interface Persona {
     website: string;
     visa_status: string;
     visa_type: string;
-    right_to_work_uk: boolean;
-    require_sponsorship: boolean;
+    right_to_work_uk: YesNo;
+    require_sponsorship: YesNo;
     security_clearance: string;
-    has_government_ties: boolean;
+    has_government_ties: YesNo;
     job_email: string;
     job_password: string;
   };
@@ -105,17 +105,17 @@ interface Persona {
     min_salary?: number;
     expected_hourly_rate?: number;
     remote_preference: string;
-    relocation_willingness: boolean;
+    relocation_willingness: YesNo;
     preferred_locations: string[];
     industries: string[];
     companies_to_avoid: string[];
     company_size_preference: string;
     employment_type: string;
     notice_period: string;
-    can_work_in_person: boolean;
-    can_start_immediately: boolean;
-    has_reliable_transportation: boolean;
-    needs_accommodations: boolean;
+    can_work_in_person: YesNo;
+    can_start_immediately: YesNo;
+    has_reliable_transportation: YesNo;
+    needs_accommodations: YesNo;
   };
   history: WorkExperience[];
   education: Education[];
@@ -142,6 +142,26 @@ const SECTIONS = [
   "Preferences",
   "Directives"
 ];
+
+// Facts stated on applications. null = not answered: the browser agent leaves those for you.
+type YesNo = boolean | null;
+
+function YesNoField({ label, value, onChange }: { label: string; value: YesNo | undefined; onChange: (v: YesNo) => void }) {
+  return (
+    <div className="flex items-center justify-between gap-4 bg-zinc-950/50 p-4 rounded-lg border border-zinc-800">
+      <span className="text-sm">{label}</span>
+      <select
+        className="bg-zinc-950 border border-zinc-800 rounded p-1 text-sm focus:border-teal-500 outline-none"
+        value={value === true ? "yes" : value === false ? "no" : ""}
+        onChange={(e) => onChange(e.target.value === "yes" ? true : e.target.value === "no" ? false : null)}
+      >
+        <option value="">Not answered</option>
+        <option value="yes">Yes</option>
+        <option value="no">No</option>
+      </select>
+    </div>
+  );
+}
 
 export default function ProfilePage() {
   const router = useRouter();
@@ -621,10 +641,9 @@ export default function ProfilePage() {
                   <label className="text-xs text-zinc-500 uppercase">Veteran Status</label>
                   <input className="w-full bg-zinc-950 border border-zinc-800 rounded p-2 text-sm focus:border-teal-500 outline-none" value={persona.diversity.veteran_status} onChange={(e) => handleChange("diversity", "veteran_status", e.target.value)} />
                 </div>
-                <div className="space-y-2 flex items-center justify-between bg-zinc-950/50 p-4 rounded-lg border border-zinc-800">
-                  <span className="text-sm">Has Government Ties</span>
-                  <input type="checkbox" checked={persona.core_info.has_government_ties} onChange={(e) => handleChange("core_info", "has_government_ties", e.target.checked)} className="accent-teal-500" />
-                </div>
+                <YesNoField label="Right to work in the UK" value={persona.core_info.right_to_work_uk} onChange={(v) => handleChange("core_info", "right_to_work_uk", v)} />
+                <YesNoField label="Requires visa sponsorship" value={persona.core_info.require_sponsorship} onChange={(v) => handleChange("core_info", "require_sponsorship", v)} />
+                <YesNoField label="Has government ties" value={persona.core_info.has_government_ties} onChange={(v) => handleChange("core_info", "has_government_ties", v)} />
                 <div className="space-y-2">
                   <label className="text-xs text-zinc-500 uppercase">Visa Type</label>
                   <input placeholder="H1-B, Skilled Worker, etc." className="w-full bg-zinc-950 border border-zinc-800 rounded p-2 text-sm focus:border-teal-500 outline-none" value={persona.core_info.visa_type} onChange={(e) => handleChange("core_info", "visa_type", e.target.value)} />
@@ -648,6 +667,7 @@ export default function ProfilePage() {
                 <div className="space-y-2">
                   <label className="text-xs text-zinc-500 uppercase">Work Setting</label>
                   <select className="w-full bg-zinc-950 border border-zinc-800 rounded p-2 text-sm focus:border-teal-500 outline-none" value={persona.preferences.remote_preference} onChange={(e) => handleChange("preferences", "remote_preference", e.target.value)}>
+                    <option value="">Not answered</option>
                     <option value="remote">Remote-only</option>
                     <option value="hybrid">Hybrid</option>
                     <option value="onsite">On-site</option>
@@ -668,22 +688,11 @@ export default function ProfilePage() {
               </div>
               
               <div className="grid grid-cols-2 gap-4 pt-4 border-t border-zinc-800">
-                <div className="flex items-center justify-between bg-zinc-950/50 p-4 rounded-lg border border-zinc-800">
-                  <span className="text-sm">Willing to Relocate</span>
-                  <input type="checkbox" checked={persona.preferences.relocation_willingness} onChange={(e) => handleChange("preferences", "relocation_willingness", e.target.checked)} className="accent-teal-500" />
-                </div>
-                <div className="flex items-center justify-between bg-zinc-950/50 p-4 rounded-lg border border-zinc-800">
-                  <span className="text-sm">Can start immediately</span>
-                  <input type="checkbox" checked={persona.preferences.can_start_immediately} onChange={(e) => handleChange("preferences", "can_start_immediately", e.target.checked)} className="accent-teal-500" />
-                </div>
-                <div className="flex items-center justify-between bg-zinc-950/50 p-4 rounded-lg border border-zinc-800">
-                  <span className="text-sm">Has reliable transportation</span>
-                  <input type="checkbox" checked={persona.preferences.has_reliable_transportation} onChange={(e) => handleChange("preferences", "has_reliable_transportation", e.target.checked)} className="accent-teal-500" />
-                </div>
-                <div className="flex items-center justify-between bg-zinc-950/50 p-4 rounded-lg border border-zinc-800">
-                  <span className="text-sm">Needs accommodations</span>
-                  <input type="checkbox" checked={persona.preferences.needs_accommodations} onChange={(e) => handleChange("preferences", "needs_accommodations", e.target.checked)} className="accent-teal-500" />
-                </div>
+                <YesNoField label="Can work in person" value={persona.preferences.can_work_in_person} onChange={(v) => handleChange("preferences", "can_work_in_person", v)} />
+                <YesNoField label="Willing to Relocate" value={persona.preferences.relocation_willingness} onChange={(v) => handleChange("preferences", "relocation_willingness", v)} />
+                <YesNoField label="Can start immediately" value={persona.preferences.can_start_immediately} onChange={(v) => handleChange("preferences", "can_start_immediately", v)} />
+                <YesNoField label="Has reliable transportation" value={persona.preferences.has_reliable_transportation} onChange={(v) => handleChange("preferences", "has_reliable_transportation", v)} />
+                <YesNoField label="Needs accommodations" value={persona.preferences.needs_accommodations} onChange={(v) => handleChange("preferences", "needs_accommodations", v)} />
               </div>
             </div>
           )}

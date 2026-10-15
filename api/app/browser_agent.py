@@ -13,8 +13,11 @@ import base64
 import json
 import logging
 import os
+import re
 import threading
 from typing import AsyncGenerator, Awaitable, Callable
+
+from .models import is_present_end_date
 
 # browser-use's product telemetry (PostHog) and cloud sync are ON unless these say otherwise: every
 # run would send the task prompt (the applicant's personal data), action history, visited URLs and
@@ -36,6 +39,10 @@ VIEWPORT = {"width": 1280, "height": 800}
 # browser-use defaults to 500 steps; cap the LLM spend per application.
 _MAX_FILL_STEPS = 40
 _MAX_SUBMIT_STEPS = 4
+# The fill agent's final summary, shown to the user during review (bounded: it's LLM output).
+_MAX_NOTES_CHARS = 2000
+# Shown in place of the job-site password in agent text sent to the client (see _redact).
+_REDACTED = "••••••••"
 
 # Navigation the agent's browser must never reach: it runs inside the api container, next to
 # the internal services. Raw-IP URLs are blocked separately (BrowserProfile.block_ip_addresses).
@@ -195,6 +202,14 @@ def _has_page(browser_session) -> bool:
     return bool(getattr(browser_session, "agent_focus_target_id", None))
 
 
+def _redact(text: str, secret: str) -> str:
+    """`text` with every occurrence of `secret` masked. browser-use swaps <secret>job_password</secret>
+    for the real value in everything the agent does — its own `done` text included — so agent text
+    goes through here before it reaches the client (and before any truncation, which could cut the
+    password in half and leave a prefix showing)."""
+    return text.replace(secret, _REDACTED) if secret else text
+
+
 def _push_frame(frame_queue: asyncio.Queue, frame_b64: str):
     """Drop oldest frame if full, then push newest."""
     if frame_queue.full():
@@ -313,6 +328,7 @@ async def _interactive_session(
     intro_action: str,
     intro_reason: str,
     on_submit: Callable[[], Awaitable[tuple[bool, str]]],
+    notes: str = "",
 ) -> AsyncGenerator[dict, None]:
     """
     Hand control to the user until they finish. Commands (from BrowserView.tsx):
@@ -321,12 +337,16 @@ async def _interactive_session(
       'done'   → the user submitted it themselves
       'skip' / 'cancel' / 'abort' → abandon (not submitted)
       any other text → typed into the focused field
+    `notes` (the agent's own summary) rides on the first event only; the UI keeps it for the review.
     """
     def interactive(action: str, reason: str, screenshot: str) -> dict:
         return {"action": action, "screenshot": screenshot or None, "blocked": True,
                 "reason": reason, "done": False, "interactive": True}
 
-    yield interactive(intro_action, intro_reason, await _screenshot_b64(browser_session))
+    intro = interactive(intro_action, intro_reason, await _screenshot_b64(browser_session))
+    if notes:
+        intro["notes"] = notes
+    yield intro
     again = "Click the screenshot or type below. 'submit' sends it, 'done' if you submitted it yourself, 'skip' cancels."
 
     while True:
@@ -384,6 +404,71 @@ async def _interactive_session(
             logger.warning("takeover input (%s) failed: %s", what, exc)
             label = f"That didn't work ({exc}) — try again"
         yield interactive(label, again, await _screenshot_b64(browser_session))
+
+
+# Yes/no facts stated on the candidate's behalf. Unanswered (None/missing) ones are left out of
+# the prompt entirely, so the agent never asserts something the user hasn't told us.
+_YES_NO_QUESTIONS = (
+    ("core_info", "right_to_work_uk", "Right to work / work authorisation in the UK"),
+    ("core_info", "require_sponsorship", "Require visa sponsorship"),
+    ("core_info", "has_government_ties", "Has government ties"),
+    ("preferences", "relocation_willingness", "Willing to relocate"),
+    ("preferences", "can_work_in_person", "Can work in-person"),
+    ("preferences", "can_start_immediately", "Can start immediately"),
+    ("preferences", "has_reliable_transportation", "Has reliable transportation"),
+    ("preferences", "needs_accommodations", "Needs accommodations"),
+)
+
+_DISABILITY_ANSWERS = {"yes": "Yes", "no": "No", "prefer_not_to_say": "Prefer not to say"}
+
+# A year (19xx/20xx) in a role's end date: the role has actually ended — unless a present word is
+# in it too, as when "Mid-2019-Present" splits at its first hyphen or a CV lists stints ("Nov 2012,
+# Dec 2012 – Present").
+_END_YEAR = re.compile(r"(?<!\d)(?:19|20)\d{2}(?!\d)")
+_PRESENT_WORD = re.compile(r"\b(?:present|current(?:ly)?|now|ongoing|today|(?:to|till|until)\s+date)\b", re.I)
+
+
+def _has_ended(end_date) -> bool:
+    end = str(end_date or "")
+    return bool(_END_YEAR.search(end)) and not _PRESENT_WORD.search(end)
+
+
+def _known_answers(persona: dict) -> list[tuple[str, str]]:
+    core = persona.get("core_info") or {}
+    prefs = persona.get("preferences") or {}
+    screening = persona.get("screening") or {}
+    diversity = persona.get("diversity") or {}
+    sections = {"core_info": core, "preferences": prefs}
+
+    answers = []
+    for section, field, question in _YES_NO_QUESTIONS:
+        value = sections[section].get(field)
+        if isinstance(value, bool):
+            answers.append((question, "Yes" if value else "No"))
+
+    # Declining to answer is always a true statement, so it's the fallback for diversity questions.
+    answers += [
+        ("Gender", diversity.get("gender") or "Prefer not to say"),
+        ("Ethnicity / diversity questions", diversity.get("ethnicity") or "Prefer not to say"),
+        ("Disability", _DISABILITY_ANSWERS.get(diversity.get("disability_status") or "", "Prefer not to say")),
+        ("Salary expectations (Annual)", screening.get("salary_canonical") or prefs.get("min_salary") or "Negotiable"),
+        ("Salary expectations (Hourly)", prefs.get("expected_hourly_rate") or "Negotiable"),
+    ]
+    if prefs.get("remote_preference"):
+        answers.append(("Remote/Hybrid preference", prefs["remote_preference"]))
+    locations = ", ".join(loc for loc in prefs.get("preferred_locations") or [] if loc)
+    if locations:
+        answers.append(("Preferred work locations", locations))
+    # Parsed CVs often leave is_current off and put "Present" (or nothing) in end_date, so "No" needs
+    # every role to have really ended — an end date with a year in it; anything less certain is left
+    # for the user (an end date we don't recognise may still mean "present").
+    history = [job for job in persona.get("history") or [] if isinstance(job, dict)]
+    if any(job.get("is_current") or is_present_end_date(job.get("end_date")) for job in history):
+        answers.append(("Are you currently employed", "Yes"))
+    elif history and all(_has_ended(job.get("end_date")) for job in history):
+        answers.append(("Are you currently employed", "No"))
+    answers.append(("How did you hear about us", "Website / Internet search"))
+    return answers
 
 
 def _build_task(job_url: str, persona: dict, cover_letter: str,
@@ -474,9 +559,6 @@ def _build_task(job_url: str, persona: dict, cover_letter: str,
         for k, v in screening.items():
             if v: screening_block += f"- {k.replace('_', ' ').title()}: {v}\n"
 
-    # Diversity & Inclusion
-    diversity = persona.get("diversity", {})
-    
     creds_block = "\n".join(lines)
     profile_block = "\n".join(profile_lines)
     task = f"Apply for the job at: {job_url}"
@@ -489,43 +571,13 @@ def _build_task(job_url: str, persona: dict, cover_letter: str,
     if stories_block:
         task += stories_block
 
-    rtw_uk = "Yes" if core.get("right_to_work_uk", True) else "No"
-    sponsorship = "Yes" if core.get("require_sponsorship", False) else "No"
-    salary = screening.get("salary_canonical") or f"{prefs.get('min_salary', 'Negotiable')}"
-    hourly = f"{prefs.get('expected_hourly_rate', 'Negotiable')}"
-    remote = prefs.get("remote_preference", "remote")
-    relocate = "Yes" if prefs.get("relocation_willingness", False) else "No"
-    pref_locs = ", ".join(prefs.get("preferred_locations", []))
-    in_person = "Yes" if prefs.get("can_work_in_person", True) else "No"
-    immediate = "Yes" if prefs.get("can_start_immediately", False) else "No"
-    transport = "Yes" if prefs.get("has_reliable_transportation", True) else "No"
-    accommodations = "Yes" if prefs.get("needs_accommodations", False) else "No"
-    gov_ties = "Yes" if core.get("has_government_ties", False) else "No"
-
-    # Diversity defaults
-    gender = diversity.get("gender") or "Prefer not to say"
-    disability = diversity.get("disability_status") or "No"
-    ethnicity = diversity.get("ethnicity") or "Prefer not to say"
-
+    task += "\n\nFor dropdown / multiple-choice questions use these answers:\n" + "\n".join(
+        f"- {question}: {answer}" for question, answer in _known_answers(persona)
+    )
     task += (
-        f"\n\nFor dropdown / multiple-choice questions use these answers:"
-        f"\n- Right to work / work authorisation in the UK: {rtw_uk}"
-        f"\n- Require visa sponsorship: {sponsorship}"
-        f"\n- Gender: {gender}"
-        f"\n- Ethnicity / diversity questions: {ethnicity}"
-        f"\n- Disability: {disability}"
-        f"\n- Salary expectations (Annual): {salary}"
-        f"\n- Salary expectations (Hourly): {hourly}"
-        f"\n- Remote/Hybrid preference: {remote}"
-        f"\n- Willing to relocate: {relocate}"
-        f"\n- Preferred work locations: {pref_locs}"
-        f"\n- Can work in-person: {in_person}"
-        f"\n- Can start immediately: {immediate}"
-        f"\n- Has reliable transportation: {transport}"
-        f"\n- Needs accommodations: {accommodations}"
-        f"\n- Has government ties: {gov_ties}"
-        f"\n- How did you hear about us: Website / Internet search"
-        f"\n- Are you currently employed: Yes if experience list is non-empty, else No"
+        "\n\nOnly state facts given above. If a question asks for a fact about the candidate that isn't "
+        "covered (for example work authorisation, sponsorship, criminal record, notice period), do NOT guess: "
+        "leave it unanswered and list it at the start of your final summary under 'Needs your input'."
     )
 
     if persona.get("custom_directives"):
@@ -539,8 +591,10 @@ def _build_task(job_url: str, persona: dict, cover_letter: str,
         "\n\nIMPORTANT — DO NOT SUBMIT. Never click the FINAL button that sends the application "
         "(e.g. 'Submit', 'Submit application', 'Apply', 'Send application', 'Finish'). The candidate reviews the "
         "filled form and submits it themselves. As soon as the only thing left is that final submission, stop and "
-        "call done with success=true, summarising what you filled and anything you were unsure about. If you cannot "
-        "fill the form (blocked, missing information, page errors), call done with success=false and say why."
+        "call done with success=true. In the done text, start with 'Needs your input: ...' (one question per line) "
+        "if you left any question unanswered, then summarise what you filled and anything you were unsure about. "
+        "If you cannot fill the form (blocked, missing information, page errors), call done with success=false and "
+        "say why, again starting with 'Needs your input: ...' for anything the candidate must answer."
     )
     return task
 
@@ -681,8 +735,10 @@ def _secret_scoped_tools() -> "Tools":
     return tools
 
 
-async def _submit_with_agent(llm, browser_session, sensitive_data: dict | None) -> tuple[bool, str]:
-    """Run a tiny follow-up agent on the same (kept-alive) browser to click the final submit."""
+async def _submit_with_agent(llm, browser_session, sensitive_data: dict | None,
+                             secret: str = "") -> tuple[bool, str]:
+    """Run a tiny follow-up agent on the same (kept-alive) browser to click the final submit.
+    `secret` (the job-site password) is masked out of the detail it returns for the client."""
     try:
         agent = Agent(
             task=_SUBMIT_TASK, llm=llm, browser_session=browser_session,
@@ -692,10 +748,11 @@ async def _submit_with_agent(llm, browser_session, sensitive_data: dict | None) 
             tools=_secret_scoped_tools(), sensitive_data=sensitive_data,
         )
         history = await agent.run(max_steps=_MAX_SUBMIT_STEPS)
-        return bool(history.is_successful()), (history.final_result() or "")[:200]
+        return bool(history.is_successful()), _redact(history.final_result() or "", secret)[:200]
     except Exception as exc:
-        logger.warning("submit agent failed: %s", exc)
-        return False, str(exc)[:200]
+        error = _redact(str(exc), secret)
+        logger.warning("submit agent failed: %s", error)
+        return False, error[:200]
 
 
 async def apply_with_browser(
@@ -712,7 +769,8 @@ async def apply_with_browser(
     Async generator: the browser-use agent fills the application, then the user reviews it and
     decides whether to submit (see module docstring). Yields dicts:
       { action, screenshot (base64|None), blocked (bool), reason (str|None), done (bool),
-        interactive (bool, optional), submitted (bool, only on the final done event) }
+        interactive (bool, optional), submitted (bool, only on the final done event),
+        notes (str, only on the first review event: the agent's summary, "Needs your input" first) }
     The browser is always killed on exit — including when the client disconnects mid-run.
     """
     if not BROWSER_USE_AVAILABLE:
@@ -737,7 +795,7 @@ async def apply_with_browser(
             _push_frame(frame_queue, screenshot)
         goal = getattr(agent_output, "next_goal", "") or ""
         actions = getattr(agent_output, "action", None) or []
-        action_str = str(goal or (actions[0] if actions else agent_output))[:120]
+        action_str = _redact(str(goal or (actions[0] if actions else agent_output)), job_password)[:120]
         await step_queue.put({
             "action": f"Step {step_number}: {action_str}",
             "screenshot": screenshot,
@@ -784,35 +842,40 @@ async def apply_with_browser(
         while not step_queue.empty():
             yield step_queue.get_nowait()
 
-        agent_error: Exception | None = None
+        agent_error = ""
         ready = False
-        summary = ""
+        notes = ""
         try:
             history = agent_task.result()
             ready = bool(history.is_successful())  # agent's own verdict: "form filled, ready to submit"
-            summary = (history.final_result() or "")[:300]
+            # Its summary starts with the "Needs your input" list, so it goes to the user whole,
+            # not squeezed into the one-line header. browser-use has put the real password back
+            # wherever the agent wrote the placeholder, so mask it before capping the length.
+            notes = _redact(history.final_result() or "", job_password).strip()[:_MAX_NOTES_CHARS]
         except Exception as exc:
-            agent_error = exc
-            logger.warning("browser agent failed: %s", exc)
+            agent_error = _redact(str(exc), job_password) or type(exc).__name__
+            logger.warning("browser agent failed: %s", agent_error)
 
         if not _has_page(browser_session):
             yield {"action": f"Browser error: {agent_error or 'no page was opened'}", "screenshot": None,
                    "blocked": False, "reason": None, "done": True}
             return
 
+        see_notes = " — see the agent's notes" if notes else ""
         if agent_error:
             intro = f"The agent hit a problem — handing control to you ({agent_error})"
             reason = "Finish the form yourself, then type 'submit' (or 'done' if you submitted it), or 'skip'."
         elif ready:
-            intro = "Form filled — review it before anything is sent" + (f". Agent notes: {summary}" if summary else "")
+            intro = "Form filled — review it before anything is sent" + see_notes
             reason = "Type 'submit' to send it, click/type to fix anything first, or 'skip' to cancel."
         else:
-            intro = "The agent couldn't finish the form" + (f": {summary}" if summary else "")
+            intro = "The agent couldn't finish the form" + see_notes
             reason = "Take over by clicking/typing, then 'submit' (or 'done' if you submitted it), or 'skip'."
 
         async for step in _interactive_session(
             browser_session, instruction_queue, intro, reason,
-            on_submit=lambda: _submit_with_agent(llm, browser_session, sensitive_data),
+            on_submit=lambda: _submit_with_agent(llm, browser_session, sensitive_data, job_password),
+            notes=notes,
         ):
             yield step
             if step.get("done"):

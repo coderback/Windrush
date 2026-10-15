@@ -20,8 +20,12 @@ logger = logging.getLogger("windrush.discovery")
 
 _COOLDOWN_S = 30 * 60          # don't re-run the same (query, location) within this window
 _MAX_CONCURRENT = 2            # each run may launch Chromium; cap total load
-_running: dict[tuple[str, str], asyncio.Task] = {}
-_finished_at: dict[tuple[str, str], float] = {}
+# State is kept per normalised (query, location) pair, not per location set, so filtering the
+# feed to a subset of the locations a run covers reuses that run instead of starting another.
+# A run over several locations is registered under each of its pairs.
+_Pair = tuple[str, str]
+_running: dict[_Pair, asyncio.Task] = {}
+_finished_at: dict[_Pair, float] = {}
 
 # The live search runs in worker *processes*: it fans out to ~70 job boards and does a lot of
 # CPU work on the results (multi-MB JSON, HTML-to-text, exposure scoring). In threads that
@@ -46,68 +50,80 @@ def shutdown() -> None:
         _pool = None
 
 
-def _search_in_process(query: str, location: str) -> list[dict]:
+def _search_in_process(query: str, locations: list[str]) -> list[dict]:
     """Worker-process entry point: run the async multi-source search on its own event loop."""
     from .job_proxy import search_jobs
-    return asyncio.run(search_jobs(query, location))
+    return asyncio.run(search_jobs(query, locations))
 
 
-async def search_jobs(query: str, location: str) -> list[dict]:
+async def search_jobs(query: str, locations: list[str]) -> list[dict]:
     """Live multi-source search, executed in a worker process."""
     global _pool
     try:
-        return await asyncio.get_running_loop().run_in_executor(_get_pool(), _search_in_process, query, location)
+        return await asyncio.get_running_loop().run_in_executor(_get_pool(), _search_in_process, query, locations)
     except BrokenProcessPool:
         _pool = None  # a worker died (e.g. Chromium OOM) — start a fresh pool next time
         raise
 
 
-def _key(query: str, location: str) -> tuple[str, str]:
-    return (" ".join(query.lower().split()), " ".join(location.lower().split()))
+def _norm(text: str) -> str:
+    return " ".join(text.lower().split())
 
 
-def is_running(query: str, location: str) -> bool:
-    task = _running.get(_key(query, location))
-    return bool(task and not task.done())
+def _pairs(query: str, locations: list[str]) -> dict[_Pair, str]:
+    """Normalised (query, location) pair -> the first spelling of that location."""
+    pairs: dict[_Pair, str] = {}
+    for loc in locations:
+        pairs.setdefault((_norm(query), _norm(loc)), loc)
+    return pairs
 
 
-def ensure(query: str, location: str) -> bool:
+def is_running(query: str, locations: list[str]) -> bool:
+    """True while a discovery covering any of these locations for `query` is in flight."""
+    tasks = [_running.get(pair) for pair in _pairs(query, locations)]
+    return any(task is not None and not task.done() for task in tasks)
+
+
+def ensure(query: str, locations: list[str]) -> bool:
     """
-    Start a background discovery for (query, location) unless one is running or ran recently.
-    Returns True while a discovery for this key is in flight (the caller reports `discovering`).
+    Start one background discovery for `query` over those `locations` that are neither in
+    flight nor ran recently (only the location-dependent sources fan out over them).
+    Returns True while a discovery for any of the locations is in flight (the caller reports
+    `discovering`).
     """
-    key = _key(query, location)
-    if is_running(query, location):
-        return True
-    if time.monotonic() - _finished_at.get(key, -_COOLDOWN_S) < _COOLDOWN_S:
-        return False
-    task = asyncio.create_task(_discover(query, location), name=f"discover:{key}")
-    _running[key] = task
-    task.add_done_callback(lambda t, k=key: _done(k, t))
-    return True
+    now = time.monotonic()
+    # A pair still in _running is in flight, or finished with its _done callback pending.
+    todo = {pair: loc for pair, loc in _pairs(query, locations).items()
+            if pair not in _running and now - _finished_at.get(pair, -_COOLDOWN_S) >= _COOLDOWN_S}
+    if todo:
+        task = asyncio.create_task(_discover(query, list(todo.values())), name=f"discover:{list(todo)}")
+        for pair in todo:
+            _running[pair] = task
+        task.add_done_callback(lambda t, ps=tuple(todo): _done(ps, t))
+    return is_running(query, locations)
 
 
-def _done(key: tuple[str, str], task: asyncio.Task) -> None:
-    _running.pop(key, None)
-    _finished_at[key] = time.monotonic()
+def _done(pairs: tuple[_Pair, ...], task: asyncio.Task) -> None:
+    finished = time.monotonic()
+    for pair in pairs:
+        _running.pop(pair, None)
+        _finished_at[pair] = finished
     if len(_finished_at) > 1000:  # bound memory: forget the oldest entries
         for k in sorted(_finished_at, key=_finished_at.get)[:500]:
             _finished_at.pop(k, None)
     if not task.cancelled() and task.exception():
-        logger.warning("discovery %r failed: %s", key, task.exception())
+        logger.warning("discovery %r failed: %s", pairs, task.exception())
 
 
-async def _discover(query: str, location: str) -> None:
-    from .main import _infer_level  # deferred: main imports this module
+async def _discover(query: str, locations: list[str]) -> None:
     started = time.monotonic()
-    jobs = await search_jobs(query, location)  # concurrency is capped by the pool size
+    jobs = await search_jobs(query, locations)  # concurrency is capped by the pool size
     # search_jobs falls back to the bundled mock fixture when every live source is empty;
     # those must never be persisted as real listings.
     live = [dict(j) for j in jobs if j.get("source") != "fixture"]
     for j in live:
         j["source"] = j.get("source") or "live"
-        j["level"] = _infer_level(j.get("title", ""))
     # Embedding is mostly waiting on Ollama, so a thread is enough here.
     added, refreshed = (await asyncio.to_thread(jobs_db.add_jobs, live)) if live else (0, 0)
     logger.info("discovery %r/%r: %d found, %d added, %d refreshed in %.1fs",
-                query, location, len(live), added, refreshed, time.monotonic() - started)
+                query, locations, len(live), added, refreshed, time.monotonic() - started)

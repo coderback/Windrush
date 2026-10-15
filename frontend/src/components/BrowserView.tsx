@@ -8,6 +8,7 @@ interface Props {
   screenshot: string | null;
   blocked: boolean;
   reason: string | null;
+  notes?: string | null;
   sessionId: string;
   interactive?: boolean;
   onInstructionSent?: () => void;
@@ -21,6 +22,7 @@ export default function BrowserView({
   screenshot,
   blocked,
   reason,
+  notes,
   sessionId,
   interactive,
   onInstructionSent,
@@ -84,11 +86,28 @@ export default function BrowserView({
     send({ type: "click", x, y });
   };
 
-  const handleImageScroll = (e: React.WheelEvent<HTMLImageElement>) => {
-    if (!interactive) return;
-    e.preventDefault();
-    send({ type: "scroll", delta: e.deltaY });
-  };
+  // The wheel over the screenshot scrolls the agent's page, not this (now scrollable) overlay. React
+  // registers onWheel as a passive listener, so its preventDefault() is ignored: use a native one.
+  const sendRef = useRef(send);
+  sendRef.current = send;
+  const hasScreenshot = Boolean(screenshot);
+  useEffect(() => {
+    const img = imgRef.current;
+    if (!interactive || !img) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      sendRef.current({ type: "scroll", delta: e.deltaY });
+    };
+    img.addEventListener("wheel", onWheel, { passive: false });
+    return () => img.removeEventListener("wheel", onWheel);
+  }, [interactive, hasScreenshot]);
+
+  // Focus the input when the controls appear, without scrolling to it: autoFocus would scroll the
+  // overlay down to the input and push the header and Agent notes off screen.
+  const inputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (blocked) inputRef.current?.focus({ preventScroll: true });
+  }, [blocked]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -101,109 +120,122 @@ export default function BrowserView({
   };
 
   return (
-    <div className="fixed inset-0 bg-black/92 backdrop-blur-sm z-50 flex flex-col items-center justify-center p-4 gap-3">
-      {/* Header */}
-      <div className="w-full max-w-5xl flex items-center justify-between shrink-0">
-        <div className="flex items-center gap-2">
-          {!blocked ? (
-            <span className="w-2 h-2 rounded-full bg-teal-400 animate-pulse" />
-          ) : (
-            <span className="w-2 h-2 rounded-full bg-amber-400" />
-          )}
-          <span className="text-xs uppercase tracking-widest font-semibold text-zinc-400">
-            {interactive ? "You have control" : blocked ? "Waiting for input" : "Browser automation"}
-          </span>
+    // Scrollable, and centred by the inner column's auto margins rather than justify-center: those
+    // collapse to 0 once the notes + screenshot outgrow a short viewport, so the column starts at the
+    // top and scrolls, instead of overflowing both ends with the header and controls out of reach.
+    // bg-black/92 is not on Tailwind 3's opacity scale and generates no CSS; the arbitrary value does.
+    <div className="fixed inset-0 bg-black/[.92] backdrop-blur-sm z-50 overflow-y-auto overscroll-contain flex p-4">
+      <div className="m-auto w-full max-w-5xl flex flex-col items-center gap-3">
+        {/* Header */}
+        <div className="w-full max-w-5xl flex items-center justify-between shrink-0">
+          <div className="flex items-center gap-2">
+            {!blocked ? (
+              <span className="w-2 h-2 rounded-full bg-teal-400 animate-pulse" />
+            ) : (
+              <span className="w-2 h-2 rounded-full bg-amber-400" />
+            )}
+            <span className="text-xs uppercase tracking-widest font-semibold text-zinc-400">
+              {interactive ? "You have control" : blocked ? "Waiting for input" : "Browser automation"}
+            </span>
+          </div>
+          <span className="text-xs text-zinc-500 max-w-[60%] truncate">{action}</span>
         </div>
-        <span className="text-xs text-zinc-500 max-w-[60%] truncate">{action}</span>
-      </div>
 
-      {/* Screenshot */}
-      <div className="w-full max-w-5xl border border-zinc-700 rounded-lg overflow-hidden bg-zinc-900 shrink-0">
-        {screenshot ? (
-          <img
-            ref={imgRef}
-            src={`data:image/jpeg;base64,${screenshot}`}
-            alt="Browser view"
-            className={`w-full h-auto block ${interactive ? "cursor-crosshair select-none" : ""}`}
-            onClick={handleImageClick}
-            onWheel={handleImageScroll}
-            draggable={false}
-          />
-        ) : (
-          <div className="h-52 flex items-center justify-center text-zinc-600 text-sm">
-            {blocked ? "Waiting…" : "Loading page…"}
+        {/* The agent's summary, in full: it lists what it left for you under "Needs your input" */}
+        {notes && (
+          <div className="w-full max-w-5xl shrink-0 max-h-40 overflow-y-auto text-sm text-amber-200 border border-amber-500/30 rounded-lg px-4 py-2.5 bg-amber-500/5">
+            <p className="text-[10px] uppercase tracking-widest text-amber-400/80 mb-1">Agent notes</p>
+            <p className="whitespace-pre-wrap break-words">{notes}</p>
           </div>
         )}
-      </div>
 
-      {/* Controls */}
-      {blocked && (
-        <div className="w-full max-w-5xl space-y-2 shrink-0">
-          {reason && !interactive && (
-            <div className="text-sm text-amber-300 border border-amber-500/30 rounded-lg px-4 py-2.5 bg-amber-500/5">
-              {reason}
+        {/* Screenshot */}
+        <div className="w-full max-w-5xl border border-zinc-700 rounded-lg overflow-hidden bg-zinc-900 shrink-0">
+          {screenshot ? (
+            <img
+              ref={imgRef}
+              src={`data:image/jpeg;base64,${screenshot}`}
+              alt="Browser view"
+              className={`w-full h-auto block ${interactive ? "cursor-crosshair select-none" : ""}`}
+              onClick={handleImageClick}
+              draggable={false}
+            />
+          ) : (
+            <div className="h-52 flex items-center justify-center text-zinc-600 text-sm">
+              {blocked ? "Waiting…" : "Loading page…"}
             </div>
           )}
-
-          <div className="flex gap-2">
-            <input
-              type="text"
-              value={text}
-              onChange={(e) => setText(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder={
-                interactive
-                  ? 'Type text to send to browser, or "submit" / "skip"…'
-                  : 'Type an instruction, "submit" to confirm, or "skip" to cancel…'
-              }
-              autoFocus
-              className="flex-1 bg-zinc-900 border border-zinc-700 rounded-lg px-4 py-2 text-sm text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:border-teal-500 transition-colors"
-            />
-            <button
-              onClick={() => send({ type: "key", key: "Tab" })}
-              disabled={!interactive || sending}
-              title="Send Tab key"
-              className="px-3 py-2 text-xs text-zinc-400 border border-zinc-700 rounded-lg hover:border-zinc-500 disabled:opacity-30 transition-colors"
-            >
-              Tab
-            </button>
-            <button
-              onClick={() => send({ type: "key", key: "Enter" })}
-              disabled={!interactive || sending}
-              title="Send Enter key"
-              className="px-3 py-2 text-xs text-zinc-400 border border-zinc-700 rounded-lg hover:border-zinc-500 disabled:opacity-30 transition-colors"
-            >
-              ↵
-            </button>
-            <button
-              onClick={() => { if (text.trim()) { send(text.trim()); setText(""); } }}
-              disabled={sending || !text.trim()}
-              className="px-4 py-2 text-sm font-semibold text-white bg-teal-600 hover:bg-teal-500 rounded-lg transition-colors disabled:opacity-40"
-            >
-              {sending ? "…" : "Send"}
-            </button>
-            <button
-              onClick={() => send("skip")}
-              disabled={sending}
-              className="px-4 py-2 text-sm text-zinc-400 border border-zinc-700 hover:border-zinc-500 rounded-lg transition-colors disabled:opacity-40"
-            >
-              Skip
-            </button>
-          </div>
-
-          {interactive && (
-            <p className="text-xs text-zinc-600">
-              Click the screenshot to click · scroll to scroll · type in the box to type · Tab / ↵ to send keys
-            </p>
-          )}
         </div>
-      )}
 
-      {!blocked && (
-        <p className="text-xs text-zinc-600 shrink-0">
-          Automating — screenshots update as the agent works
-        </p>
-      )}
+        {/* Controls */}
+        {blocked && (
+          <div className="w-full max-w-5xl space-y-2 shrink-0">
+            {reason && !interactive && (
+              <div className="text-sm text-amber-300 border border-amber-500/30 rounded-lg px-4 py-2.5 bg-amber-500/5">
+                {reason}
+              </div>
+            )}
+
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={text}
+                onChange={(e) => setText(e.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder={
+                  interactive
+                    ? 'Type text to send to browser, or "submit" / "skip"…'
+                    : 'Type an instruction, "submit" to confirm, or "skip" to cancel…'
+                }
+                ref={inputRef}
+                className="flex-1 bg-zinc-900 border border-zinc-700 rounded-lg px-4 py-2 text-sm text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:border-teal-500 transition-colors"
+              />
+              <button
+                onClick={() => send({ type: "key", key: "Tab" })}
+                disabled={!interactive || sending}
+                title="Send Tab key"
+                className="px-3 py-2 text-xs text-zinc-400 border border-zinc-700 rounded-lg hover:border-zinc-500 disabled:opacity-30 transition-colors"
+              >
+                Tab
+              </button>
+              <button
+                onClick={() => send({ type: "key", key: "Enter" })}
+                disabled={!interactive || sending}
+                title="Send Enter key"
+                className="px-3 py-2 text-xs text-zinc-400 border border-zinc-700 rounded-lg hover:border-zinc-500 disabled:opacity-30 transition-colors"
+              >
+                ↵
+              </button>
+              <button
+                onClick={() => { if (text.trim()) { send(text.trim()); setText(""); } }}
+                disabled={sending || !text.trim()}
+                className="px-4 py-2 text-sm font-semibold text-white bg-teal-600 hover:bg-teal-500 rounded-lg transition-colors disabled:opacity-40"
+              >
+                {sending ? "…" : "Send"}
+              </button>
+              <button
+                onClick={() => send("skip")}
+                disabled={sending}
+                className="px-4 py-2 text-sm text-zinc-400 border border-zinc-700 hover:border-zinc-500 rounded-lg transition-colors disabled:opacity-40"
+              >
+                Skip
+              </button>
+            </div>
+
+            {interactive && (
+              <p className="text-xs text-zinc-600">
+                Click the screenshot to click · scroll to scroll · type in the box to type · Tab / ↵ to send keys
+              </p>
+            )}
+          </div>
+        )}
+
+        {!blocked && (
+          <p className="text-xs text-zinc-600 shrink-0">
+            Automating — screenshots update as the agent works
+          </p>
+        )}
+      </div>
     </div>
   );
 }

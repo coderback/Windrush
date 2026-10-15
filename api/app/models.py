@@ -1,8 +1,21 @@
+import re
+
 from pydantic import BaseModel, Field
 from typing import List, Optional
 
 
 # ── PERSONA MODELS ────────────────────────────────────────────────────────────
+
+# End dates CVs give a role that hasn't ended ("2020 – Present", "2019 to date"). Matched as a prefix:
+# CVs (and LinkedIn PDFs) trail it with more text — "Present (7 years 9 months)", "Present (Remote)",
+# "Present Day", "Present*" — and a stray dash or "to"/"till" can survive the range split ("-- Present").
+_PRESENT_END_DATE = re.compile(
+    r"[\s\-–—]*(?:(?:to|till|until|up\s+to)\s+)?(?:present|current(?:ly)?|now|ongoing|today|date)\b", re.I)
+
+
+def is_present_end_date(end_date) -> bool:
+    return bool(_PRESENT_END_DATE.match(str(end_date or "")))
+
 
 class WorkExperience(BaseModel):
     employer: str
@@ -86,10 +99,12 @@ class CoreInfo(BaseModel):
     website: str = ""
     visa_status: str = ""
     visa_type: str = ""
-    right_to_work_uk: bool = True
-    require_sponsorship: bool = False
+    # Yes/no facts stated on applications: None means "not answered", and the browser agent
+    # never fills in an answer the user hasn't given.
+    right_to_work_uk: Optional[bool] = None
+    require_sponsorship: Optional[bool] = None
     security_clearance: str = ""
-    has_government_ties: bool = False
+    has_government_ties: Optional[bool] = None
     job_email: str = ""
     job_password: str = ""
 
@@ -97,18 +112,18 @@ class JobPreferences(BaseModel):
     target_titles: List[str] = []
     min_salary: Optional[int] = None
     expected_hourly_rate: Optional[float] = None
-    remote_preference: str = "remote"
-    relocation_willingness: bool = False
+    remote_preference: str = ""  # "" = not answered; else "remote" / "hybrid" / "onsite"
+    relocation_willingness: Optional[bool] = None
     preferred_locations: List[str] = []
     industries: List[str] = []
     companies_to_avoid: List[str] = []
     company_size_preference: str = "" # e.g. "Startup", "Scale-up", "Enterprise"
     employment_type: str = "full-time" # "full-time", "contract", "internship"
     notice_period: str = ""
-    can_work_in_person: bool = True
-    can_start_immediately: bool = False
-    has_reliable_transportation: bool = True
-    needs_accommodations: bool = False
+    can_work_in_person: Optional[bool] = None
+    can_start_immediately: Optional[bool] = None
+    has_reliable_transportation: Optional[bool] = None
+    needs_accommodations: Optional[bool] = None
 
 class Persona(BaseModel):
     core_info: CoreInfo = Field(default_factory=CoreInfo)

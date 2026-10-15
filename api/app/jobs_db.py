@@ -71,12 +71,27 @@ def init_db(db_path: str = "") -> None:
         # Drop old index if it exists and create the new one
         con.execute("DROP INDEX IF EXISTS idx_dedup_jobs")
         con.execute(_CREATE_INDEX)
-        
+
+        if con.execute("PRAGMA user_version").fetchone()[0] < 1:
+            _reclassify_levels(con)
+            con.execute("PRAGMA user_version = 1")
+
         con.commit()
         con.close()
         logger.info("Jobs DB initialised at %s", _DB_PATH)
     except Exception as exc:
         logger.error("Failed to initialise jobs DB: %s", exc)
+
+def _reclassify_levels(con: sqlite3.Connection) -> None:
+    """One-off: re-derive every stored job's level with seniority.infer_level (older rows used a
+    title-only substring match)."""
+    rows = con.execute("SELECT id, title, description, level FROM jobs").fetchall()
+    changes = [(new, row_id) for row_id, title, desc, old in rows
+               if (new := seniority.infer_level(title or "", desc or "")) != old]
+    con.executemany("UPDATE jobs SET level = ? WHERE id = ?", changes)
+    if changes:
+        logger.info("Reclassified the seniority of %d of %d stored jobs", len(changes), len(rows))
+
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -118,6 +133,7 @@ def _extract_tags(job: dict) -> str:
     return json.dumps(list(tags))
 
 from . import semantic
+from . import seniority
 
 # Tags recognised in the `tags` filter (must match what _extract_tags writes). Role tags are
 # OR'd ("ml or data"); domain tags are AND'd ("fintech and sponsorship"). Any other tag is
@@ -206,7 +222,8 @@ def add_jobs(jobs: list[dict]) -> tuple[int, int]:
                     uuid.uuid4().hex, str(job.get("job_id", "")), job.get("title", ""), job.get("company", ""),
                     _normalize_company(job.get("company", "")), job.get("location", ""), job.get("description", ""),
                     job.get("url", ""), job.get("salary_min"), job.get("salary_max"), job.get("exposure_score"),
-                    job.get("level", "mid"), job.get("source", "unknown"), _extract_tags(job), blob_for.get(id(job)),
+                    job.get("level") or seniority.infer_level(job.get("title", ""), job.get("description", "")),
+                    job.get("source", "unknown"), _extract_tags(job), blob_for.get(id(job)),
                     now_str, now_str, job.get("expires_at"),
                 ),
             )
@@ -244,11 +261,27 @@ def _like(term: str) -> str:
 
 
 def _location_matcher(location: str):
-    """(sql_terms, precise_regex) for a location filter."""
+    """(sql, params, matches) for one location filter: a LIKE clause as a SQL superset, and a
+    precise whole-word check of a job's location string."""
     loc = location.lower().strip()
     terms = _LOCATION_ALIASES.get(_LOCATION_ALIAS_KEYS.get(loc, ""), [loc])
     regex = re.compile(r"(?<![a-z])(" + "|".join(re.escape(t) for t in terms) + r")(?![a-z])")
-    return terms, regex
+    # "London" (or the UK alias, which includes it) means London, England — unless the user is
+    # explicitly searching for the Canadian / US ones.
+    exclude_other_londons = "london" in terms and not any(x in loc for x in ("ontario", "new london", "canada"))
+
+    sql = "(" + " OR ".join("lower(location) LIKE ? ESCAPE '\\'" for _ in terms) + ")"
+    params = [_like(t) for t in terms]
+    if exclude_other_londons:
+        # Also in SQL, scoped to this location's clause: otherwise those rows fill the candidate
+        # pool and push UK jobs out, while another location (e.g. Toronto) may still want Ontario.
+        sql = f"({sql} AND lower(location) NOT LIKE '%ontario%' AND lower(location) NOT LIKE '%new london%')"
+
+    def matches(job_location: str) -> bool:
+        if not regex.search(job_location):
+            return False
+        return not (exclude_other_londons and ("ontario" in job_location or "new london" in job_location))
+    return sql, params, matches
 
 
 def _parse_tags(tags: list[str]) -> tuple[list[str], list[str], list[str]]:
@@ -263,7 +296,7 @@ def _parse_tags(tags: list[str]) -> tuple[list[str], list[str], list[str]]:
 
 def get_jobs(
     query: str = "",
-    location: str = "",
+    location: str | list[str] = "",
     level: str = "",
     category: str = "",
     remote: bool = False,
@@ -275,7 +308,8 @@ def get_jobs(
 ) -> tuple[list[dict], bool]:
     """
     Filter in SQL, then rank (semantic similarity to `persona_vector` when given, else
-    recency) and paginate. `query`, `category` and free-text `tags` are hard filters; role
+    recency) and paginate. `location` is one location or a list (any of them matches; "remote"
+    in it means remote jobs too). `query`, `category` and free-text `tags` are hard filters; role
     tags are OR'd, domain tags AND'd. `exclude` holds (lower company, lower title) pairs to
     drop *before* pagination (jobs the user already applied to / discarded), so pages stay
     full. Returns (jobs, has_more). Blocking: call via asyncio.to_thread() from async code.
@@ -304,26 +338,25 @@ def get_jobs(
         where.append("tags LIKE ?")
         params.append(f'%"{d}"%')
 
-    loc_regex = None
-    loc_lower = location.lower().strip()
-    remote_only = remote or loc_lower == "remote"
+    locations = [loc.strip() for loc in ([location] if isinstance(location, str) else location or [])
+                 if loc and loc.strip()]
+    if any(loc.lower() == "remote" for loc in locations):
+        remote = True
+        locations = [loc for loc in locations if loc.lower() != "remote"]
+    matchers = [_location_matcher(loc) for loc in locations]
     remote_sql = "(" + " OR ".join("lower(location) LIKE ?" for _ in _REMOTE_TERMS) + ")"
-    if remote_only and not (location and loc_lower != "remote"):
+    if remote and not matchers:
         where.append(remote_sql)
         params += [f"%{t}%" for t in _REMOTE_TERMS]
-    elif location:
-        terms, loc_regex = _location_matcher(location)
-        loc_sql = "(" + " OR ".join("lower(location) LIKE ? ESCAPE '\\'" for _ in terms) + ")"
+    elif matchers:
+        loc_sql = "(" + " OR ".join(sql for sql, _, _ in matchers) + ")"
+        loc_params = [p for _, ps, _ in matchers for p in ps]
         if remote:  # "in <location>, or remote"
             where.append(f"({loc_sql} OR {remote_sql})")
-            params += [_like(t) for t in terms] + [f"%{t}%" for t in _REMOTE_TERMS]
+            params += loc_params + [f"%{t}%" for t in _REMOTE_TERMS]
         else:
             where.append(loc_sql)
-            params += [_like(t) for t in terms]
-        # "London" (or the UK alias, which includes it) means London, England — unless the
-        # user is explicitly searching for the Canadian / US ones.
-        if ("london" in terms) and not any(x in loc_lower for x in ("ontario", "new london", "canada")):
-            where.append("lower(location) NOT LIKE '%ontario%' AND lower(location) NOT LIKE '%new london%'")
+            params += loc_params
 
     columns = "*" if persona_vector else (
         "id, job_id, title, company, normalized_company, location, description, url, salary_min, salary_max, "
@@ -342,7 +375,7 @@ def get_jobs(
         if exclude and ((job.get("company") or "").lower(), (job.get("title") or "").lower()) in exclude:
             continue
         loc = (job.get("location") or "").lower()
-        if loc_regex is not None and not loc_regex.search(loc):
+        if matchers and not any(matches(loc) for _, _, matches in matchers):
             if not (remote and any(t in loc for t in _REMOTE_TERMS)):
                 continue
         candidates.append(job)
@@ -406,9 +439,10 @@ def update_description(job_db_id: str, description: str) -> None:
         init_db()
     try:
         con = sqlite3.connect(_DB_PATH)
+        title = (con.execute("SELECT title FROM jobs WHERE id = ?", (job_db_id,)).fetchone() or ("",))[0]
         con.execute(
-            "UPDATE jobs SET description = ?, updated_at = ? WHERE id = ?",
-            (description, _now(), job_db_id),
+            "UPDATE jobs SET description = ?, level = ?, updated_at = ? WHERE id = ?",
+            (description, seniority.infer_level(title, description), _now(), job_db_id),
         )
         con.commit()
         con.close()

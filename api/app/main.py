@@ -22,7 +22,8 @@ from . import pdf_generator
 from . import doc_render
 from . import jobs_db
 from . import net_guard
-from .models import Persona
+from . import seniority
+from .models import Persona, is_present_end_date
 
 
 @asynccontextmanager
@@ -168,6 +169,31 @@ async def health():
     return {"status": "ok"}
 
 
+# Between the two dates of a CV role. Spaced separators first, then en/em dashes, then a bare hyphen,
+# so "2020-01 - 2021-03" and "2020-01–2021-06" split between the dates rather than inside the first one.
+_DATE_RANGE_SEPS = (re.compile(r"\s+(?:-|–|—|to|till|until)\s+", re.I), re.compile(r"\s*[–—]\s*"),
+                    re.compile(r"\s*-\s*"))
+# The pieces of an end date that is itself a range or a list of stints.
+_END_DATE_PIECES = re.compile(r"[-–—,]|\s+(?:to|till|until)\s+", re.I)
+
+
+def _split_cv_dates(dates) -> tuple[str, str, bool]:
+    """(start_date, end_date, is_current) from a parsed CV role's free-text dates. An end such as
+    "Present" or "Now" means the role is current, so it isn't kept as an end date."""
+    text = str(dates or "").strip()
+    for sep in _DATE_RANGE_SEPS:
+        parts = sep.split(text, maxsplit=1)
+        if len(parts) == 2:
+            start, end = parts[0].strip(), parts[1].strip()
+            if is_present_end_date(end):
+                return start, "", True
+            # "Mid-2019-Present" splits at its first hyphen and "2010 – 2012, 2013 – Present" lists
+            # stints: still current when the end's last piece is a present word. The end is kept, as
+            # it holds a date the user may want.
+            return start, end, is_present_end_date(_END_DATE_PIECES.split(end)[-1].strip())
+    return "", "", is_present_end_date(text)
+
+
 @app.post("/upload")
 async def upload_cv(
     file: UploadFile = File(...),
@@ -252,12 +278,13 @@ async def upload_cv(
         new_history = []
         for exp in cv_data["experience"]:
             # Map old 'summary' to achievements/summary as needed
+            start_date, end_date, is_current = _split_cv_dates(exp.get("dates"))
             new_history.append(WorkExperience(
                 employer=exp.get("employer", ""),
                 title=exp.get("title", ""),
-                start_date=exp.get("dates", "").split("-")[0].strip() if "-" in exp.get("dates", "") else "",
-                end_date=exp.get("dates", "").split("-")[1].strip() if "-" in exp.get("dates", "") else "",
-                is_current="present" in exp.get("dates", "").lower(),
+                start_date=start_date,
+                end_date=end_date,
+                is_current=is_current,
                 summary=exp.get("summary", ""),
             ))
         persona.history = new_history
@@ -529,11 +556,31 @@ from . import discovery
 
 # Live discovery kicks in (in the background) when page 1 has fewer matches than this.
 _THIN_FEED = 5
+# It runs once per top target title, each run covering their first few preferred locations;
+# capped because each run is a full multi-source search in the worker pool.
+_DISCOVERY_TITLES = 3
+# Each location is one Adzuna call per title, or two when a title with a seniority word finds nothing
+# and is retried without it: 3 titles x 4 locations = 12 to 24 calls per feed load, just under
+# Adzuna's default ~25 calls/minute.
+_DISCOVERY_LOCATIONS = 4
 # Request-path embedding budget: past this the feed falls back to recency ranking rather than
 # making the user wait on Ollama loading the model (background work still allows 600s).
 _FEED_EMBED_TIMEOUT_S = 20.0
 # Tracker statuses that hide a job from the feed.
 _HIDE_STATUSES = {"Applied", "Responded", "Interview", "Offer", "Rejected", "Discarded"}
+
+
+def _distinct(items) -> list[str]:
+    """Stripped, non-empty items without case/whitespace duplicates (first spelling kept). The
+    profile stores raw comma-split text, e.g. "London, london , LONDON"."""
+    seen, out = set(), []
+    for item in items or []:
+        item = (item or "").strip()
+        norm = " ".join(item.lower().split())
+        if norm and norm not in seen:
+            seen.add(norm)
+            out.append(item)
+    return out
 
 
 @app.get("/jobs")
@@ -558,9 +605,10 @@ async def get_jobs(
 
     persona_data = tracker.get_user_persona(current_user.id)
     prefs = persona_data.get("preferences", {}) or {}
-    titles = prefs.get("target_titles", []) or []
-    locs = prefs.get("preferred_locations", []) or []
-    effective_location = location or (locs[0] if locs else "")
+    titles = _distinct(prefs.get("target_titles"))
+    locs = _distinct(prefs.get("preferred_locations"))
+    # An explicit filter wins; otherwise any of the user's preferred locations matches.
+    effective_location = location or locs
 
     # "Interest-weighted" ranking vector: who you are (persona) + what you're searching for now.
     persona_text = semantic.vectorize_persona(persona_data)
@@ -587,28 +635,23 @@ async def get_jobs(
     discovering = False
     if page == 1 and len(jobs) < _THIN_FEED:
         free_text = [t for t in tag_list if t.lower() not in jobs_db.ROLE_TAGS | jobs_db.DOMAIN_TAGS]
-        live_query = query or (free_text[0] if free_text else "") or (titles[0] if titles else "software engineer")
-        if len(live_query) > 2:  # don't fire on a stray character
-            discovering = discovery.ensure(live_query, effective_location or "London")
+        live_queries = [query] if query else free_text[:1] or titles[:_DISCOVERY_TITLES] or ["software engineer"]
+        live_locations = ([location] if location else
+                          [l for l in locs if l.lower() != "remote"][:_DISCOVERY_LOCATIONS] or ["London"])
+        # One run per title over its locations not already in flight or in cooldown. ensure() is
+        # cheap for those; evaluate every title.
+        discovering = any([discovery.ensure(q, live_locations) for q in live_queries
+                           if len(q) > 2])  # don't fire on a stray character
 
     return {
         "jobs": jobs,
         "query": query,
-        "location": effective_location,
+        "location": location or ", ".join(locs),
         "page": page,
         "limit": limit,
         "has_more": has_more,
         "discovering": discovering,
     }
-
-
-def _infer_level(title: str) -> str:
-    t = title.lower()
-    if any(w in t for w in ["junior", "graduate", "entry", "associate", "intern"]):
-        return "junior"
-    elif any(w in t for w in ["senior", "lead", "principal", "staff", "manager", "head", "director"]):
-        return "senior"
-    return "mid"
 
 
 # ── Per-job agent endpoints (SSE) ─────────────────────────────────────────────
@@ -679,7 +722,7 @@ async def job_from_url(
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Could not fetch that listing: {exc}")
 
-    job["level"] = _infer_level(job.get("title", ""))
+    job["level"] = seniority.infer_level(job.get("title", ""), job.get("description", ""))
     job["tags"] = jobs_db._extract_tags(job)
     return {"job": job}
 

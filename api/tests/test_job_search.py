@@ -27,7 +27,7 @@ def test_ats_level_gets_word_keywords_not_characters(monkeypatch):
                  "_search_level1_playwright", "_search_level3_websearch", "_search_level4_adzuna"):
         monkeypatch.setattr(job_searcher, name, _empty)
 
-    jobs = asyncio.run(job_searcher.search_jobs_multi("software engineer", "London"))
+    jobs = asyncio.run(job_searcher.search_jobs_multi("software engineer", ["London"]))
     assert seen["kw"] == ["engineer", "software"]
     assert jobs and jobs[0]["title"] == "Graduate Software Engineer" and jobs[0].get("source") != "fixture"
 
@@ -35,10 +35,56 @@ def test_ats_level_gets_word_keywords_not_characters(monkeypatch):
 def test_fixture_fallback_is_marked_and_copied(monkeypatch):
     for name in LIVE_SOURCES:
         monkeypatch.setattr(job_searcher, name, _empty)
-    jobs = asyncio.run(job_searcher.search_jobs_multi("anything", "London"))
+    jobs = asyncio.run(job_searcher.search_jobs_multi("anything", ["London"]))
     assert jobs and all(j["source"] == "fixture" for j in jobs)
     jobs[0]["title"] = "MUTATED"
     assert job_searcher._FIXTURE[0]["title"] != "MUTATED"
+
+
+def test_only_the_location_dependent_level_fans_out_over_locations(monkeypatch):
+    calls = []
+
+    def recorder(name):
+        async def fake(*args):
+            calls.append((name, *args))
+            return []
+        return fake
+    for name in LIVE_SOURCES[:3]:
+        monkeypatch.setattr(job_searcher, name, recorder(name))
+
+    async def fake_adzuna(query, location):
+        calls.append(("_search_level4_adzuna", query, location))
+        return [{"title": f"Graduate Software Engineer {i}", "company": f"{location} Co {i}",
+                 "url": f"https://x/{location}/{i}"} for i in range(15)]
+    monkeypatch.setattr(job_searcher, "_search_level4_adzuna", fake_adzuna)
+
+    jobs = asyncio.run(job_searcher.search_jobs_multi("software engineer", ["London", "Toronto"]))
+    assert sorted(c[0] for c in calls) == sorted(LIVE_SOURCES[:3]) + ["_search_level4_adzuna"] * 2
+    assert sorted(c[2] for c in calls if c[0] == "_search_level4_adzuna") == ["London", "Toronto"]
+    assert len(jobs) == 30  # the result cap scales with the locations, so none are crowded out
+
+
+def test_same_role_in_two_locations_keeps_both_postings(monkeypatch):
+    for name in LIVE_SOURCES[:3]:
+        monkeypatch.setattr(job_searcher, name, _empty)
+
+    async def fake_ats(queries):
+        return [{"title": "Graduate Software Engineer", "company": "Sky", "url": "https://sky/1"}]
+    monkeypatch.setattr(job_searcher, "_search_level2_ats_apis", fake_ats)
+
+    async def fake_adzuna(query, location):
+        return [
+            {"title": "Software Engineer", "company": "BBC", "url": f"https://adzuna/{location}/1"},
+            # Reposted in the same location, and a listing the ATS level already found.
+            {"title": "Software Engineer", "company": "BBC", "url": f"https://adzuna/{location}/1-repost"},
+            {"title": "Graduate Software Engineer", "company": "Sky", "url": f"https://adzuna/{location}/2"},
+        ]
+    monkeypatch.setattr(job_searcher, "_search_level4_adzuna", fake_adzuna)
+
+    jobs = asyncio.run(job_searcher.search_jobs_multi("software engineer", ["London", "Manchester"]))
+    # BBC's posting survives in both locations; repeats within a location or of levels 1-3 don't.
+    assert sorted(j["url"] for j in jobs) == ["https://adzuna/London/1", "https://adzuna/Manchester/1",
+                                              "https://sky/1"]
 
 
 @pytest.mark.parametrize("location, country", [

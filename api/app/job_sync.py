@@ -8,14 +8,6 @@ from . import jobs_db
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("windrush.job_sync")
 
-def infer_level(title: str) -> str:
-    t = title.lower()
-    if any(w in t for w in ["junior", "graduate", "entry", "associate", "intern"]):
-        return "junior"
-    elif any(w in t for w in ["senior", "lead", "principal", "staff", "manager", "head"]):
-        return "senior"
-    return "mid"
-
 async def sync_jobs():
     jobs_db.init_db()
     
@@ -80,9 +72,6 @@ async def sync_jobs():
     for job in l3:
         job["source"] = "brave"
         all_jobs.append(job)
-        
-    for job in all_jobs:
-        job["level"] = infer_level(job["title"])
         
     deduped = job_searcher._deduplicate(all_jobs)
     

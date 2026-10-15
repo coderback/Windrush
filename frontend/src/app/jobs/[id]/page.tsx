@@ -93,6 +93,8 @@ export default function JobDetailPage() {
   const [browserBlocked, setBrowserBlocked] = useState(false);
   const [browserReason, setBrowserReason] = useState<string | null>(null);
   const [browserInteractive, setBrowserInteractive] = useState(false);
+  // The agent's summary ("Needs your input: …" first); sent once, kept for the whole review.
+  const [browserNotes, setBrowserNotes] = useState<string | null>(null);
   const [showBrowser, setShowBrowser] = useState(false);
   const [minimised, setMinimised] = useState(false);
   const [applying, setApplying] = useState(false);
@@ -242,6 +244,7 @@ export default function JobDetailPage() {
     setApplying(true);
     setShowBrowser(true);
     setMinimised(false);
+    setBrowserNotes(null);
 
     // If using tailored CV, ensure PDF exists first
     let effectiveCvDocId = cvDocId;
@@ -308,6 +311,7 @@ export default function JobDetailPage() {
       setBrowserInteractive(!!(ev.interactive));
       setMinimised(false);
     }
+    if (typeof ev.notes === "string") setBrowserNotes(ev.notes);
   };
 
   if (!job) {
@@ -620,6 +624,7 @@ export default function JobDetailPage() {
             screenshot={browserScreenshot}
             blocked={browserBlocked}
             reason={browserReason}
+            notes={browserNotes}
             sessionId={sessionId}
             interactive={browserInteractive}
             onInstructionSent={() => setBrowserBlocked(false)}
