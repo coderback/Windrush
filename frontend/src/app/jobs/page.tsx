@@ -42,6 +42,9 @@ export default function JobsPage() {
   // "" lets the server choose: "possible" when the profile needs sponsorship, else "any".
   const [sponsorship, setSponsorship] = useState("");
   const [sponsorshipApplied, setSponsorshipApplied] = useState("any");
+  // Experience asked for and degree, as read from each ad; ads that don't say are always shown.
+  const [maxYears, setMaxYears] = useState("");
+  const [noDegree, setNoDegree] = useState(false);
 
   // Paste-your-own-link state
   const [linkOpen, setLinkOpen] = useState(false);
@@ -73,6 +76,8 @@ export default function JobsPage() {
         if (level) params.set("level", level);
         if (remote) params.set("remote", "true");
         if (sponsorship) params.set("sponsorship", sponsorship);
+        if (maxYears) params.set("max_years", maxYears);
+        if (noDegree) params.set("no_degree", "true");
         params.set("page", String(pageNum));
         params.set("limit", "20");
 
@@ -98,7 +103,7 @@ export default function JobsPage() {
         setLoadingMore(false);
       }
     },
-    [committedQuery, selectedTags, committedLocation, level, remote, sponsorship]
+    [committedQuery, selectedTags, committedLocation, level, remote, sponsorship, maxYears, noDegree]
   );
 
   // Fetch when committed search params or filters change
@@ -208,6 +213,8 @@ export default function JobsPage() {
     setLevel("");
     setRemote(false);
     setSponsorship("");
+    setMaxYears("");
+    setNoDegree(false);
     setSelectedTags([]);
     setPage(1);
   };
@@ -365,6 +372,40 @@ export default function JobsPage() {
           <option value="likely">Sponsorship likely</option>
         </select>
 
+        {/* Experience asked for */}
+        <select
+          value={maxYears}
+          onChange={(e) => {
+            setMaxYears(e.target.value);
+            setPage(1);
+          }}
+          title="Hides jobs whose ad asks for more experience; ads that don't say are kept."
+          className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs text-zinc-300 focus:outline-none focus:border-teal-500 transition-colors cursor-pointer"
+        >
+          <option value="">Experience: any</option>
+          <option value="0">No experience required</option>
+          <option value="1">Up to 1 year</option>
+          <option value="2">Up to 2 years</option>
+          <option value="3">Up to 3 years</option>
+          <option value="5">Up to 5 years</option>
+        </select>
+
+        {/* Degree */}
+        <button
+          onClick={() => {
+            setNoDegree(!noDegree);
+            setPage(1);
+          }}
+          title="Hides jobs whose ad requires a degree; ads that only prefer one, or don't say, are kept."
+          className={`text-xs px-3 py-1.5 rounded-lg border transition-colors ${
+            noDegree
+              ? "border-teal-500 bg-teal-500/10 text-teal-300"
+              : "border-zinc-800 text-zinc-500 hover:border-zinc-600"
+          }`}
+        >
+          🎓 No degree needed
+        </button>
+
         {/* Role Suggestion Quick-Chips (Only show when input is empty) */}
         {!queryInput && (
           <div className="flex flex-wrap gap-2 items-center">
@@ -382,7 +423,8 @@ export default function JobsPage() {
         )}
 
         {/* Clear filters (only show when active) */}
-        {(committedQuery || selectedTags.length > 0 || level || remote || committedLocation || sponsorship) && (
+        {(committedQuery || selectedTags.length > 0 || level || remote || committedLocation || sponsorship ||
+          maxYears || noDegree) && (
           <button
             onClick={clearSearch}
             className="text-xs px-3 py-1.5 rounded-lg border border-zinc-800 text-zinc-500 hover:text-zinc-300 hover:border-zinc-600 transition-colors ml-auto"

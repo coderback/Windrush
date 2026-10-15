@@ -144,3 +144,40 @@ def test_a_fetched_full_ad_is_read_again(stored, monkeypatch):
     jobs_db.update_description(stored, AD + " You'll bring 3+ years of commercial experience.")
     assert asyncio.run(job_attributes.extract_pending()) == (1, 1)
     assert jobs_db.get_job(stored)["years_min"] == 3
+
+
+# ── Feed filters on the read attributes ──────────────────────────────────────
+
+@pytest.fixture
+def read_jobs(db, ollama):
+    """Five stored jobs: four read by the model (years asked, degree), one not read yet."""
+    jobs_db.add_jobs([make_job(i, title, f"Co{i}", description="An ad.") for i, title in enumerate(
+        ["Grad", "One year", "Three years", "Unstated", "Unread"])])
+    ids = dict(sqlite3.connect(jobs_db._DB_PATH).execute("SELECT title, id FROM jobs").fetchall())
+    for title, years, degree in [("Grad", 0, "required"), ("One year", 1, "preferred"),
+                                 ("Three years", 3, "required"), ("Unstated", None, "not_mentioned")]:
+        jobs_db.store_attributes(ids[title], {"level": "junior", "sponsorship": "", "sponsorship_evidence": "",
+                                              "clearance": "", "years_min": years, "degree": degree})
+    return ids
+
+
+def _feed(**kwargs):
+    return sorted(j["title"] for j in jobs_db.get_jobs(limit=20, **kwargs)[0])
+
+
+def test_jobs_asking_for_more_experience_or_a_degree_can_be_hidden(read_jobs):
+    everything = ["Grad", "One year", "Three years", "Unread", "Unstated"]
+    assert _feed() == everything
+    assert _feed(max_years=0) == ["Grad", "Unread", "Unstated"]          # an ad that doesn't say is kept
+    assert _feed(max_years=2) == ["Grad", "One year", "Unread", "Unstated"]
+    assert _feed(max_years=5) == everything
+    assert _feed(no_degree=True) == ["One year", "Unread", "Unstated"]     # "preferred" isn't required
+    assert _feed(max_years=2, no_degree=True) == ["One year", "Unread", "Unstated"]
+
+
+def test_the_feed_api_takes_the_filters(read_jobs, client, monkeypatch):
+    from app import discovery
+    monkeypatch.setattr(discovery, "ensure", lambda *a, **k: False)
+    titles = lambda **p: sorted(j["title"] for j in client.get("/jobs", params={"location": "London", **p}).json()["jobs"])
+    assert titles(max_years=1, no_degree="true") == ["One year", "Unread", "Unstated"]
+    assert client.get("/jobs", params={"max_years": -1}).status_code == 422

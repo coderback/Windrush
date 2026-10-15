@@ -679,16 +679,18 @@ async def get_jobs(
     remote: bool = Query(default=False),
     tags: str = Query(default=""),
     sponsorship: str = Query(default=""),
+    max_years: Optional[int] = Query(default=None, ge=0, le=40),
+    no_degree: bool = Query(default=False),
     page: int = Query(default=1, ge=1),
     limit: int = Query(default=20, ge=1, le=100),
     current_user: Annotated[auth.User, Depends(auth.get_current_user)] = None,
 ):
     """
-    Job feed. Explicit filters (query, tags, category, level, location, remote, sponsorship) are
-    applied in SQL; the persona only *ranks* (semantic similarity) and supplies a default location
-    and sponsorship filter. If page 1 comes back thin, live discovery starts in the background and
-    `discovering` tells the client to re-poll — the request itself never waits on scraping or
-    embedding.
+    Job feed. Explicit filters (query, tags, category, level, location, remote, sponsorship,
+    max_years, no_degree) are applied in SQL; the persona only *ranks* (semantic similarity) and
+    supplies a default location and sponsorship filter. If page 1 comes back thin, live discovery
+    starts in the background and `discovering` tells the client to re-poll — the request itself
+    never waits on scraping or embedding.
     """
     tag_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else []
 
@@ -719,7 +721,7 @@ async def get_jobs(
         jobs_db.get_jobs,
         query=query, location=effective_location, level=level, category=category, remote=remote,
         tags=tag_list, persona_vector=persona_vector, limit=limit, offset=(page - 1) * limit,
-        exclude=hidden, sponsorship=sponsorship, marks=marks,
+        exclude=hidden, sponsorship=sponsorship, marks=marks, max_years=max_years, no_degree=no_degree,
     )
     for job in jobs:
         status = status_map.get(((job.get("company") or "").lower(), (job.get("title") or "").lower()))

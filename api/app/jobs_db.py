@@ -387,6 +387,8 @@ def get_jobs(
     exclude: set[tuple[str, str]] | None = None,
     sponsorship: str = "",
     marks: dict[str, str] | None = None,
+    max_years: int | None = None,
+    no_degree: bool = False,
 ) -> tuple[list[dict], bool]:
     """
     Filter in SQL, then rank (semantic similarity to `persona_vector` when given, else
@@ -395,7 +397,9 @@ def get_jobs(
     tags are OR'd, domain tags AND'd. `exclude` holds (lower company, lower title) pairs to
     drop *before* pagination (jobs the user already applied to / discarded), so pages stay
     full. `sponsorship` is one of SPONSORSHIP_FILTERS ("" = any); `marks` ({job id: OFFERED or
-    NOT_OFFERED}) are the user's own calls, which win over the ad and the register.
+    NOT_OFFERED}) are the user's own calls, which win over the ad and the register. `max_years` hides
+    jobs asking for more years of experience and `no_degree` jobs requiring a degree; a job whose ad
+    doesn't say (or hasn't been read yet, see job_attributes.py) is kept.
     Returns (jobs, has_more). Blocking: call via asyncio.to_thread() from async code.
     """
     if not _DB_PATH:
@@ -421,6 +425,11 @@ def get_jobs(
     for d in domains:
         where.append("tags LIKE ?")
         params.append(f'%"{d}"%')
+    if max_years is not None:
+        where.append("(years_min IS NULL OR years_min <= ?)")
+        params.append(max_years)
+    if no_degree:
+        where.append("coalesce(degree, '') != 'required'")
     if sponsorship in SPONSORSHIP_FILTERS and sponsorship != "any":
         sql, sql_params = _sponsorship_filter(sponsorship, marks or {})
         where.append(sql)
