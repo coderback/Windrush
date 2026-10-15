@@ -8,6 +8,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     # WeasyPrint runtime deps (HTML->PDF document rendering)
     libpangoft2-1.0-0 libgdk-pixbuf-2.0-0 libffi8 libfontconfig1 fontconfig \
     fonts-dejavu-core \
+    # Caladea: metric-compatible with Cambria, the CV template's font
+    fonts-crosextra-caladea \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

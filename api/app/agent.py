@@ -325,7 +325,7 @@ def _persona_to_cvdoc(persona: dict) -> dict:
     contact = {
         "email": core.get("email", ""),
         "phone": core.get("phone", ""),
-        "location": core.get("city", "") or core.get("location", ""),
+        "location": _cv_location(core),
         "linkedin": core.get("linkedin", ""),
         "github": core.get("github", ""),
         # core_info has both a 'website' and a 'portfolio' field; either may hold the
@@ -362,7 +362,8 @@ def _persona_to_cvdoc(persona: dict) -> dict:
 
     education = [
         {"degree": e.get("degree", ""), "institution": e.get("institution", ""),
-         "year": e.get("end_date", "") or e.get("year", ""), "grade": e.get("grade", "")}
+         "start_date": e.get("start_date", ""), "year": e.get("end_date", "") or e.get("year", ""),
+         "grade": e.get("grade", "")}
         for e in sorted(persona.get("education", []), key=_recency_key, reverse=True)
     ]
     projects = []
@@ -462,31 +463,64 @@ def _rank_projects_by_relevance(job: dict, projects: list[dict]) -> list[dict]:
     return [p for _, _, p in scored]
 
 
-def _regrouped_skills(groups, base: list[dict]) -> list[dict] | None:
+# How many skills a tailored CV lists: the candidate's own CV design shows about 30, in 5 rows.
+_MIN_CV_SKILLS, _MAX_CV_SKILLS = 20, 30
+_CV_SKILLS_CEILING = 40   # a choice a little over the asked-for range is still better than the full list
+_MIN_KEPT_SKILLS = 10     # fewer real skills than this left after dropping the rest: use the full list
+
+
+def _chosen_skills(groups, base: list[dict]) -> list[dict] | None:
     """
-    The model's regrouping of the profile's skills, if it holds exactly those skills (none dropped,
-    added or repeated) in at most doc_render.MAX_SKILL_GROUPS named groups; else None. Each skill
-    keeps the profile's spelling.
+    The model's choice of job-relevant skills, keeping only the profile's own skills in the
+    profile's spelling: anything it invented, renamed or repeated is dropped, and an unnamed row
+    becomes "Other" (rows past doc_render.MAX_SKILL_GROUPS fold when rendered). None when fewer than
+    _MIN_KEPT_SKILLS remain, or more than _CV_SKILLS_CEILING: then the profile's full list is used.
     """
     spelling = {str(s).strip().lower(): str(s).strip()
                 for g in base for s in (g.get("items") or []) if s and str(s).strip()}
-    if not isinstance(groups, list) or not 0 < len(groups) <= doc_render.MAX_SKILL_GROUPS:
+    if not isinstance(groups, list):
         return None
     out, seen = [], set()
     for g in groups:
-        items = g.get("items") if isinstance(g, dict) else None
-        category = str(g.get("category") or "").strip() if isinstance(g, dict) else ""
-        if not category or not isinstance(items, list) or not items:
-            return None
+        if not isinstance(g, dict) or not isinstance(g.get("items"), list):
+            continue
         row = []
-        for s in items:
+        for s in g["items"]:
             key = str(s).strip().lower()
-            if key not in spelling or key in seen:
-                return None
-            seen.add(key)
-            row.append(spelling[key])
-        out.append({"category": category, "items": row})
-    return out if seen == set(spelling) else None
+            if key in spelling and key not in seen:
+                seen.add(key)
+                row.append(spelling[key])
+        if row:
+            out.append({"category": str(g.get("category") or "").strip() or "Other", "items": row})
+    return out if _MIN_KEPT_SKILLS <= len(seen) <= _CV_SKILLS_CEILING else None
+
+
+def _cv_location(core: dict) -> str:
+    """'City, Country' for the CV header, as in the candidate's CV ("Bristol, United Kingdom")."""
+    city = (core.get("city") or core.get("location") or "").strip()
+    country = (core.get("country") or "").strip()
+    if not country or country.lower() in city.lower():
+        return city
+    return f"{city}, {country}" if city else country
+
+
+def _restore_role_dates(roles: list, base_roles: list) -> list:
+    """
+    Each role keeps the profile's own dates (the model tends to reformat them): matched by employer
+    and title, else by employer alone when the profile has one role there.
+    """
+    def key(text) -> str:
+        return re.sub(r"[^a-z0-9]", "", (text or "").lower())
+
+    out = []
+    for role in roles or []:
+        same = [b for b in base_roles if key(b.get("employer")) == key(role.get("employer"))]
+        match = next((b for b in same if key(b.get("title")) == key(role.get("title"))),
+                     same[0] if len(same) == 1 else None)
+        if match:
+            role = {**role, "start_date": match.get("start_date", ""), "end_date": match.get("end_date", "")}
+        out.append(role)
+    return out
 
 
 def _restore_project_depth(cv_projects: list, base_projects: list) -> list:
@@ -1089,9 +1123,9 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
                 "This is an early-career / graduate candidate. Treat substantial university projects, "
                 "capstones, internships and part-time (incl. retail/hospitality) roles as first-class "
                 "experience, reframing duties as transferable competencies (stakeholder management, data "
-                "analysis, operational delivery, working under pressure). The CV MUST fit a SINGLE page."
+                "analysis, operational delivery, working under pressure)."
             )
-            summary_rule = "summary = 2-3 sentences"
+            summary_rule = "summary = 3 sentences (~50-60 words)"
         else:
             level_guidance = (
                 "This is an experienced candidate. Lead with scope of ownership, leadership and measurable "
@@ -1105,11 +1139,12 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
                 "object (no prose, no code fences) using EXACTLY this shape: " + _CVDOC_SCHEMA + ". "
                 "Tailor to the target job: reorder and reword to mirror the job's exact, conventional keywords. "
                 "ATS RULES: use standard industry skill names and SPELL OUT acronyms next to the abbreviation, "
-                "e.g. 'Search Engine Optimization (SEO)'. Format EVERY date as 'Mon YYYY' or MM/YYYY "
-                "(never 'Summer 2025' or \"Jan '25\"). "
-                "BULLETS: up to 4 per role, each a single line of ~16-26 words, beginning with a strong, varied "
-                "action verb (never 'Responsible for' or 'Helped with'); follow Action + Task/Tool + quantified "
-                "Result. Quantify ONLY with metrics actually present in the candidate data; if a bullet has no "
+                "e.g. 'Search Engine Optimization (SEO)'. Keep every date exactly as the candidate data gives it "
+                "(MM/YYYY); never reformat one. "
+                "BULLETS: 1-2 per role (one is right when the role is one story), each one or two lines "
+                "(~20-35 words) and no more than ~60 words per role in all, beginning with a strong, varied action verb (never 'Responsible for' or 'Helped "
+                "with'); follow Action + Task/Tool + quantified Result, and combine closely related achievements "
+                "into one bullet rather than listing them. Quantify ONLY with metrics actually present in the candidate data; if a bullet has no "
                 "source number, convey scope/scale with concrete specifics instead — NEVER invent, estimate or "
                 "round up a percentage, count or efficiency gain. NEVER pad to a count: write only bullets backed "
                 "by a real achievement in the "
@@ -1121,11 +1156,11 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
                 f"{level_guidance} "
                 "PROJECTS: the candidate's full project list is provided (ALREADY ORDERED by relevance to this "
                 "job), each with its problem, quantified 'outcomes' and 'technologies'/'tech_source'. SELECT the "
-                "3 most relevant to THIS job's domain and responsibilities and keep each 'name' exactly as given. "
-                "Write a tailored 'description' of AT LEAST TWO full sentences: sentence 1 states what the "
+                "4 most relevant to THIS job's domain and responsibilities and keep each 'name' exactly as given. "
+                "Write a tailored 'description' as ONE paragraph of 2-3 full sentences (~40-55 words): what the "
                 "project is and what it achieves (include ONE real quantified outcome from its 'outcomes' when "
-                "available — never invent, estimate or round a number); sentence 2 explains HOW IT WORKS — its "
-                "architecture, core approach or key technique. Set 'tech' to 6-10 clean, canonical technology "
+                "available — never invent, estimate or round a number), then HOW IT WORKS — its architecture, "
+                "core approach or key technique. Set 'tech' to 5-10 clean, canonical technology "
                 "names (languages, frameworks, datastores, key libraries) drawn from that project's "
                 "'technologies'/'tech_source', omitting evaluation metrics and verbose phrases and normalising to "
                 "the common name (e.g. 'PostgreSQL', 'FastAPI', 'Next.js'). "
@@ -1136,11 +1171,14 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
                 "'Results-driven', 'Detail-oriented', 'Passionate') and do NOT close with vague filler ('strong "
                 "problem-solving skills and attention to detail', 'hardworking team player'). Do NOT spend a "
                 "sentence naming assumed or basic tooling (e.g. Git / version control). "
-                f"SKILLS: sort EVERY skill in the candidate data into at most {doc_render.MAX_SKILL_GROUPS} "
-                "categories with short, conventional names (e.g. 'Languages', 'Machine Learning', 'Web', "
-                "'Data & Cloud', 'Tools'), the categories most relevant to this job first. Copy each skill "
-                "exactly as written; do not add, drop, rename or combine any. "
-                "LENGTH: at most 4 most-recent roles; at most 3 projects. "
+                f"SKILLS: choose the {_MIN_CV_SKILLS}-{_MAX_CV_SKILLS} skills from the candidate data most "
+                f"relevant to THIS job and group them into at most {doc_render.MAX_SKILL_GROUPS} rows of no more "
+                "than 8 skills, with short, conventional names such as 'Languages', 'Frontend', 'Backend & Data', "
+                "'ML & AI', 'Tools'; where two fit equally, choose the one with the shorter name. Copy each chosen "
+                "skill EXACTLY as written, character for character (never shorten, expand or rename one), and "
+                "never add one the candidate data doesn't list. Leave "
+                "out spoken languages: they aren't technical skills. "
+                "LENGTH: at most 4 most-recent roles and 4 projects. A graduate's CV must fit ONE page. "
                 "BANNED words (recruiters flag these as AI-written — never use them in bullets, summary or "
                 "project text): delve, testament, robust, seamless, synergy, leverage, pivotal, intricate, "
                 "elevate, foster, underscore, tapestry, landscape. "
@@ -1163,16 +1201,20 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
         used_fallback = not cv or not (cv.get("experience") or cv.get("summary"))
         if used_fallback:
             cv = base_cv
-        # Trust our own structured data — never let the model alter identity/contact, and keep
-        # the candidate's full skills list: the model's regrouping is used only when it holds
-        # exactly the profile's skills (it tends to silently drop some when tailoring).
+        # Trust our own structured data — never let the model alter identity, contact details,
+        # education or certifications; its choice of skills is used only when every one is the
+        # candidate's own (otherwise the profile's full list).
         cv["contact"] = base_cv["contact"]
-        regrouped = None
+        cv["education"] = base_cv["education"]
+        cv["certifications"] = base_cv["certifications"]
+        chosen = None
         if base_cv.get("skills"):
-            regrouped = None if used_fallback else _regrouped_skills(cv.get("skills"), base_cv["skills"])
-            cv["skills"] = regrouped or base_cv["skills"]
+            chosen = None if used_fallback else _chosen_skills(cv.get("skills"), base_cv["skills"])
+            cv["skills"] = chosen or base_cv["skills"]
         if cv.get("projects") and base_cv.get("projects"):
             cv["projects"] = _restore_project_depth(cv["projects"], base_cv["projects"])
+        if cv.get("experience") and base_cv.get("experience"):
+            cv["experience"] = _restore_role_dates(cv["experience"], base_cv["experience"])
         if not cv.get("name"):
             cv["name"] = base_cv["name"]
         cv["seniority"] = level  # drives section order in the renderer
@@ -1181,8 +1223,8 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
         # same projects recur across roles (the model is meant to tailor the selection).
         final_proj_names = [(p.get("name") or "")[:40] for p in (cv.get("projects") or [])][:5]
         (logger.warning if used_fallback else logger.info)(
-            "tailored_cv: fallback=%s, level=%s, skills regrouped=%s, projects base=%d model=%d final=%d %s | job=%r",
-            used_fallback, level, regrouped is not None, base_proj_n, model_proj_n, len(cv.get("projects") or []),
+            "tailored_cv: fallback=%s, level=%s, skills chosen=%s, projects base=%d model=%d final=%d %s | job=%r",
+            used_fallback, level, chosen is not None, base_proj_n, model_proj_n, len(cv.get("projects") or []),
             final_proj_names, (job.get("title") or "")[:60],
         )
         return {"cv": cv, "template_id": template_id}
