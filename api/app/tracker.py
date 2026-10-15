@@ -60,6 +60,19 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_dedup
     ON applications(user_id, lower(company), lower(job_title));
 """
 
+# A user's own call on whether a job sponsors visas ('offered' / 'not_offered'), which wins over
+# what the ad and the sponsor register suggest. job_id is the jobs.db row id.
+_CREATE_JOB_MARKS_TABLE = """
+CREATE TABLE IF NOT EXISTS job_marks (
+    user_id     TEXT NOT NULL,
+    job_id      TEXT NOT NULL,
+    sponsorship TEXT NOT NULL,
+    updated_at  TEXT NOT NULL,
+    PRIMARY KEY (user_id, job_id)
+);
+"""
+JOB_MARKS = ("offered", "not_offered")
+
 
 def init_db(db_path: str = "") -> None:
     global _DB_PATH
@@ -72,6 +85,7 @@ def init_db(db_path: str = "") -> None:
         con.execute("PRAGMA journal_mode=WAL")
         con.execute(_CREATE_USERS_TABLE)
         con.execute(_CREATE_TABLE)
+        con.execute(_CREATE_JOB_MARKS_TABLE)
         # Migrations — safe to run on existing DBs
         for stmt in [
             "ALTER TABLE users ADD COLUMN persona TEXT DEFAULT '{}'",
@@ -402,3 +416,25 @@ def update_status(app_id: str, status: str, notes: str | None = None, *, user_id
     except Exception as exc:
         logger.error("Tracker update_status failed: %s", exc)
         return False
+
+
+def set_job_mark(user_id: str, job_id: str, sponsorship: str | None) -> None:
+    """Record the user's call on whether a job sponsors visas (one of JOB_MARKS), or clear it (None)."""
+    if sponsorship is not None and sponsorship not in JOB_MARKS:
+        raise ValueError(f"sponsorship mark must be one of {JOB_MARKS} or None")
+    con = sqlite3.connect(_DB_PATH)
+    with con:
+        if sponsorship is None:
+            con.execute("DELETE FROM job_marks WHERE user_id = ? AND job_id = ?", (user_id, job_id))
+        else:
+            con.execute("INSERT OR REPLACE INTO job_marks (user_id, job_id, sponsorship, updated_at) "
+                        "VALUES (?, ?, ?, ?)", (user_id, job_id, sponsorship, _now()))
+    con.close()
+
+
+def get_job_marks(user_id: str) -> dict[str, str]:
+    """{job id: 'offered' | 'not_offered'} for the jobs the user has marked."""
+    con = sqlite3.connect(_DB_PATH)
+    rows = con.execute("SELECT job_id, sponsorship FROM job_marks WHERE user_id = ?", (user_id,)).fetchall()
+    con.close()
+    return dict(rows)

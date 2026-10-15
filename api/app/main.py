@@ -15,7 +15,8 @@ from fastapi.responses import StreamingResponse
 from fastapi.security import OAuth2PasswordRequestForm
 
 from .cv_parser import extract_text, extract_links, profile_links
-from .agent import run_apply, execute_tool, _normalise_company_name
+from .agent import run_apply, execute_tool
+from .company_names import normalise_company_name as _normalise_company_name
 from .guardrails import check_cv_for_injection, GuardrailViolation
 from . import tracker
 from . import auth
@@ -24,6 +25,7 @@ from . import doc_render
 from . import jobs_db
 from . import net_guard
 from . import seniority
+from . import sponsor_register
 from .models import (Persona, WorkExperience, Education, Project, Certification, SkillCategory,
                      is_present_end_date)
 
@@ -44,7 +46,9 @@ async def lifespan(app: FastAPI):
     tracker.init_db()
     jobs_db.init_db()
     pdf_generator.init_pdf_dir(data_dir)
+    register_task = asyncio.create_task(sponsor_register.keep_fresh())
     yield
+    register_task.cancel()
     from . import discovery
     discovery.shutdown()
 
@@ -671,15 +675,17 @@ async def get_jobs(
     category: str = Query(default=""),
     remote: bool = Query(default=False),
     tags: str = Query(default=""),
+    sponsorship: str = Query(default=""),
     page: int = Query(default=1, ge=1),
     limit: int = Query(default=20, ge=1, le=100),
     current_user: Annotated[auth.User, Depends(auth.get_current_user)] = None,
 ):
     """
-    Job feed. Explicit filters (query, tags, category, level, location, remote) are applied in
-    SQL; the persona only *ranks* (semantic similarity) and supplies a default location. If page
-    1 comes back thin, live discovery starts in the background and `discovering` tells the
-    client to re-poll — the request itself never waits on scraping or embedding.
+    Job feed. Explicit filters (query, tags, category, level, location, remote, sponsorship) are
+    applied in SQL; the persona only *ranks* (semantic similarity) and supplies a default location
+    and sponsorship filter. If page 1 comes back thin, live discovery starts in the background and
+    `discovering` tells the client to re-poll — the request itself never waits on scraping or
+    embedding.
     """
     tag_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else []
 
@@ -700,17 +706,23 @@ async def get_jobs(
 
     status_map = tracker.get_user_application_statuses(current_user.id)
     hidden = {key for key, status in status_map.items() if status in _HIDE_STATUSES}
+    # Someone who needs a visa sponsored doesn't see jobs that rule them out unless they ask to.
+    if sponsorship not in jobs_db.SPONSORSHIP_FILTERS:
+        needs_sponsorship = (persona_data.get("core_info") or {}).get("require_sponsorship") is True
+        sponsorship = "possible" if needs_sponsorship else "any"
+    marks = tracker.get_job_marks(current_user.id)
 
     jobs, has_more = await asyncio.to_thread(
         jobs_db.get_jobs,
         query=query, location=effective_location, level=level, category=category, remote=remote,
         tags=tag_list, persona_vector=persona_vector, limit=limit, offset=(page - 1) * limit,
-        exclude=hidden,
+        exclude=hidden, sponsorship=sponsorship, marks=marks,
     )
     for job in jobs:
         status = status_map.get(((job.get("company") or "").lower(), (job.get("title") or "").lower()))
         if status:
             job["tracker_status"] = status
+        job["sponsorship_mark"] = marks.get(job["id"], "")
 
     discovering = False
     if page == 1 and len(jobs) < _THIN_FEED:
@@ -731,7 +743,49 @@ async def get_jobs(
         "limit": limit,
         "has_more": has_more,
         "discovering": discovering,
+        "sponsorship": sponsorship,
     }
+
+
+def _sponsorship_view(job: dict, mark: str) -> dict:
+    return {
+        "sponsorship": job.get("sponsorship") or "",
+        "evidence": job.get("sponsorship_evidence") or "",
+        "clearance": job.get("clearance") or "",
+        "licensed_sponsor": bool(job.get("licensed_sponsor")),
+        "sponsor_name": job.get("sponsor_name") or "",
+        "mark": mark,
+    }
+
+
+@app.get("/jobs/{job_db_id}/sponsorship")
+async def get_job_sponsorship(
+    job_db_id: str,
+    current_user: Annotated[auth.User, Depends(auth.get_current_user)],
+):
+    """What the ad says about sponsorship and clearance, whether the employer is a licensed sponsor,
+    and the user's own mark (which wins)."""
+    job = await asyncio.to_thread(jobs_db.get_job, job_db_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return _sponsorship_view(job, tracker.get_job_marks(current_user.id).get(job_db_id, ""))
+
+
+@app.put("/jobs/{job_db_id}/sponsorship")
+async def mark_job_sponsorship(
+    job_db_id: str,
+    body: dict,
+    current_user: Annotated[auth.User, Depends(auth.get_current_user)],
+):
+    """Mark a job as sponsoring ("offered") or not ("not_offered"), or clear the mark (null)."""
+    mark = body.get("mark")
+    if mark not in (*tracker.JOB_MARKS, None, ""):
+        raise HTTPException(status_code=422, detail=f"mark must be one of {tracker.JOB_MARKS} or null")
+    job = await asyncio.to_thread(jobs_db.get_job, job_db_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    tracker.set_job_mark(current_user.id, job_db_id, mark or None)
+    return _sponsorship_view(job, mark or "")
 
 
 # ── Per-job agent endpoints (SSE) ─────────────────────────────────────────────

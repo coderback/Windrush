@@ -11,6 +11,7 @@ from typing import AsyncGenerator
 from openai import AsyncOpenAI, BadRequestError
 
 from . import azure_config
+from .company_names import normalise_company_name as _normalise_company_name
 from . import http_client
 from . import tracker
 from .risk_scorer import lookup_by_title
@@ -672,19 +673,6 @@ async def _ddg_search(query: str, max_results: int = 15) -> list[dict]:
         import logging as _logging
         _logging.getLogger("windrush.agent").warning("web_search failed: %s", exc)
         return []
-
-
-_COMPANY_SUFFIXES = {"ltd", "limited", "plc", "inc", "llc", "llp", "corp", "corporation", "co", "uk", "group",
-                     "holdings", "gmbh", "sa", "ag", "bv"}
-
-
-def _normalise_company_name(text: str) -> str:
-    """Lower-case words only, legal / regional suffixes dropped: 'Kestrel Ledger Analytics Ltd.' ->
-    'kestrel ledger analytics'."""
-    words = re.sub(r"[^a-z0-9]+", " ", (text or "").lower()).split()
-    while words and words[-1] in _COMPANY_SUFFIXES:
-        words.pop()
-    return " ".join(words)
 
 
 async def _research_company(company: str, role: str = "") -> str:

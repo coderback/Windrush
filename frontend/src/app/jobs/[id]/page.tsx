@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { authFetch } from "@/app/api";
 import { Job } from "@/components/JobCard";
 import BrowserView from "@/components/BrowserView";
+import SponsorshipPanel from "@/components/SponsorshipPanel";
 import DocEditor, { CVDoc, LetterDoc, letterToText } from "@/components/DocEditor";
 
 interface AnalysisResult {
@@ -70,6 +71,8 @@ export default function JobDetailPage() {
   const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
   const [analysisDone, setAnalysisDone] = useState(false);
+  // Bumped when an analysis finishes: it fetches the full ad, which can change the sponsorship signals.
+  const [analysisRuns, setAnalysisRuns] = useState(0);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
 
   const [appStep, setAppStep] = useState<AppStep>("idle");
@@ -142,6 +145,7 @@ export default function JobDetailPage() {
       );
       setAnalysis(result);
       setAnalysisDone(true);
+      setAnalysisRuns((n) => n + 1);
     } catch (err: unknown) {
       setAnalysisError(String(err));
     } finally {
@@ -366,6 +370,8 @@ export default function JobDetailPage() {
           </p>
         )}
       </div>
+
+      {job.id && <SponsorshipPanel jobId={job.id} refreshKey={analysisRuns} />}
 
       {/* Panel B — Analysis */}
       <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-6">
