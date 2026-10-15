@@ -5,6 +5,7 @@ import os
 import pathlib
 import re
 import uuid
+from collections import Counter
 from contextlib import aclosing, asynccontextmanager
 from typing import Optional, Annotated
 
@@ -13,8 +14,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from fastapi.security import OAuth2PasswordRequestForm
 
-from .cv_parser import extract_text
-from .agent import run_apply, execute_tool
+from .cv_parser import extract_text, extract_links, profile_links
+from .agent import run_apply, execute_tool, _normalise_company_name
 from .guardrails import check_cv_for_injection, GuardrailViolation
 from . import tracker
 from . import auth
@@ -23,7 +24,8 @@ from . import doc_render
 from . import jobs_db
 from . import net_guard
 from . import seniority
-from .models import Persona, is_present_end_date
+from .models import (Persona, WorkExperience, Education, Project, Certification, SkillCategory,
+                     is_present_end_date)
 
 
 @asynccontextmanager
@@ -194,6 +196,130 @@ def _split_cv_dates(dates) -> tuple[str, str, bool]:
     return "", "", is_present_end_date(text)
 
 
+def _norm(text) -> str:
+    """Lower-case words only, for matching CV entries to persona ones."""
+    return " ".join(re.sub(r"[^a-z0-9]+", " ", str(text or "").lower()).split())
+
+
+def _str_list(value) -> list[str]:
+    """A model-returned list of strings, cleaned; a lone string becomes a one-item list."""
+    if isinstance(value, str):
+        value = [value]
+    if not isinstance(value, list):
+        return []
+    return [" ".join(str(v).split()) for v in value if isinstance(v, (str, int, float)) and str(v).strip()]
+
+
+def _text(value) -> str:
+    return " ".join(str(value).split()) if isinstance(value, (str, int, float)) else ""
+
+
+def _fill(obj, field: str, value) -> None:
+    """Set a field only when the persona has nothing in it."""
+    if value and not getattr(obj, field):
+        setattr(obj, field, value)
+
+
+def _matching_role(history: list[WorkExperience], role: WorkExperience, only_one_at_employer: bool):
+    """The persona's entry for a CV role: same employer (legal suffixes ignored) and title, else the
+    employer's only entry when the CV also has one role there, so a reworded title still matches."""
+    employer = _normalise_company_name(role.employer)
+    same = [h for h in history if _normalise_company_name(h.employer) == employer]
+    titled = next((h for h in same if _norm(h.title) == _norm(role.title)), None)
+    return titled or (same[0] if len(same) == 1 and only_one_at_employer else None)
+
+
+def _merge_cv(persona: Persona, cv: dict) -> None:
+    """
+    Merge a parsed CV into the persona without overwriting anything the user has entered or edited:
+    entries the persona lacks (a role, a project, a qualification) are added, and ones it has gain
+    only the details they're missing. Re-uploading a CV therefore completes an earlier import.
+    """
+    core = persona.core_info
+    name = _text(cv.get("name")).split()
+    _fill(core, "first_name", name[0] if name else "")
+    _fill(core, "last_name", " ".join(name[1:]))
+    for field, key in (("email", "email"), ("phone", "phone"), ("address_line_1", "address"),
+                       ("city", "location"), ("linkedin", "linkedin"), ("github", "github")):
+        _fill(core, field, _text(cv.get(key)))
+    website = _text(cv.get("website"))
+    if "." in website and " " not in website:
+        _fill(core, "website", website)
+    _fill(persona, "summary", _text(cv.get("summary")))
+
+    # A skill the persona has in any category is kept where it is: the CV's categories needn't match
+    # the persona's (an earlier import, or the user, may have grouped them differently).
+    have = {s.lower() for c in persona.skills for s in c.skills}
+    for cat in cv.get("skills") or []:
+        # Categorised ({category, skills}); an older flat list of names goes under "Uncategorized".
+        category = (_text(cat.get("category")) or "Uncategorized") if isinstance(cat, dict) else "Uncategorized"
+        new = []
+        for skill in _str_list(cat.get("skills") if isinstance(cat, dict) else cat):
+            if skill.lower() not in have:
+                have.add(skill.lower())
+                new.append(skill)
+        if not new:
+            continue
+        target = next((c for c in persona.skills if c.category.lower() == category.lower()), None)
+        if target is None:
+            persona.skills.append(SkillCategory(category=category, skills=new))
+        else:
+            target.skills.extend(new)
+
+    roles = [r for r in cv.get("experience") or [] if isinstance(r, dict) and (r.get("employer") or r.get("title"))]
+    per_employer = Counter(_normalise_company_name(_text(r.get("employer"))) for r in roles)
+    for r in roles:
+        start, end, current = _split_cv_dates(r.get("dates"))
+        role = WorkExperience(employer=_text(r.get("employer")), title=_text(r.get("title")),
+                              start_date=start, end_date=end, is_current=current, summary=_text(r.get("summary")),
+                              achievements=_str_list(r.get("achievements")), tech_stack=_str_list(r.get("tech_stack")))
+        match = _matching_role(persona.history, role, per_employer[_normalise_company_name(role.employer)] == 1)
+        if match is None:
+            persona.history.append(role)
+            continue
+        for field in ("summary", "achievements", "tech_stack"):
+            _fill(match, field, getattr(role, field))
+        if not (match.start_date or match.end_date):
+            match.start_date, match.end_date, match.is_current = start, end, current
+
+    for e in cv.get("education") or []:
+        if not isinstance(e, dict) or not _text(e.get("institution")):
+            continue
+        dates = _text(e.get("dates"))
+        start, end, current = _split_cv_dates(dates)
+        if not (start or end or current):
+            end = dates  # a lone year is when the course ended
+        edu = Education(institution=_text(e.get("institution")), degree=_text(e.get("degree")), start_date=start,
+                        end_date=end, grade=_text(e.get("grade")), is_currently_enrolled=current)
+        match = next((x for x in persona.education if _norm(x.institution) == _norm(edu.institution)), None)
+        if match is None:
+            persona.education.append(edu)
+            continue
+        for field in ("degree", "grade"):
+            _fill(match, field, getattr(edu, field))
+        if not (match.start_date or match.end_date):
+            match.start_date, match.end_date, match.is_currently_enrolled = start, end, current
+
+    for p in cv.get("projects") or []:
+        if not isinstance(p, dict) or not _text(p.get("name")):
+            continue
+        proj = Project(name=_text(p.get("name")), url=_text(p.get("url")) or None,
+                       problem_solved=_text(p.get("description")), outcomes=_text(p.get("outcomes")),
+                       technologies=_str_list(p.get("technologies")))
+        match = next((x for x in persona.projects if _norm(x.name) == _norm(proj.name)), None)
+        if match is None:
+            persona.projects.append(proj)
+            continue
+        for field in ("url", "problem_solved", "outcomes", "technologies"):
+            _fill(match, field, getattr(proj, field))
+
+    for c in cv.get("certifications") or []:
+        cert_name = _text(c.get("name")) if isinstance(c, dict) else ""
+        if cert_name and not any(_norm(x.name) == _norm(cert_name) for x in persona.certifications):
+            persona.certifications.append(Certification(
+                name=cert_name, issuing_organization=_text(c.get("issuer")), issue_date=_text(c.get("date"))))
+
+
 @app.post("/upload")
 async def upload_cv(
     file: UploadFile = File(...),
@@ -205,101 +331,23 @@ async def upload_cv(
         cv_text = extract_text(pdf_bytes)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
+    links = extract_links(pdf_bytes)
+    if links:
+        # A clickable link's target is in no page text; the model needs it for profile and project URLs.
+        cv_text += "\n\nLinks in this CV (anchor text -> URL):\n" + "\n".join(
+            f"- {anchor or '(no text)'} -> {url}" for anchor, url in links)
 
     try:
         check_cv_for_injection(cv_text)
     except GuardrailViolation as e:
         raise HTTPException(status_code=422, detail=f"GUARDRAIL: {e.detail}")
 
-    # Extract structured data from CV
     cv_data = await execute_tool("extract_cv_profile", {"cv_text": cv_text})
+    # LinkedIn and GitHub profile addresses are unambiguous: take them from the links themselves.
+    cv_data.update(profile_links(links))
 
-    # Merge into existing Persona
-    existing_persona_data = tracker.get_user_persona(current_user.id)
-    persona = Persona(**existing_persona_data)
-    
-    # Granular merge logic
-    if cv_data.get("name"):
-        parts = cv_data["name"].split()
-        if len(parts) >= 2:
-            if not persona.core_info.first_name: persona.core_info.first_name = parts[0]
-            if not persona.core_info.last_name: persona.core_info.last_name = " ".join(parts[1:])
-        elif not persona.core_info.first_name:
-            persona.core_info.first_name = cv_data["name"]
-
-    if cv_data.get("email") and not persona.core_info.email:
-        persona.core_info.email = cv_data["email"]
-    if cv_data.get("phone") and not persona.core_info.phone:
-        persona.core_info.phone = cv_data["phone"]
-    
-    # Location/Address mapping
-    if cv_data.get("address") and not persona.core_info.address_line_1:
-        persona.core_info.address_line_1 = cv_data["address"]
-    if cv_data.get("location") and not persona.core_info.city:
-        persona.core_info.city = cv_data["location"]
-
-    # Skill Categorization Logic (Merging categorized skills)
-    # cv_data['skills'] is now expected to be List[dict] with {category, skills}
-    extracted_categories = cv_data.get("skills", [])
-    if extracted_categories and isinstance(extracted_categories[0], dict):
-        # Already categorized by the LLM
-        for ext_cat in extracted_categories:
-            cat_name = ext_cat.get("category", "Uncategorized")
-            new_skills = ext_cat.get("skills", [])
-            # Find matching category in persona
-            found = False
-            for p_cat in persona.skills:
-                if p_cat.category.lower() == cat_name.lower():
-                    p_cat.skills = list(set(p_cat.skills + new_skills))
-                    found = True
-                    break
-            if not found:
-                from .models import SkillCategory
-                persona.skills.append(SkillCategory(category=cat_name, skills=new_skills))
-    else:
-        # Fallback for old/flat list if any
-        flat_skills = cv_data.get("skills", [])
-        if flat_skills:
-            from .models import SkillCategory
-            found = False
-            for p_cat in persona.skills:
-                if p_cat.category == "Uncategorized":
-                    p_cat.skills = list(set(p_cat.skills + flat_skills))
-                    found = True
-                    break
-            if not found:
-                persona.skills.append(SkillCategory(category="Uncategorized", skills=flat_skills))
-
-    persona.summary = cv_data.get("summary") or persona.summary
-
-    # Update history and education if empty
-    from .models import WorkExperience, Education
-    if not persona.history and cv_data.get("experience"):
-        new_history = []
-        for exp in cv_data["experience"]:
-            # Map old 'summary' to achievements/summary as needed
-            start_date, end_date, is_current = _split_cv_dates(exp.get("dates"))
-            new_history.append(WorkExperience(
-                employer=exp.get("employer", ""),
-                title=exp.get("title", ""),
-                start_date=start_date,
-                end_date=end_date,
-                is_current=is_current,
-                summary=exp.get("summary", ""),
-            ))
-        persona.history = new_history
-
-    if not persona.education and cv_data.get("education"):
-        new_edu = []
-        for edu in cv_data["education"]:
-            new_edu.append(Education(
-                institution=edu.get("institution", ""),
-                degree=edu.get("degree", ""),
-                start_date="", end_date="", grade="",
-                is_currently_enrolled=False
-            ))
-        persona.education = new_edu
-
+    persona = Persona(**tracker.get_user_persona(current_user.id))
+    _merge_cv(persona, cv_data)
     tracker.update_user_persona(current_user.id, persona.model_dump())
 
     # Keep the original PDF so the apply flow can upload it when no tailored CV is chosen.
