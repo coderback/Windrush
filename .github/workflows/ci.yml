@@ -44,16 +44,20 @@ jobs:
       - run: pytest -m browser
 
   compose:
-    name: docker-compose.yml resolves
+    name: Docker config (compose + nginx)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       # Placeholder values for the two secrets the file requires: this only parses and resolves
       # the file (a YAML slip once left it unusable on main), nothing is started.
-      - run: docker compose config -q
+      - name: docker-compose.yml resolves
+        run: docker compose config -q
         env:
           JWT_SECRET: ci
           CREDENTIALS_KEY: ci
+      # The upstreams use `resolve`, so this passes without the other services running.
+      - name: nginx.conf is valid
+        run: docker run --rm -v "$PWD/nginx/nginx.conf:/etc/nginx/nginx.conf:ro" nginx:alpine nginx -t
 
   frontend:
     name: Frontend type-check + build
