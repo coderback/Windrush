@@ -1,6 +1,7 @@
 """CV and cover-letter documents: profile → CVDoc / LetterDoc → HTML → PDF."""
 import asyncio
 import copy
+import datetime
 import json
 import os
 import re
@@ -352,6 +353,13 @@ def test_an_experienced_cv_may_run_to_two_pages(pages):
     assert "<body>" in doc_render.render_cv_html(_full_cvdoc("experienced")) and pages.steps == [""]
 
 
+def test_a_long_letter_tightens_its_layout_but_keeps_every_paragraph(pages):
+    pages.rule = staticmethod(lambda html: 1 if 'class="tight small"' in html else 2)
+    paragraphs = _letter_paragraphs((70, 95, 160, 55))
+    html = doc_render.render_letter_html({"candidate_name": "Sam Okafor", "paragraphs": paragraphs})
+    assert pages.steps == ["", "tight", "tight small"] and _letter_body(html)[1:] == paragraphs
+
+
 def test_the_preview_is_fitted_like_the_pdf(client, pages):
     pages.rule = staticmethod(lambda html: 1 if 'class="tight"' in html else 2)
     html = client.post("/documents/preview", json={"type": "cv", "doc": _one_role_junior()}).json()["html"]
@@ -403,6 +411,25 @@ def test_cover_letter_renders_four_paragraphs_and_the_contact_block(llm):
     assert '<p class="letter-headline">Computer Science Graduate</p>' in html
     assert ">Bristol.</p>" in html and 'href="mailto:sam@example.com"' in html and 'href="tel:+447700900456"' in html
     assert re.search(r'<p>Yours faithfully,</p>\s*<p class="sig-name">Sam Okafor</p>', html)
+
+    # Under the candidate's contact details: the date, the employer and where, then the role.
+    today = datetime.date.today().strftime("%d %B %Y")
+    order = [">Bristol.</p>", f'<p class="letter-date">{today}</p>', "<p>Acme Robotics</p>", "<p>Cambridge, UK</p>",
+             '<p class="letter-subject">Re: Graduate Software Engineer</p>', "<p>Dear Hiring Manager,</p>"]
+    assert [html.index(s) for s in order] == sorted(html.index(s) for s in order)
+
+
+def test_a_job_without_a_location_leaves_the_employers_location_blank(llm):
+    persona = copy.deepcopy(GRADUATE)
+    persona["core_info"]["country"] = "Nigeria"
+    letter = asyncio.run(agent.execute_tool("generate_cover_letter",
+                                            {"job": {**JOB, "location": ""}, "persona": persona}))["letter"]
+    assert letter["company"] == "Acme Robotics" and letter["company_location"] == ""
+
+
+def test_a_letter_without_date_or_employer_has_no_empty_block():
+    html = doc_render.render_letter_html({"candidate_name": "Sam Okafor", "paragraphs": ["Hello."]})
+    assert 'class="letter-meta"' not in html.split("</style>")[1] and "Re:" not in html
 
 
 def test_cover_letter_without_the_model_still_reads_as_a_letter(llm):
@@ -477,6 +504,8 @@ def test_a_full_length_cover_letter_fits_one_page(pdf_dir):
     letter = {"candidate_name": "Sam Okafor", "headline": "Computer Science Graduate",
               "contact": {"address_line_1": "1 High Street", "city": "Bristol", "postcode": "BS1 1AA",
                           "phone": "+44 7700 900456", "email": "sam@example.com"},
+              "date": "15 October 2026", "company": "Acme Robotics", "company_location": "Cambridge, UK",
+              "job_title": "Graduate Software Engineer (2027 start)",
               "paragraphs": _letter_paragraphs((70, 95, 160, 55))}   # longer than the ~380 words asked for
     assert _weasy("cover_letter", letter).page_count == 1
 
@@ -485,8 +514,10 @@ def test_a_full_length_cover_letter_fits_one_page(pdf_dir):
     ("cv", agent._persona_to_cvdoc(GRADUATE),
      ["Sam Okafor", "Software Engineering Intern", "Pantry Planner", "BSc (Hons) Computer Science"]),
     ("cover_letter", {"candidate_name": "Sam Okafor", "job_title": "Graduate Software Engineer",
-                      "company": "Acme Robotics", "paragraphs": ["I would like to join Acme Robotics."]},
-     ["Sam Okafor", "Dear Hiring Manager", "I would like to join Acme Robotics."]),
+                      "company": "Acme Robotics", "company_location": "Cambridge, UK", "date": "15 October 2026",
+                      "paragraphs": ["I would like to join Acme Robotics."]},
+     ["Sam Okafor", "15 October 2026", "Acme Robotics Cambridge, UK", "Re: Graduate Software Engineer",
+      "Dear Hiring Manager", "I would like to join Acme Robotics."]),
 ])
 def test_a_failing_weasyprint_falls_back_to_a_plain_pdf(pdf_dir, monkeypatch, doc_type, doc, expected):
     def broken(html):
