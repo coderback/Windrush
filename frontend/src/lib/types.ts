@@ -1,0 +1,204 @@
+/* Shapes the API returns. Only the fields the frontend reads are listed. */
+
+export interface Job {
+  id?: string;
+  job_id?: string;
+  title: string;
+  company: string;
+  location: string;
+  salary?: string;
+  salary_min?: number | null;
+  salary_max?: number | null;
+  description?: string;
+  url?: string;
+  exposure_score?: number;
+  semantic_score?: number;
+  tags?: string | string[];
+  source?: string;
+  level?: string;
+  posted_at?: string;
+  created_at?: string;
+  tracker_status?: string;
+  sponsorship?: string;            // "offered" | "not_offered" | "" (the ad doesn't say)
+  sponsorship_evidence?: string;
+  clearance?: string;              // "DV" | "SC" | "NPPV" | "unspecified" | ""
+  licensed_sponsor?: boolean;      // the employer is on the Home Office sponsor register
+  sponsorship_mark?: string;       // the user's own call, which wins
+  years_min?: number | null;       // minimum years of experience the ad asks for (LLM-read)
+  degree?: string;                 // "required" | "preferred" | "not_mentioned" | ""
+}
+
+export interface Application {
+  id: string;
+  job_id: string;
+  job_title: string;
+  company: string;
+  location: string;
+  job_url: string;
+  status: string;
+  date_applied: string | null;
+  composite_score: number | null;
+  exposure_score: number | null;
+  fit_score: number | null;
+  skill_gaps: string[];
+  level_match: string;
+  notes: string | null;
+  tailored_cv?: string | null;
+  created_at: string;
+}
+
+export interface SkillRisk {
+  skill: string;
+  exposure_score: number;
+  risk_label: string;
+  reasoning?: string;
+}
+
+export interface Analysis {
+  fit_score?: number;
+  level_match?: string;
+  skill_gaps?: string[];
+  matched_skills?: string[];
+  reasoning?: string;
+}
+
+/* ── Persona (mirrors api/app/models.py) ─────────────────────────────── */
+
+// Facts stated on applications. null = not answered: the browser agent leaves those for you.
+export type YesNo = boolean | null;
+
+export interface WorkExperience {
+  employer: string;
+  title: string;
+  start_date: string;
+  end_date: string;
+  is_current: boolean;
+  tech_stack: string[];
+  achievements: string[];
+  metrics: string;
+  summary: string;
+}
+
+export interface Education {
+  institution: string;
+  degree: string;
+  start_date: string;
+  end_date: string;
+  grade: string;
+  is_currently_enrolled: boolean;
+}
+
+export interface Project {
+  name: string;
+  url?: string | null;
+  problem_solved: string;
+  technologies: string[];
+  outcomes: string;
+  summary: string;
+  is_ongoing: boolean;
+}
+
+export interface Certification {
+  name: string;
+  issuing_organization: string;
+  issue_date: string;
+  expiration_date: string;
+  credential_id: string;
+  credential_url: string;
+}
+
+export interface BehavioralStory {
+  title: string;
+  scenario: string;
+  action: string;
+  result: string;
+  tags: string[];
+}
+
+export interface SkillCategory {
+  category: string;
+  skills: string[];
+}
+
+export interface CoreInfo {
+  first_name: string;
+  last_name: string;
+  preferred_name: string;
+  dob: string;
+  email: string;
+  phone: string;
+  address_line_1: string;
+  city: string;
+  country: string;
+  postcode: string;
+  linkedin: string;
+  github: string;
+  twitter: string;
+  portfolio: string;
+  website: string;
+  visa_status: string;
+  visa_type: string;
+  right_to_work_uk: YesNo;
+  require_sponsorship: YesNo;
+  security_clearance: string;
+  has_government_ties: YesNo;
+  nationality: string;
+  holds_other_nationality: YesNo;
+  other_nationalities: string;
+  held_other_nationality: YesNo;
+  previous_nationalities: string;
+  job_email: string;
+  job_password: string;
+}
+
+export interface Diversity {
+  gender: string;
+  ethnicity: string;
+  disability_status: string;
+  veteran_status: string;
+  sexual_orientation: string;
+}
+
+export interface Screening {
+  why_this_role: string;
+  why_this_company: string;
+  greatest_strength: string;
+  biggest_weakness: string;
+  leadership_example: string;
+  conflict_resolution: string;
+  salary_canonical: string;
+  notice_period_canonical: string;
+}
+
+export interface Preferences {
+  target_titles: string[];
+  min_salary?: number | null;
+  expected_hourly_rate?: number | null;
+  remote_preference: string;
+  relocation_willingness: YesNo;
+  preferred_locations: string[];
+  industries: string[];
+  companies_to_avoid: string[];
+  company_size_preference: string;
+  employment_type: string;
+  notice_period: string;
+  can_work_in_person: YesNo;
+  can_start_immediately: YesNo;
+  has_reliable_transportation: YesNo;
+  needs_accommodations: YesNo;
+}
+
+export interface Persona {
+  core_info: CoreInfo;
+  diversity: Diversity;
+  screening: Screening;
+  preferences: Preferences;
+  history: WorkExperience[];
+  education: Education[];
+  projects: Project[];
+  certifications: Certification[];
+  story_bank: BehavioralStory[];
+  custom_directives: string;
+  skills: SkillCategory[];
+  summary: string;
+}

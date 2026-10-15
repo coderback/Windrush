@@ -2,19 +2,226 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Design tokens (design/redesign/HANDOFF.md, section 2). Light is the default; the inline script
+   in layout.tsx puts `.dark` on <html> before first paint when the theme resolves to dark. */
 :root {
-  --background: #0a0a0a;
-  --foreground: #ededed;
+  --canvas: #F5F5F2;
+  --surface: #FFFFFF;
+  --subtle: #FAFAF8;
+  --muted: #F0F0EC;
+  --track: #EFEEEA;
+  --divider: #F2F1ED;
+  --border: #E7E6E1;
+  --border-strong: #D6D5CF;
+  --bar-idle: #D9D8D2;
+  --stone: #B9B8B1;
+  --ink: #15171C;
+  --ink-2: #4A4D55;
+  --ink-3: #6B6E76;
+  --on-ink: #FFFFFF;
+  --teal: #0D6E66;
+  --teal-deep: #0A524C;
+  --teal-soft: #EAF4F1;
+  --teal-chip: #DDF1EC;
+  --teal-logo: #E3F1EE;
+  --teal-line: #9BC9C1;
+  --teal-ok: #F2FAF8;
+  --teal-ok-line: #7DBDB2;
+  --amber: #D98E04;
+  --amber-text: #7A4A00;
+  --amber-soft: #FCEFD6;
+  --amber-chip: #FCE9C2;
+  --amber-wash: #FDF6E7;
+  --amber-wash-2: #FFF8EA;
+  --amber-line: #EBD9B4;
+  --amber-line-2: #F1E3C4;
+  --amber-line-3: #F1DDB0;
+  --amber-ink: #5C4A26;
+  --amber-ink-2: #5C3A00;
+  --amber-dash: #D3A54A;
+  --orange: #C2410C;
+  --orange-text: #A33508;
+  --red: #A12A1C;
+  --red-soft: #FBE4E1;
+  --blue: #2F62C9;
+  --blue-soft: #E4ECFB;
+  --blue-text: #1F4FB0;
+  --violet: #6E4FD0;
+  --violet-soft: #EEE8FB;
+  --violet-text: #5B3DB0;
+  --green: #3F8F2E;
+  --green-soft: #E2F3DF;
+  --green-text: #2E6B1F;
+  --tint-mint: #E4F3EE;
+  --tint-sky: #E6EEFB;
+  --tint-peach: #FCEBDF;
+  --tint-lilac: #EEE9FB;
+  --tint-sand: #F7F1DF;
+  --band: #16181D;
+  --scale-low: #8CC7BD;
+  --scale-mid: #EDC679;
+  --scale-high: #E59A7A;
+  --ring-teal: rgba(13, 110, 102, 0.14);
+  --scrim: rgba(21, 23, 28, 0.18);
+  color-scheme: light;
+}
+
+.dark {
+  --canvas: #0E0F12;
+  --surface: #17191D;
+  --subtle: #1B1D22;
+  --muted: #25272D;
+  --track: #24262B;
+  --divider: #212328;
+  --border: #2B2E34;
+  --border-strong: #3B3E45;
+  --bar-idle: #3B3E45;
+  --stone: #6E7178;
+  --ink: #ECECE8;
+  --ink-2: #B5B7BD;
+  --ink-3: #8F929A;
+  --on-ink: #17191D;
+  --teal: #3DB3A3;
+  --teal-deep: #85D6C9;
+  --teal-soft: #13302C;
+  --teal-chip: #163B36;
+  --teal-logo: #13302C;
+  --teal-line: #2E6F66;
+  --teal-ok: #13302C;
+  --teal-ok-line: #3E8F84;
+  --amber: #E5A43A;
+  --amber-text: #F2C672;
+  --amber-soft: #3A2B10;
+  --amber-chip: #40300F;
+  --amber-wash: #221C10;
+  --amber-wash-2: #221C10;
+  --amber-line: #4A3B1E;
+  --amber-line-2: #3A2F19;
+  --amber-line-3: #4A3B1E;
+  --amber-ink: #DCC8A0;
+  --amber-ink-2: #F2C672;
+  --amber-dash: #A8802F;
+  --orange: #F07D4A;
+  --orange-text: #F5A07A;
+  --red: #F28C80;
+  --red-soft: #3A1A16;
+  --blue: #7099F0;
+  --blue-soft: #19243F;
+  --blue-text: #A2BCF6;
+  --violet: #A28BEF;
+  --violet-soft: #241D3F;
+  --violet-text: #C3B3F6;
+  --green: #6FC45E;
+  --green-soft: #1B2E17;
+  --green-text: #9FDB91;
+  --tint-mint: #14302A;
+  --tint-sky: #17253A;
+  --tint-peach: #3A2618;
+  --tint-lilac: #241F3D;
+  --tint-sand: #2E2A1C;
+  --band: #25282F;
+  --scale-low: #2E6F66;
+  --scale-mid: #8A6A2A;
+  --scale-high: #8A4A33;
+  --ring-teal: rgba(61, 179, 163, 0.2);
+  --scrim: rgba(0, 0, 0, 0.45);
+  color-scheme: dark;
+}
+
+html {
+  background: var(--canvas);
 }
 
 body {
-  color: var(--foreground);
-  background: var(--background);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--canvas);
+  color: var(--ink);
+  font-family: var(--font-geist), ui-sans-serif, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* A visible focus ring on every interactive element reached by keyboard. */
+:focus-visible {
+  outline: 2px solid var(--teal);
+  outline-offset: 2px;
 }
 
 @layer utilities {
-  .text-balance {
-    text-wrap: balance;
+  .text-balance { text-wrap: balance; }
+  .text-pretty { text-wrap: pretty; }
+  /* Micro label: Geist Mono 10.5px uppercase, 0.08em tracking. */
+  .micro {
+    font-family: var(--font-geist-mono), ui-monospace, monospace;
+    font-size: 10.5px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink-3);
   }
+  .sr-only-input {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    opacity: 0;
+    overflow: hidden;
+  }
+}
+
+/* Skeleton shimmer: blocks in the track colour, same radius as the element they stand in for. */
+@keyframes wr-pulse {
+  50% { opacity: 0.55; }
+}
+.skeleton {
+  background: var(--track);
+  animation: wr-pulse 1.6s ease-in-out infinite;
+}
+
+/* Indeterminate progress for "discovery running". */
+@keyframes wr-indeterminate {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(250%); }
+}
+.indeterminate {
+  animation: wr-indeterminate 1.8s ease-in-out infinite;
+}
+
+/* Two overlaid range inputs make the salary slider: only the thumbs take pointer events. */
+.dual-range {
+  -webkit-appearance: none;
+  appearance: none;
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  background: transparent;
+  pointer-events: none;
+}
+.dual-range::-webkit-slider-runnable-track { background: transparent; height: 4px; }
+.dual-range::-moz-range-track { background: transparent; height: 4px; }
+.dual-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  pointer-events: auto;
+  width: 16px;
+  height: 16px;
+  margin-top: -6px;
+  border-radius: 999px;
+  border: 3px solid var(--amber);
+  background: #FFFFFF;
+  cursor: pointer;
+}
+.dual-range::-moz-range-thumb {
+  pointer-events: auto;
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  border: 3px solid var(--amber);
+  background: #FFFFFF;
+  cursor: pointer;
+}
+.dual-range:focus-visible { outline: none; }
+.dual-range:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.45); }
+.dual-range:focus-visible::-moz-range-thumb { box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.45); }
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton, .indeterminate { animation: none; }
 }

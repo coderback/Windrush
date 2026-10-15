@@ -3,6 +3,7 @@
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { authFetch } from "./api";
+import Icon from "@/components/ui/Icon";
 
 export default function RootPage() {
   const router = useRouter();
@@ -26,8 +27,11 @@ export default function RootPage() {
   }, [router]);
 
   return (
-    <div className="min-h-screen flex items-center justify-center text-zinc-600 text-sm">
-      Loading…
+    <div className="min-h-screen flex items-center justify-center bg-canvas" role="status">
+      <span className="w-8 h-8 rounded-[9px] bg-teal text-surface flex items-center justify-center">
+        <Icon name="wind" size={18} strokeWidth={2} />
+      </span>
+      <span className="sr-only">Loading</span>
     </div>
   );
 }
