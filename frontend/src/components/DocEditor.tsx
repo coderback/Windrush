@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { authFetch } from "@/app/api";
+import CommaListInput from "./CommaListInput";
 
 /* ── Document shapes (mirror the backend CVDoc / LetterDoc) ─────────────── */
 
@@ -177,8 +178,8 @@ function CvForm({ cv, onChange }: { cv: CVDoc; onChange: (c: CVDoc) => void }) {
               </div>
               <div>
                 <label className={labelCls}>Items (comma-separated)</label>
-                <input className={inputCls} value={g.items.join(", ")}
-                  onChange={(e) => set({ skills: cv.skills.map((x, idx) => idx === i ? { ...x, items: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) } : x) })} />
+                <CommaListInput className={inputCls} value={g.items}
+                  onChange={(items) => set({ skills: cv.skills.map((x, idx) => idx === i ? { ...x, items } : x) })} />
               </div>
               <button className={removeBtn} onClick={() => set({ skills: cv.skills.filter((_, idx) => idx !== i) })}>remove</button>
             </div>
@@ -246,8 +247,11 @@ function CvForm({ cv, onChange }: { cv: CVDoc; onChange: (c: CVDoc) => void }) {
                   onChange={(e) => set({ projects: cv.projects.map((x, idx) => idx === i ? { ...x, description: e.target.value } : x) })} />
               </div>
               <div className="grid grid-cols-2 gap-2">
-                <Field label="Tech (comma-separated)" value={(p.tech ?? []).join(", ")}
-                  onChange={(v) => set({ projects: cv.projects.map((x, idx) => idx === i ? { ...x, tech: v.split(",").map((s) => s.trim()).filter(Boolean) } : x) })} />
+                <div>
+                  <label className={labelCls}>Tech (comma-separated)</label>
+                  <CommaListInput className={inputCls} value={p.tech ?? []}
+                    onChange={(tech) => set({ projects: cv.projects.map((x, idx) => idx === i ? { ...x, tech } : x) })} />
+                </div>
                 <Field label="Link" value={p.link ?? ""}
                   onChange={(v) => set({ projects: cv.projects.map((x, idx) => idx === i ? { ...x, link: v } : x) })} />
               </div>

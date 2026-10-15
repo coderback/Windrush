@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { authFetch } from "../api";
+import CommaListInput from "@/components/CommaListInput";
 
 interface WorkExperience {
   employer: string;
@@ -434,7 +435,7 @@ export default function ProfilePage() {
                      <input placeholder="Category (e.g. Languages)" className="flex-1 bg-transparent border-b border-zinc-800 p-1 text-sm font-bold outline-none" value={cat.category} onChange={(e) => { const arr = [...persona.skills]; arr[i].category = e.target.value; handleChange("skills", "skills", arr); }}/>
                      <button onClick={() => { const arr = [...persona.skills]; arr.splice(i, 1); handleChange("skills", "skills", arr); }} className="text-xs text-red-900 hover:text-red-500 transition-colors">Delete</button>
                    </div>
-                   <input placeholder="Skills (comma separated, e.g. Python, Go, Java)" className="w-full bg-zinc-950 border border-zinc-800 rounded p-2 text-sm focus:border-teal-500 outline-none" value={cat.skills.join(", ")} onChange={(e) => { const arr = [...persona.skills]; arr[i].skills = e.target.value.split(",").map(s => s.trim()).filter(Boolean); handleChange("skills", "skills", arr); }} />
+                   <CommaListInput placeholder="Skills (comma separated, e.g. Python, Go, Java)" className="w-full bg-zinc-950 border border-zinc-800 rounded p-2 text-sm focus:border-teal-500 outline-none" value={cat.skills} onChange={(items) => { const arr = [...persona.skills]; arr[i].skills = items; handleChange("skills", "skills", arr); }} />
                  </div>
                ))}
             </div>
@@ -706,8 +707,13 @@ export default function ProfilePage() {
                   </select>
                 </div>
                 <div className="space-y-2 col-span-2">
+                  <label className="text-xs text-zinc-500 uppercase">Target Job Titles (comma separated)</label>
+                  <CommaListInput className="w-full bg-zinc-950 border border-zinc-800 rounded p-2 text-sm focus:border-teal-500 outline-none" value={persona.preferences.target_titles || []} onChange={(items) => handleChange("preferences", "target_titles", items)} placeholder="e.g. Graduate Software Engineer, Junior ML Engineer" />
+                  <p className="text-xs text-zinc-600">The job feed and discovery search each title in each location.</p>
+                </div>
+                <div className="space-y-2 col-span-2">
                   <label className="text-xs text-zinc-500 uppercase">Preferred Locations (comma separated)</label>
-                  <input className="w-full bg-zinc-950 border border-zinc-800 rounded p-2 text-sm focus:border-teal-500 outline-none" value={(persona.preferences.preferred_locations || []).join(", ")} onChange={(e) => handleChange("preferences", "preferred_locations", e.target.value.split(",").map(s => s.trim()))} placeholder="e.g. London, Manchester, New York" />
+                  <CommaListInput className="w-full bg-zinc-950 border border-zinc-800 rounded p-2 text-sm focus:border-teal-500 outline-none" value={persona.preferences.preferred_locations || []} onChange={(items) => handleChange("preferences", "preferred_locations", items)} placeholder="e.g. London, Manchester, New York" />
                 </div>
               </div>
               
