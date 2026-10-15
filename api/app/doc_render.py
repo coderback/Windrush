@@ -49,7 +49,6 @@ _MAX_PROJECTS = 4
 _MAX_PROJECT_DESC_CHARS = 520  # room for 2-3 sentences (what it is, how it works, a result)
 _MAX_EDUCATION = 4
 _MAX_CERTS = 6
-_MAX_PARAGRAPHS = 4
 
 # Pages a CV must fit: one for a graduate / early-career candidate, two otherwise.
 _PAGE_TARGET = {"junior": 1, "experienced": 2}
@@ -310,7 +309,9 @@ def _letter_contact_lines(contact: dict) -> list[dict]:
 def build_letter_template_data(letter: dict, fit: tuple[str, ...] = ()) -> dict:
     """Render-ready letter data. `fit` is a step from _LETTER_FIT_STEPS: layout classes only."""
     letter = letter or {}
-    paragraphs = [p.strip() for p in (letter.get("paragraphs") or []) if p and p.strip()][:_MAX_PARAGRAPHS]
+    # Every paragraph is kept (the model may write five, the editor can add more); fitting the
+    # letter to one page is _fitted_html's job, which only ever tightens the layout.
+    paragraphs = [p.strip() for p in (letter.get("paragraphs") or []) if p and p.strip()]
     return {
         "page_target": 1,
         "body_class": " ".join(fit),
