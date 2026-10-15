@@ -3,6 +3,7 @@
 import { useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { authFetch } from "../api";
+import CommaListInput from "@/components/CommaListInput";
 
 type Step = "cv" | "credentials" | "persona";
 
@@ -282,9 +283,9 @@ export default function OnboardingPage() {
 
               <div className="space-y-2">
                 <label className="text-[10px] text-zinc-500 uppercase tracking-widest">Target job titles (comma separated)</label>
-                <input
-                  value={prefs.target_titles.join(", ")}
-                  onChange={(e) => setPrefs((p) => ({ ...p, target_titles: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) }))}
+                <CommaListInput
+                  value={prefs.target_titles}
+                  onChange={(items) => setPrefs((p) => ({ ...p, target_titles: items }))}
                   placeholder="Software Engineer, ML Engineer"
                   className="w-full bg-zinc-950 border border-zinc-800 rounded px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-teal-500 transition-colors"
                 />
@@ -292,9 +293,9 @@ export default function OnboardingPage() {
 
               <div className="space-y-2">
                 <label className="text-[10px] text-zinc-500 uppercase tracking-widest">Preferred locations (comma separated)</label>
-                <input
-                  value={prefs.preferred_locations.join(", ")}
-                  onChange={(e) => setPrefs((p) => ({ ...p, preferred_locations: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) }))}
+                <CommaListInput
+                  value={prefs.preferred_locations}
+                  onChange={(items) => setPrefs((p) => ({ ...p, preferred_locations: items }))}
                   placeholder="London, Remote"
                   className="w-full bg-zinc-950 border border-zinc-800 rounded px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-teal-500 transition-colors"
                 />
