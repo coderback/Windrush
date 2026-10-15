@@ -1,0 +1,52 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Apply for this job</title>
+<style>
+  body { font-family: sans-serif; margin: 20px; }
+  .field { margin: 12px 0; }
+  .select__control { border: 1px solid #999; width: 300px; padding: 4px; display: flex; }
+  .select__hidden { display: none; }
+</style></head>
+<body>
+<form id="f" onsubmit="event.preventDefault(); window.__submitted = true;">
+  <!-- required, empty: reported -->
+  <div class="field"><label for="first">First Name<span>*</span></label>
+    <input id="first" aria-required="true"></div>
+  <!-- required, filled: not reported -->
+  <div class="field"><label for="email">Email<span>*</span></label>
+    <input id="email" type="email" required value="ada@example.com"></div>
+  <!-- optional, empty: not reported -->
+  <div class="field"><label for="portfolio">Portfolio</label><input id="portfolio"></div>
+  <!-- required but hidden: not reported -->
+  <div class="field" style="display:none"><label for="ghost">Ghost<span>*</span></label><input id="ghost" required></div>
+
+  <!-- react-select style, nothing picked: reported -->
+  <div class="field"><label id="nat-label" for="nat">Nationality<span>*</span></label>
+    <div class="select__container"><div class="select__control">
+      <div class="select__placeholder">Select...</div>
+      <input id="nat" role="combobox" aria-required="true" aria-labelledby="nat-label" value="">
+    </div><input type="hidden" name="nationality" value="">
+    <!-- react-select's validation stub while nothing is picked (as Greenhouse renders it): not a field -->
+    <input required tabindex="-1" aria-hidden="true" class="requiredInput" value="" style="opacity:0"></div></div>
+  <!-- react-select style, an option picked (its <input> stays empty): not reported -->
+  <div class="field"><label id="country-label" for="country">Country<span>*</span></label>
+    <div class="select__container"><div class="select__control">
+      <div class="select__single-value">United Kingdom</div>
+      <input id="country" role="combobox" aria-required="true" aria-labelledby="country-label" value="">
+    </div><input type="hidden" name="country" value="GB"></div></div>
+
+  <!-- native select on its placeholder option: reported -->
+  <div class="field"><label for="heard">How did you hear about this role?<span>*</span></label>
+    <select id="heard" required><option value="">Select...</option><option value="web">Company website</option></select></div>
+
+  <!-- required radio group, none checked: reported under its legend -->
+  <fieldset class="field"><legend>Will you require visa sponsorship?<span>*</span></legend>
+    <label><input type="radio" name="sponsor" value="yes" required> Yes</label>
+    <label><input type="radio" name="sponsor" value="no"> No</label></fieldset>
+
+  <!-- the cover-letter box: counts the input events a real paste would fire -->
+  <div class="field"><label for="cover">Cover Letter</label>
+    <textarea id="cover" rows="6" cols="60" oninput="window.__coverInputs = (window.__coverInputs || 0) + 1">old draft</textarea></div>
+
+  <button id="submit" type="submit">Submit application</button>
+</form>
+</body></html>

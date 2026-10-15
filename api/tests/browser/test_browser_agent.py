@@ -5,6 +5,8 @@ Run with: pytest -m browser   (needs `playwright install chromium`)
 import asyncio
 import base64
 import json
+import os
+import re
 
 import pytest
 from browser_support import (ScriptedLLM, SecretTypingLLM, assert_no_chromium_left, ba, run_apply_flow,  # noqa: F401
@@ -194,4 +196,91 @@ def test_password_typed_via_placeholder_in_scope_and_never_sent_to_the_model(ba,
 
     _, value = run("https://*.some-other-site.example")      # out of scope: never typed
     assert value != SECRET
+    assert_no_chromium_left()
+
+
+EMPTY_REQUIRED = ["First Name", "Nationality", "How did you hear about this role?", "Will you require visa sponsorship?"]
+
+
+def test_required_fields_still_empty_are_read_from_the_page(ba, site):
+    from browser_use import BrowserSession
+
+    async def run():
+        session = BrowserSession(browser_profile=ba._browser_profile())
+        await session.start()
+        try:
+            await session.navigate_to(f"{site}/application.html")
+            await asyncio.sleep(1.0)
+            return await ba._empty_required_fields(session)
+        finally:
+            await session.kill()
+
+    # Not the filled email, the picked react-select country, the optional or the hidden field.
+    assert asyncio.run(run()) == EMPTY_REQUIRED
+    assert_no_chromium_left()
+
+
+class CoverLetterLLM(ScriptedLLM):
+    """Pastes the cover letter into its box by index, reads the box back with JS, then finishes."""
+
+    def __init__(self):
+        super().__init__()
+        self.pasted = self.read_back = False
+
+    def next_action(self, text: str) -> list[dict]:
+        box = re.search(r"\[(\d+)\]<textarea[^\n]*?id=cover", text)
+        if box and not self.pasted:
+            self.pasted = True
+            return [{"paste_cover_letter": {"index": int(box.group(1))}}]
+        if self.pasted and not self.read_back:
+            self.read_back = True
+            return [{"evaluate": {"code": "(function(){var c=document.getElementById('cover');"
+                                          "return 'COVER:'+c.value.length+':'+(window.__coverInputs||0)})()"}}]
+        return [{"done": {"text": "Filled what I could.", "success": True}}]
+
+
+LETTER = ("Dear Hiring Manager,\n\nI’d like to join your AI team — here’s why.\n\n"
+          + "A paragraph with real detail about the work. " * 40
+          + "\n\nYours faithfully,\n\nAda Lovelace")
+
+
+def test_cover_letter_is_pasted_whole_and_files_go_up_under_the_candidates_name(ba, site, monkeypatch, tmp_path):
+    llm = CoverLetterLLM()
+    monkeypatch.setattr(ba, "_make_browser_llm", lambda: llm)
+    cv = tmp_path / ("ab" * 16 + ".pdf")                 # stored documents are named by id
+    cv.write_bytes(b"%PDF-1.4 cv")
+    letter_pdf = tmp_path / ("cd" * 16 + ".pdf")
+    letter_pdf.write_bytes(b"%PDF-1.4 letter")
+    persona = {"core_info": {"first_name": "Ada", "last_name": "Lovelace"}}
+
+    async def flow():
+        queue: asyncio.Queue = asyncio.Queue()
+        events = []
+        async for event in ba.apply_with_browser(f"{site}/application.html", persona, LETTER, queue,
+                                                 cv_path=str(cv), cover_letter_path=str(letter_pdf)):
+            events.append(event)
+            if event.get("interactive"):
+                await queue.put("skip")
+            if event.get("done"):
+                break
+        return events
+    events = asyncio.run(flow())
+    seen = "\n".join(llm.seen)
+
+    # The whole letter went in with one action, firing the input events a paste would.
+    assert f"Pasted the whole cover letter ({len(LETTER)} characters)" in seen
+    length, inputs = map(int, re.search(r"COVER:(\d+):(\d+)", seen).groups())
+    assert length == len(LETTER) and inputs >= 1
+
+    # Uploads are offered under the candidate's name, and the copies are gone once the session ends.
+    cv_upload = re.search(r"upload the file at: (\S*Ada_Lovelace_CV\.pdf)", seen).group(1)
+    letter_upload = re.search(r"upload the file at: (\S*Ada_Lovelace_Cover_Letter\.pdf)", seen).group(1)
+    assert not os.path.exists(cv_upload) and not os.path.exists(letter_upload)
+    assert cv.exists() and letter_pdf.exists()            # the stored originals are untouched
+
+    # The review lists what the page still needs, whatever the agent's own summary said.
+    review = next(e for e in events if e.get("interactive"))
+    assert "4 required fields still empty" in review["action"]
+    assert review["notes"].startswith("Required fields still empty on the form:\n"
+                                      + "\n".join(f"- {label}" for label in EMPTY_REQUIRED))
     assert_no_chromium_left()

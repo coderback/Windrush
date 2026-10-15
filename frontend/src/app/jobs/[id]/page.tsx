@@ -261,6 +261,10 @@ export default function JobDetailPage() {
     form.append("cover_letter", letterDoc ? letterToText(letterDoc) : "");
     form.append("tailored_cv", cvDoc ? JSON.stringify(cvDoc) : "");
     form.append("cv_doc_id", cvChoice === "tailored" && effectiveCvDocId ? effectiveCvDocId : "");
+    // For forms that take the letter as a file: the PDF you saved, else rendered from this document.
+    form.append("cover_letter_doc", letterDoc ? JSON.stringify(letterDoc) : "");
+    form.append("letter_doc_id", letterDocId ?? "");
+    form.append("template_id", templateId ?? "");
     form.append("job_email", "");
     form.append("job_password", "");
     form.append("cv_profile", JSON.stringify({}));

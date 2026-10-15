@@ -11,7 +11,8 @@ from app.models import is_present_end_date
 
 UNSET_FACTS = ["Right to work", "Require visa sponsorship", "Has government ties", "Willing to relocate",
                "Can work in-person", "Can start immediately", "Has reliable transportation",
-               "Needs accommodations", "Are you currently employed", "Remote/Hybrid preference"]
+               "Needs accommodations", "Are you currently employed", "Remote/Hybrid preference",
+               "Salary expectations", "Currently holds another", "Previously held another"]
 
 
 def _answers(persona):
@@ -127,10 +128,44 @@ def test_saving_a_profile_without_a_work_setting_leaves_it_unanswered_everywhere
     assert export.status_code == 200 and "Remote preference" not in export.text
 
 
-def test_unset_salary_reads_negotiable_not_none():
-    answers = _answers({"preferences": {"min_salary": None, "expected_hourly_rate": None}})
-    assert answers["Salary expectations (Annual)"] == "Negotiable"
-    assert answers["Salary expectations (Hourly)"] == "Negotiable"
+def test_salary_is_stated_only_as_the_candidate_gave_it():
+    # Unset: left out (see UNSET_FACTS) rather than "None", or a "Negotiable" they never chose.
+    assert not any(q.startswith("Salary") for q in _answers({"preferences": {"min_salary": None}}))
+    answers = _answers({"screening": {"salary_canonical": "£32,000 - £36,000"},
+                        "preferences": {"min_salary": 30000, "expected_hourly_rate": 18.5}})
+    assert answers["Salary expectations (Annual)"] == "£32,000 - £36,000"   # the written answer wins
+    assert answers["Salary expectations (Hourly)"] == "18.5"
+    assert _answers({"preferences": {"min_salary": 30000}})["Salary expectations (Annual)"] == "30000"
+
+
+def test_nationality_answers_are_stated_with_their_details():
+    persona = {"core_info": {"nationality": "Nigerian", "holds_other_nationality": False,
+                             "held_other_nationality": True, "previous_nationalities": "Ghanaian",
+                             "other_nationalities": "stale text from before"}}
+    answers = _answers(persona)
+    assert answers["Currently holds another (dual) nationality or citizenship"] == "No"
+    assert answers["Previously held another nationality or citizenship"] == "Yes"
+    task = ba._build_task("https://x.example/job", persona, "", "", "", "")
+    assert "Nationality: Nigerian" in task and "Previously held nationalities / citizenships: Ghanaian" in task
+    assert "stale text" not in task                     # details only follow a "Yes"
+
+
+@pytest.mark.parametrize("core, kind, name", [
+    ({"first_name": "Ada", "last_name": "Lovelace"}, "CV", "Ada_Lovelace_CV.pdf"),
+    ({"first_name": "Zoë", "last_name": "Ó'Brien-Smith"}, "Cover Letter", "Zoe_O_Brien_Smith_Cover_Letter.pdf"),
+    ({}, "CV", "CV.pdf"),
+])
+def test_uploads_are_named_after_the_candidate(core, kind, name):
+    assert ba._upload_name({"core_info": core}, kind) == name
+
+
+def test_the_agent_pastes_the_letter_and_is_offered_its_pdf():
+    task = ba._build_task("https://x.example/job", {}, "Dear team, ...", "", "", "/tmp/x/CV.pdf",
+                          "/tmp/x/Ada_Cover_Letter.pdf")
+    assert "upload the file at: /tmp/x/Ada_Cover_Letter.pdf" in task
+    assert "paste_cover_letter" in task and "Never type the letter yourself" in task
+    no_letter = ba._build_task("https://x.example/job", {}, "", "", "", "")
+    assert "paste_cover_letter" not in no_letter and "Cover letter:" not in no_letter
 
 
 def test_saving_a_profile_without_eligibility_answers_stores_them_as_unanswered(client, user):
@@ -369,3 +404,14 @@ def test_apply_stream_passes_the_notes_to_the_client(client, monkeypatch):
     review = next(e for e in events if e["type"] == "browser_blocked")
     assert review["notes"] == NOTES and review["interactive"] is True
     assert all("notes" not in e for e in events if e is not review)
+
+
+def test_required_fields_the_page_shows_empty_head_the_notes(monkeypatch):
+    async def empty_on_page(session):
+        return ["Nationality", "How did you hear about this role?"]
+    monkeypatch.setattr(ba, "_empty_required_fields", empty_on_page)
+
+    review = next(e for e in _fill_events(monkeypatch, NOTES) if e.get("interactive"))
+    assert review["action"].startswith("Form filled, but 2 required fields still empty")
+    assert review["notes"] == ("Required fields still empty on the form:\n- Nationality\n"
+                               "- How did you hear about this role?\n\n" + NOTES)

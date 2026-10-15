@@ -80,6 +80,11 @@ interface Persona {
     require_sponsorship: YesNo;
     security_clearance: string;
     has_government_ties: YesNo;
+    nationality: string;
+    holds_other_nationality: YesNo;
+    other_nationalities: string;
+    held_other_nationality: YesNo;
+    previous_nationalities: string;
     job_email: string;
     job_password: string;
   };
@@ -648,6 +653,25 @@ export default function ProfilePage() {
                   <label className="text-xs text-zinc-500 uppercase">Visa Type</label>
                   <input placeholder="H1-B, Skilled Worker, etc." className="w-full bg-zinc-950 border border-zinc-800 rounded p-2 text-sm focus:border-teal-500 outline-none" value={persona.core_info.visa_type} onChange={(e) => handleChange("core_info", "visa_type", e.target.value)} />
                 </div>
+                <div className="space-y-2">
+                  <label className="text-xs text-zinc-500 uppercase">Nationality</label>
+                  <input placeholder="e.g. Nigerian" className="w-full bg-zinc-950 border border-zinc-800 rounded p-2 text-sm focus:border-teal-500 outline-none" value={persona.core_info.nationality ?? ""} onChange={(e) => handleChange("core_info", "nationality", e.target.value)} />
+                </div>
+                <div />
+                <YesNoField label="Currently hold another (dual) nationality" value={persona.core_info.holds_other_nationality} onChange={(v) => handleChange("core_info", "holds_other_nationality", v)} />
+                {persona.core_info.holds_other_nationality === true ? (
+                  <div className="space-y-2">
+                    <label className="text-xs text-zinc-500 uppercase">Which ones</label>
+                    <input className="w-full bg-zinc-950 border border-zinc-800 rounded p-2 text-sm focus:border-teal-500 outline-none" value={persona.core_info.other_nationalities ?? ""} onChange={(e) => handleChange("core_info", "other_nationalities", e.target.value)} />
+                  </div>
+                ) : <div />}
+                <YesNoField label="Previously held another nationality" value={persona.core_info.held_other_nationality} onChange={(v) => handleChange("core_info", "held_other_nationality", v)} />
+                {persona.core_info.held_other_nationality === true ? (
+                  <div className="space-y-2">
+                    <label className="text-xs text-zinc-500 uppercase">Which ones</label>
+                    <input className="w-full bg-zinc-950 border border-zinc-800 rounded p-2 text-sm focus:border-teal-500 outline-none" value={persona.core_info.previous_nationalities ?? ""} onChange={(e) => handleChange("core_info", "previous_nationalities", e.target.value)} />
+                  </div>
+                ) : <div />}
               </div>
             </div>
           )}

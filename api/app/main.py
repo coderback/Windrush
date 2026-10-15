@@ -27,6 +27,8 @@ from . import seniority
 from .models import (Persona, WorkExperience, Education, Project, Certification, SkillCategory,
                      is_present_end_date)
 
+logger = logging.getLogger("windrush.main")
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -64,6 +66,34 @@ _browser_frames: dict[str, asyncio.Queue] = {}   # session_id → CDP screencast
 def _original_cv_path(user_id: str) -> pathlib.Path:
     """The user's most recently uploaded CV — one file per user, overwritten on re-upload."""
     return pathlib.Path(os.environ.get("APP_DATA_PATH", "/tmp")) / "cvs" / f"{user_id}.pdf"
+
+
+def _stored_pdf(doc_id: str) -> str:
+    """Path of a stored PDF document, or "" for an id that isn't one (ids are 32 hex characters)."""
+    path = pdf_generator.get_pdf_path(doc_id) if re.fullmatch(r"[a-f0-9]{32}", doc_id or "") else ""
+    return path if path and os.path.exists(path) else ""
+
+
+async def _cover_letter_pdf(text: str, doc_json: str, doc_id: str, template_id: str, metadata: dict) -> str:
+    """
+    A PDF of the cover letter, for forms that take it as a file: the one the user saved, else the
+    letter document rendered now, else its plain text. "" when there's no letter or it can't be
+    rendered; the agent can still paste the text into a box.
+    """
+    if saved := _stored_pdf(doc_id):
+        return saved
+    try:
+        doc = json.loads(doc_json) if doc_json else None
+        if isinstance(doc, dict) and doc.get("paragraphs"):
+            new_id = await doc_render.render_pdf("cover_letter", doc, template_id or None)
+        elif text.strip():
+            new_id = await asyncio.to_thread(pdf_generator.generate_pdf, "cover_letter", text, metadata)
+        else:
+            return ""
+        return _stored_pdf(new_id)
+    except Exception as exc:
+        logger.warning("cover letter PDF for /apply failed: %s", exc)
+        return ""
 
 
 # ── Auth Endpoints ────────────────────────────────────────────────────────────
@@ -369,6 +399,9 @@ async def apply(
     job_password: str = Form(default=""),
     tailored_cv: str = Form(default=""),
     cv_doc_id: str = Form(default=""),
+    cover_letter_doc: str = Form(default=""),
+    letter_doc_id: str = Form(default=""),
+    template_id: str = Form(default=""),
     job_title: str = Form(default=""),
     company: str = Form(default=""),
     location: str = Form(default=""),
@@ -407,11 +440,9 @@ async def apply(
 
     # Tailored CV PDF (if the user chose it) takes precedence over their uploaded original.
     original_cv = _original_cv_path(current_user.id)
-    tailored_path = pdf_generator.get_pdf_path(cv_doc_id) if re.fullmatch(r"[a-f0-9]{32}", cv_doc_id) else ""
-    if tailored_path and os.path.exists(tailored_path):
-        cv_path = tailored_path
-    else:
-        cv_path = str(original_cv) if original_cv.exists() else ""
+    cv_path = _stored_pdf(cv_doc_id) or (str(original_cv) if original_cv.exists() else "")
+    letter_path = await _cover_letter_pdf(cover_letter, cover_letter_doc, letter_doc_id, template_id,
+                                          {"job_title": job_title, "company": company})
     session_id = str(uuid.uuid4())
 
     job_dict = {
@@ -444,6 +475,7 @@ async def apply(
             async with aclosing(run_apply(
                 current_user.id, job_id, job_url, cover_letter, risks, session_id, q, fq,
                 job_email=effective_email, job_password=effective_password, cv_path=cv_path,
+                cover_letter_path=letter_path,
             )) as chunks:
                 async for chunk in chunks:
                     try:

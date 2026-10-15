@@ -54,6 +54,7 @@ def persona_to_markdown(persona: dict) -> str:
         ("GitHub", core.get("github", "")),
         ("Portfolio", core.get("portfolio", "") or core.get("website", "")),
         ("Visa status", core.get("visa_status", "")),
+        ("Nationality", core.get("nationality", "")),
     ]
     contact_rows = [(k, v) for k, v in contact_rows if str(v).strip()]
     if contact_rows:

@@ -1186,6 +1186,7 @@ async def run_apply(
     job_email: str = "",
     job_password: str = "",
     cv_path: str = "",
+    cover_letter_path: str = "",
 ) -> AsyncGenerator[str, None]:
     """Apply phase: browser automation."""
     persona = tracker.get_user_persona(user_id)
@@ -1200,6 +1201,7 @@ async def run_apply(
         async with aclosing(apply_with_browser(
             job_url, persona, cover_letter, instruction_queue, frame_queue,
             job_email=job_email, job_password=job_password, cv_path=cv_path,
+            cover_letter_path=cover_letter_path,
         )) as steps:
             async for step in steps:
                 event_type = "browser_blocked" if step.get("blocked") else "browser_action"

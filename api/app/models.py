@@ -105,6 +105,12 @@ class CoreInfo(BaseModel):
     require_sponsorship: Optional[bool] = None
     security_clearance: str = ""
     has_government_ties: Optional[bool] = None
+    # UK application forms often ask for nationality and for any other citizenship, current or past.
+    nationality: str = ""
+    holds_other_nationality: Optional[bool] = None
+    other_nationalities: str = ""
+    held_other_nationality: Optional[bool] = None
+    previous_nationalities: str = ""
     job_email: str = ""
     job_password: str = ""
 
