@@ -26,3 +26,6 @@ frontend/tsconfig.tsbuildinfo
 /import_summer_internships.py
 /.claude/settings.local.json
 /test_workable.py
+
+# Model evaluation output (api/evals)
+/api/evals/last_run.json

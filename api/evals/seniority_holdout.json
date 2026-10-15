@@ -1,0 +1,3663 @@
+[
+ {
+  "title": "Graduate Software Engineer",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "graduate role"
+ },
+ {
+  "title": "Graduate Software Engineer - September 2027 Intake",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "graduate intake"
+ },
+ {
+  "title": "Software Engineer, New Grad (2027)",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "new grad"
+ },
+ {
+  "title": "software engineer - new grad",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "new grad, lowercase"
+ },
+ {
+  "title": "GRADUATE SOFTWARE ENGINEER",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "graduate, uppercase"
+ },
+ {
+  "title": "Graduate Data Analyst",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "graduate"
+ },
+ {
+  "title": "Graduate Civil Engineer",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "graduate"
+ },
+ {
+  "title": "Graduate Mechanical Engineer – Rail",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "graduate"
+ },
+ {
+  "title": "Graduate Electrical Engineer",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "graduate"
+ },
+ {
+  "title": "Graduate Marketing Executive",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "graduate; 'Executive' is not a seniority marker here"
+ },
+ {
+  "title": "Graduate Sales Executive – £27k + Commission",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "graduate with salary text"
+ },
+ {
+  "title": "Graduate Consultant",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "graduate consultant"
+ },
+ {
+  "title": "Graduate Account Manager",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "graduate; 'Manager' is not people management"
+ },
+ {
+  "title": "Graduate Quantity Surveyor",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "graduate"
+ },
+ {
+  "title": "Graduate Trainee – Supply Chain",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "graduate trainee"
+ },
+ {
+  "title": "Graduate Scheme – Finance (ACA)",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "graduate scheme"
+ },
+ {
+  "title": "Technology Graduate Programme | 2027 | London",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "graduate programme with pipes"
+ },
+ {
+  "title": "Graduate Developer - £30,000 + Training",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "graduate with salary"
+ },
+ {
+  "title": "Graduate/Junior Data Analyst",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "both tokens are junior"
+ },
+ {
+  "title": "🎓 Graduate Software Engineer | London | £32k",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "graduate with emoji, pipes, salary"
+ },
+ {
+  "title": "Graduate Engineer 🎓 (Sept 2027 start)",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "graduate with emoji"
+ },
+ {
+  "title": "[Graduate] Software Developer",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "graduate in brackets"
+ },
+ {
+  "title": "Graduate Developer – Work Alongside Senior Engineers! – £28k",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "graduate role; 'Senior' refers to colleagues"
+ },
+ {
+  "title": "Graduate Analyst – Office of the Chief Data Officer",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "graduate; 'Chief' is the department"
+ },
+ {
+  "title": "University Graduate - Software Engineer 2027",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "university graduate"
+ },
+ {
+  "title": "Campus Hire – Software Engineer (University Graduate)",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "campus hire"
+ },
+ {
+  "title": "Software Engineer - Class of 2027",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "class-of new grad"
+ },
+ {
+  "title": "Software Engineer – Early Careers",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "early careers"
+ },
+ {
+  "title": "Emerging Talent Programme – Data Analyst",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "emerging talent programme"
+ },
+ {
+  "title": "Area Manager Graduate Programme",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "graduate programme despite 'Manager'"
+ },
+ {
+  "title": "Graduate Leadership Programme 2027",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "graduate leadership scheme"
+ },
+ {
+  "title": "Future Leaders Graduate Scheme",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "graduate scheme; 'Leaders' is aspirational"
+ },
+ {
+  "title": "Leadership Development Graduate Programme – Operations",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "graduate scheme; 'Leadership' is not 'Lead'"
+ },
+ {
+  "title": "HeadStart Graduate Programme 2027 – Engineering",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "graduate scheme; 'Head' is part of a programme name"
+ },
+ {
+  "title": "NHS Graduate Management Training Scheme",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "graduate training scheme"
+ },
+ {
+  "title": "Civil Service Fast Stream 2027",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "graduate fast stream"
+ },
+ {
+  "title": "Technology Analyst Programme 2027",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "bank graduate analyst programme"
+ },
+ {
+  "title": "Investment Banking Analyst – 2027 Graduate Programme",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "graduate analyst programme"
+ },
+ {
+  "title": "Audit Associate – ACA Graduate Scheme",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "graduate scheme associate"
+ },
+ {
+  "title": "Assistant Economist (Government Economic Service)",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "GES graduate entry role"
+ },
+ {
+  "title": "Junior Software Engineer",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "junior"
+ },
+ {
+  "title": "Jr. Software Developer",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "jr abbreviation"
+ },
+ {
+  "title": "Jnr Developer",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "jnr abbreviation"
+ },
+ {
+  "title": "Jr Data Engineer - Remote (UK)",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "jr abbreviation"
+ },
+ {
+  "title": "JUNIOR DATA ANALYST",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "junior uppercase"
+ },
+ {
+  "title": "Junior Front-End Developer – £26,000",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "junior with salary"
+ },
+ {
+  "title": "Junior Developer £24k–£28k | Leeds",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "junior with salary range"
+ },
+ {
+  "title": "Junior DevOps Engineer (Graduates Welcome)",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "junior"
+ },
+ {
+  "title": "Junior QA Tester",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "junior"
+ },
+ {
+  "title": "Junior Account Manager",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "junior"
+ },
+ {
+  "title": "Junior Product Owner",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "junior"
+ },
+ {
+  "title": "Junior UX Designer",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "junior"
+ },
+ {
+  "title": "Junior Copywriter",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "junior"
+ },
+ {
+  "title": "Junior Analyst – Credit Risk",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "junior"
+ },
+ {
+  "title": "👩‍💻 Junior Developer – Learn & Grow!",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "junior with emoji"
+ },
+ {
+  "title": "Desarrollador Junior",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "Spanish 'junior developer'"
+ },
+ {
+  "title": "Entry-Level Software Engineer",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "entry level"
+ },
+ {
+  "title": "Entry Level IT Support Technician",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "entry level"
+ },
+ {
+  "title": "Software Engineer (Entry Level)",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "entry level in brackets"
+ },
+ {
+  "title": "Entry-Level Data Analyst - No Experience Required",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "entry level, no experience"
+ },
+ {
+  "title": "Software Engineer (0-1 yrs)",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "0-1 years"
+ },
+ {
+  "title": "Software Engineer, 0–2 YOE",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "0-2 years of experience"
+ },
+ {
+  "title": "Associate Software Engineer",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "associate = entry rung for engineers"
+ },
+ {
+  "title": "Associate Engineer (Entry Level)",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "associate entry level"
+ },
+ {
+  "title": "Associate Software Developer – Graduate",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "associate graduate"
+ },
+ {
+  "title": "Associate Data Scientist",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "associate entry rung"
+ },
+ {
+  "title": "Associate Product Manager (APM) Program",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "APM programme is entry level"
+ },
+ {
+  "title": "Associate Consultant – Technology",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "associate consultant is the entry consulting grade"
+ },
+ {
+  "title": "Software Engineer I",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "level I of ladder"
+ },
+ {
+  "title": "SDE I (New Grad)",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "SDE I new grad"
+ },
+ {
+  "title": "Data Scientist I",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "level I"
+ },
+ {
+  "title": "Analyst I – Operations",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "level I analyst"
+ },
+ {
+  "title": "Software Engineering Intern",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "intern"
+ },
+ {
+  "title": "Summer Intern 2027 – Data Science",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "summer intern"
+ },
+ {
+  "title": "SWE Intern (Summer '27)",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "intern"
+ },
+ {
+  "title": "Intern, Machine Learning Research",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "intern"
+ },
+ {
+  "title": "Software Engineer Internship – 12 weeks",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "internship"
+ },
+ {
+  "title": "Undergraduate Software Engineer Internship",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "undergraduate internship"
+ },
+ {
+  "title": "INTERN – Data Science (Summer 2027) ☀️",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "intern uppercase with emoji"
+ },
+ {
+  "title": "(Intern) Data Analyst",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "intern in brackets"
+ },
+ {
+  "title": "Software-Engineering-Intern",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "intern hyphenated"
+ },
+ {
+  "title": "Intern – Office of the CTO",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "intern; CTO is the department"
+ },
+ {
+  "title": "Data Analytics Industrial Placement 2027/28",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "industrial placement"
+ },
+ {
+  "title": "Placement Student – Software Engineering (12 months)",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "placement student"
+ },
+ {
+  "title": "Year in Industry – Electronic Engineering",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "year in industry placement"
+ },
+ {
+  "title": "Sandwich Placement – Finance (13 months)",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "sandwich placement"
+ },
+ {
+  "title": "Undergraduate Placement – Marketing",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "undergraduate placement"
+ },
+ {
+  "title": "Spring Insight Week 2027 – Investment Banking",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "spring insight for students"
+ },
+ {
+  "title": "Insight Day – Technology (First Years)",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "insight day for first-year students"
+ },
+ {
+  "title": "Summer Analyst – Global Markets 2027",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "bank summer analyst = intern"
+ },
+ {
+  "title": "Off-Cycle Internship – M&A (January 2027)",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "off-cycle internship"
+ },
+ {
+  "title": "Vacation Scheme 2027 – Commercial Law",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "law vacation scheme = internship"
+ },
+ {
+  "title": "Werkstudent Softwareentwicklung (m/w/d)",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "German working student"
+ },
+ {
+  "title": "Praktikum Data Science (m/w/d)",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "German internship"
+ },
+ {
+  "title": "Stage – Développeur Full Stack (H/F)",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "French 'stage' = internship"
+ },
+ {
+  "title": "Working Student – Data Engineering (20h/week)",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "working student"
+ },
+ {
+  "title": "Co-op Student, Software Engineering (Fall 2027)",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "co-op student"
+ },
+ {
+  "title": "Software Developer Apprentice",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "apprentice"
+ },
+ {
+  "title": "Level 4 Software Developer Apprenticeship",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "apprenticeship; level is qualification level"
+ },
+ {
+  "title": "Degree Apprenticeship – Cyber Security (Level 6)",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "degree apprenticeship"
+ },
+ {
+  "title": "Higher Apprenticeship – Accountancy",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "apprenticeship"
+ },
+ {
+  "title": "Apprentice Electrician",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "apprentice"
+ },
+ {
+  "title": "Engineering Technician Apprentice",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "apprentice"
+ },
+ {
+  "title": "Apprentice Developer – Supported by Lead Developers",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "apprentice; 'Lead' refers to colleagues"
+ },
+ {
+  "title": "Alternance – Développeur Web (H/F)",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "French 'alternance' = apprenticeship"
+ },
+ {
+  "title": "Police Constable Degree Apprenticeship (PCDA)",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "degree apprenticeship"
+ },
+ {
+  "title": "Trainee Software Developer",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "trainee"
+ },
+ {
+  "title": "Trainee Accountant (ACCA)",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "trainee"
+ },
+ {
+  "title": "Trainee Recruitment Consultant",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "trainee"
+ },
+ {
+  "title": "Trainee Solicitor – 2029 Training Contract",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "trainee solicitor"
+ },
+ {
+  "title": "Trainee Patent Attorney – Electronics",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "trainee"
+ },
+ {
+  "title": "Trainee Teacher (PGCE Secondary Maths)",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "trainee teacher"
+ },
+ {
+  "title": "Trainee Surveyor",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "trainee"
+ },
+ {
+  "title": "Trainee Manager",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "manager-in-training is entry level"
+ },
+ {
+  "title": "Engineer in Training (EIT) – Structural",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "EIT is post-grad entry"
+ },
+ {
+  "title": "Administrative Officer (AO)",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "civil service entry grade"
+ },
+ {
+  "title": "Administrative Assistant – AA Grade",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "civil service entry grade"
+ },
+ {
+  "title": "Band 5 Staff Nurse",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "NHS Band 5 is the newly-qualified nurse band"
+ },
+ {
+  "title": "Newly Qualified Nurse – Band 5",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "newly qualified"
+ },
+ {
+  "title": "Band 5 Rotational Physiotherapist",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "Band 5 rotational = newly qualified"
+ },
+ {
+  "title": "Foundation Year 1 Doctor (FY1)",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "first post-graduation doctor year"
+ },
+ {
+  "title": "Newly Qualified Solicitor (NQ) – Corporate",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "newly qualified"
+ },
+ {
+  "title": "Pupil Barrister – Pupillage 2028",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "pupillage is barrister training"
+ },
+ {
+  "title": "Early Career Teacher (ECT) – Science",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "ECT = first two years of teaching"
+ },
+ {
+  "title": "Commis Chef",
+  "description": "",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "commis is the entry kitchen rank"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "no level marker"
+ },
+ {
+  "title": "Software Developer",
+  "description": "",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "no level marker"
+ },
+ {
+  "title": "  software   engineer  ",
+  "description": "",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "no level marker, messy whitespace"
+ },
+ {
+  "title": "Backend Engineer (Go)",
+  "description": "",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "no level marker"
+ },
+ {
+  "title": "Software Engineer – Backend (Python)",
+  "description": "",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "no level marker"
+ },
+ {
+  "title": "Full-Stack Engineer (React/Node)",
+  "description": "",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "no level marker"
+ },
+ {
+  "title": "Platform Engineer",
+  "description": "",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "no level marker"
+ },
+ {
+  "title": "Frontend Engineer, Growth",
+  "description": "",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "no level marker"
+ },
+ {
+  "title": "Mobile Developer (iOS/Android)",
+  "description": "",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "no level marker"
+ },
+ {
+  "title": "Embedded Software Engineer",
+  "description": "",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "no level marker"
+ },
+ {
+  "title": "Machine Learning Engineer",
+  "description": "",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "no level marker"
+ },
+ {
+  "title": "Data Engineer",
+  "description": "",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "no level marker"
+ },
+ {
+  "title": "Data Analyst",
+  "description": "",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "no level marker"
+ },
+ {
+  "title": "Data Analyst (SQL, Tableau)",
+  "description": "",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "no level marker"
+ },
+ {
+  "title": "Business Intelligence Developer",
+  "description": "",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "no level marker"
+ },
+ {
+  "title": "Security Engineer",
+  "description": "",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "no level marker"
+ },
+ {
+  "title": "Site Reliability Engineer",
+  "description": "",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "no level marker"
+ },
+ {
+  "title": "QA Engineer",
+  "description": "",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "no level marker"
+ },
+ {
+  "title": "Software Engineer, Infrastructure — Remote (UK)",
+  "description": "",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "no level marker"
+ },
+ {
+  "title": "Software Engineer — Payments | Fintech 💳",
+  "description": "",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "no level marker, emoji"
+ },
+ {
+  "title": "⚡️ Software Engineer ⚡️ | Fintech | London",
+  "description": "",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "no level marker, emoji and pipes"
+ },
+ {
+  "title": "Software Engineer [Remote] | £45–55k",
+  "description": "",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "no level marker, salary"
+ },
+ {
+  "title": "DevOps Engineer | Hybrid | £60k",
+  "description": "",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "no level marker, salary"
+ },
+ {
+  "title": "Cloud Engineer (AWS) – £55,000–£65,000",
+  "description": "",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "no level marker, salary"
+ },
+ {
+  "title": "Backend Engineer | Up to £70k | Hybrid",
+  "description": "",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "'Up to' is salary, not experience"
+ },
+ {
+  "title": "Software Engineer (Python/Django) – Remote – Outside IR35",
+  "description": "",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "contract, no level marker"
+ },
+ {
+  "title": "Software Engineer (Contract, 6 months)",
+  "description": "",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "6 months is contract length"
+ },
+ {
+  "title": "Software Engineer – 12 Month FTC",
+  "description": "",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "12 months is fixed-term contract length"
+ },
+ {
+  "title": "Data Analyst | Hybrid (2 days/week in office)",
+  "description": "",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "2 days is office pattern"
+ },
+ {
+  "title": "Software Engineer (m/w/d)",
+  "description": "",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "German gender tag, no level"
+ },
+ {
+  "title": "Software-Entwickler (m/w/d)",
+  "description": "",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "German, no level"
+ },
+ {
+  "title": "Développeur Full Stack (H/F) – CDI",
+  "description": "",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "French permanent contract, no level"
+ },
+ {
+  "title": "Ingeniero de Software",
+  "description": "",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "Spanish, no level"
+ },
+ {
+  "title": "Full Stack Developer - Mid Level",
+  "description": "",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "explicit mid level"
+ },
+ {
+  "title": "Mid-Level Software Engineer",
+  "description": "",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "explicit mid level"
+ },
+ {
+  "title": "Intermediate Software Developer",
+  "description": "",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "intermediate = mid"
+ },
+ {
+  "title": "Software Engineer (3+ years)",
+  "description": "",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "3+ years"
+ },
+ {
+  "title": "Software Engineer | 3-5 yrs exp",
+  "description": "",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "3-5 years"
+ },
+ {
+  "title": "Software Engineer II",
+  "description": "",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "level II"
+ },
+ {
+  "title": "Software Development Engineer II",
+  "description": "",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "level II"
+ },
+ {
+  "title": "Data Scientist II",
+  "description": "",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "level II"
+ },
+ {
+  "title": "Software Engineer (Level 2)",
+  "description": "",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "level 2"
+ },
+ {
+  "title": "Analyst II – Business Intelligence",
+  "description": "",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "level II"
+ },
+ {
+  "title": "2nd Line Support Engineer",
+  "description": "",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "support tier 2, not seniority"
+ },
+ {
+  "title": "Level 2 Support Analyst",
+  "description": "",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "support tier 2"
+ },
+ {
+  "title": "Product Manager",
+  "description": "",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "IC product manager, not people manager"
+ },
+ {
+  "title": "Product Owner",
+  "description": "",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "no level marker"
+ },
+ {
+  "title": "Scrum Master",
+  "description": "",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "no level marker"
+ },
+ {
+  "title": "Project Manager – Infrastructure",
+  "description": "",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "project manager is not people management"
+ },
+ {
+  "title": "Account Manager",
+  "description": "",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "account manager is IC"
+ },
+ {
+  "title": "Customer Success Manager",
+  "description": "",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "CSM is IC"
+ },
+ {
+  "title": "Account Executive – SaaS",
+  "description": "",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "no level marker"
+ },
+ {
+  "title": "Marketing Executive",
+  "description": "",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "no level marker"
+ },
+ {
+  "title": "International Sales Executive",
+  "description": "",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "'International' is not 'intern'"
+ },
+ {
+  "title": "Consultant – Technology Strategy",
+  "description": "",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "consultant grade is mid"
+ },
+ {
+  "title": "Investment Banking Associate",
+  "description": "",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "bank associate is post-analyst"
+ },
+ {
+  "title": "Associate – M&A (Investment Banking)",
+  "description": "",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "bank associate is post-analyst"
+ },
+ {
+  "title": "Associate Solicitor – Employment (3 PQE)",
+  "description": "",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "3 PQE"
+ },
+ {
+  "title": "Solicitor (2–4 PQE) – Real Estate",
+  "description": "",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "2-4 PQE"
+ },
+ {
+  "title": "Higher Executive Officer (HEO) – Policy",
+  "description": "",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "HEO is a middle civil-service grade"
+ },
+ {
+  "title": "Policy Advisor – HEO",
+  "description": "",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "HEO"
+ },
+ {
+  "title": "Band 6 Physiotherapist – MSK",
+  "description": "",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "Band 6 is mid"
+ },
+ {
+  "title": "Band 6 Occupational Therapist",
+  "description": "",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "Band 6 is mid"
+ },
+ {
+  "title": "Chef de Partie",
+  "description": "",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "mid kitchen rank"
+ },
+ {
+  "title": "Teacher of English",
+  "description": "",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "qualified teacher, no level"
+ },
+ {
+  "title": "Pharmacist",
+  "description": "",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "no level marker"
+ },
+ {
+  "title": "Electrician",
+  "description": "",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "no level marker"
+ },
+ {
+  "title": "Mechanical Design Engineer",
+  "description": "",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "no level marker"
+ },
+ {
+  "title": "Quantity Surveyor",
+  "description": "",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "no level marker"
+ },
+ {
+  "title": "UX Designer",
+  "description": "",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "no level marker"
+ },
+ {
+  "title": "Copywriter",
+  "description": "",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "no level marker"
+ },
+ {
+  "title": "Internal Auditor",
+  "description": "",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "'Internal' is not 'intern'"
+ },
+ {
+  "title": "Internal Communications Officer",
+  "description": "",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "'Internal' is not 'intern'"
+ },
+ {
+  "title": "Internal Tools Engineer",
+  "description": "",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "'Internal' is not 'intern'"
+ },
+ {
+  "title": "Technical Trainer",
+  "description": "",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "trainer, not trainee"
+ },
+ {
+  "title": "Head Office Administrator",
+  "description": "",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "'Head Office' is a location"
+ },
+ {
+  "title": "Headless CMS Developer",
+  "description": "",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "'Headless' is a technology"
+ },
+ {
+  "title": "Print Head Firmware Engineer",
+  "description": "",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "'Print Head' is hardware"
+ },
+ {
+  "title": "Lead Generation Specialist",
+  "description": "",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "'Lead generation' is sales leads"
+ },
+ {
+  "title": "Executive Assistant to the Chief Executive",
+  "description": "",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "assistant role; 'Executive' refers to the boss"
+ },
+ {
+  "title": "PA to the Principal",
+  "description": "",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "assistant role; 'Principal' refers to the boss"
+ },
+ {
+  "title": "Assistant to the Managing Director",
+  "description": "",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "assistant role; 'Director' refers to the boss"
+ },
+ {
+  "title": "Senior Leadership Team Administrator",
+  "description": "",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "administrator supporting the SLT"
+ },
+ {
+  "title": "Graduate School Administrator",
+  "description": "",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "administers a university graduate school"
+ },
+ {
+  "title": "Student Placement Coordinator",
+  "description": "",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "coordinates placements, is not one"
+ },
+ {
+  "title": "Apprenticeship Assessor",
+  "description": "",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "assesses apprentices, is not one"
+ },
+ {
+  "title": "Apprenticeship Coordinator",
+  "description": "",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "coordinates apprentices, is not one"
+ },
+ {
+  "title": "Early Careers Recruiter",
+  "description": "",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "recruits graduates, is not one"
+ },
+ {
+  "title": "Senior Software Engineer",
+  "description": "",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "senior"
+ },
+ {
+  "title": "Sr. Backend Engineer",
+  "description": "",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "sr abbreviation"
+ },
+ {
+  "title": "Snr Data Engineer",
+  "description": "",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "snr abbreviation"
+ },
+ {
+  "title": "SENIOR SOFTWARE ENGINEER",
+  "description": "",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "senior uppercase"
+ },
+ {
+  "title": "senior software engineer",
+  "description": "",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "senior lowercase"
+ },
+ {
+  "title": "Software Engineer (Senior)",
+  "description": "",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "senior in brackets"
+ },
+ {
+  "title": "Software Engineer [Senior] – Platform",
+  "description": "",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "senior in square brackets"
+ },
+ {
+  "title": "Senior Software Engineer II",
+  "description": "",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "senior ladder"
+ },
+ {
+  "title": "Senior/Lead Engineer",
+  "description": "",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "senior and lead"
+ },
+ {
+  "title": "Senior Data Engineer | £90,000–£100,000 | Hybrid (2 days)",
+  "description": "",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "senior with salary"
+ },
+ {
+  "title": "Senior Backend Engineer (Python) – £85,000 – £95,000 + equity",
+  "description": "",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "senior with salary"
+ },
+ {
+  "title": "Senior Full-Stack Engineer (React/Node) | Remote",
+  "description": "",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "senior"
+ },
+ {
+  "title": "Senior DevOps Engineer – £85k",
+  "description": "",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "senior"
+ },
+ {
+  "title": "Senior Data Analyst",
+  "description": "",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "senior"
+ },
+ {
+  "title": "Senior Product Manager",
+  "description": "",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "senior"
+ },
+ {
+  "title": "🔥 Senior React Dev 🔥",
+  "description": "",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "senior with emoji"
+ },
+ {
+  "title": "Ingénieur Logiciel Senior (H/F)",
+  "description": "",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "French senior"
+ },
+ {
+  "title": "Senior Software-Entwickler (m/w/d)",
+  "description": "",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "German senior"
+ },
+ {
+  "title": "Ingeniero de Software Sr.",
+  "description": "",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "Spanish sr"
+ },
+ {
+  "title": "Software Engineer (7+ yrs exp)",
+  "description": "",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "7+ years"
+ },
+ {
+  "title": "Software Engineer - 5+ Years Experience",
+  "description": "",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "5+ years"
+ },
+ {
+  "title": "Software Engineer – Platform (L5 / Senior)",
+  "description": "",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "L5 senior"
+ },
+ {
+  "title": "Senior Software Engineer – Intern & Graduate Hiring Tools",
+  "description": "",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "senior; intern/graduate is the product domain"
+ },
+ {
+  "title": "Lead Software Engineer",
+  "description": "",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "lead"
+ },
+ {
+  "title": "Lead Developer – Python – £90k",
+  "description": "",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "lead"
+ },
+ {
+  "title": "⭐ Lead Frontend Developer ⭐",
+  "description": "",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "lead with emoji"
+ },
+ {
+  "title": "Lead QA Engineer",
+  "description": "",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "lead"
+ },
+ {
+  "title": "Lead Data Analyst",
+  "description": "",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "lead"
+ },
+ {
+  "title": "Lead Consultant",
+  "description": "",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "lead"
+ },
+ {
+  "title": "Tech Lead – Payments",
+  "description": "",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "tech lead"
+ },
+ {
+  "title": "Team Lead (Backend)",
+  "description": "",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "team lead"
+ },
+ {
+  "title": "Engineering Lead, Mobile",
+  "description": "",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "engineering lead"
+ },
+ {
+  "title": "Principal Software Engineer",
+  "description": "",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "principal"
+ },
+ {
+  "title": "Principal Data Scientist",
+  "description": "",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "principal"
+ },
+ {
+  "title": "Principal Product Manager",
+  "description": "",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "principal"
+ },
+ {
+  "title": "Principal Engineer – Structures",
+  "description": "",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "principal"
+ },
+ {
+  "title": "Principal Consultant",
+  "description": "",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "principal"
+ },
+ {
+  "title": "Principal Architect",
+  "description": "",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "principal"
+ },
+ {
+  "title": "Staff Software Engineer",
+  "description": "",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "staff is above senior in tech ladders"
+ },
+ {
+  "title": "Staff Machine Learning Engineer",
+  "description": "",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "staff"
+ },
+ {
+  "title": "Senior Staff Engineer",
+  "description": "",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "senior staff"
+ },
+ {
+  "title": "Distinguished Engineer",
+  "description": "",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "distinguished is top IC level"
+ },
+ {
+  "title": "Head of Engineering",
+  "description": "",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "head of"
+ },
+ {
+  "title": "Head of Data & Analytics",
+  "description": "",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "head of"
+ },
+ {
+  "title": "Head of Product Design",
+  "description": "",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "head of"
+ },
+ {
+  "title": "Head of People",
+  "description": "",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "head of"
+ },
+ {
+  "title": "Head of Early Careers",
+  "description": "",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "head of; early careers is the function"
+ },
+ {
+  "title": "Head of Graduate Recruitment",
+  "description": "",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "head of; graduate is the function"
+ },
+ {
+  "title": "Group Head of Technology",
+  "description": "",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "head of"
+ },
+ {
+  "title": "Director of Engineering",
+  "description": "",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "director"
+ },
+ {
+  "title": "Director of Product",
+  "description": "",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "director"
+ },
+ {
+  "title": "Director, Data Engineering",
+  "description": "",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "director"
+ },
+ {
+  "title": "Engineering Director",
+  "description": "",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "director"
+ },
+ {
+  "title": "VP, Engineering",
+  "description": "",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "vice president"
+ },
+ {
+  "title": "Chief Technology Officer (CTO)",
+  "description": "",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "C-level"
+ },
+ {
+  "title": "Chief of Staff",
+  "description": "",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "executive role"
+ },
+ {
+  "title": "Engineering Manager – Platform",
+  "description": "",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "people manager"
+ },
+ {
+  "title": "Engineering Manager (Hands-on)",
+  "description": "",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "people manager"
+ },
+ {
+  "title": "Manager, Software Engineering",
+  "description": "",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "people manager"
+ },
+ {
+  "title": "Software Development Manager",
+  "description": "",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "people manager"
+ },
+ {
+  "title": "Senior Manager, Data Science",
+  "description": "",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "senior manager"
+ },
+ {
+  "title": "Sr Mgr, Engineering",
+  "description": "",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "senior manager abbreviated"
+ },
+ {
+  "title": "Senior Manager – Internal Audit",
+  "description": "",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "senior manager; 'Internal' not 'intern'"
+ },
+ {
+  "title": "Group Product Manager",
+  "description": "",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "manages product managers"
+ },
+ {
+  "title": "Audit Manager",
+  "description": "",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "manages audit teams"
+ },
+ {
+  "title": "Store Manager",
+  "description": "",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "manages store staff"
+ },
+ {
+  "title": "Senior Consultant – Cyber Security",
+  "description": "",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "senior"
+ },
+ {
+  "title": "Managing Consultant",
+  "description": "",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "managing grade"
+ },
+ {
+  "title": "Associate Director – Engineering",
+  "description": "",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "director grade"
+ },
+ {
+  "title": "Associate Partner – Financial Services",
+  "description": "",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "partner grade"
+ },
+ {
+  "title": "Associate Creative Director",
+  "description": "",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "director grade"
+ },
+ {
+  "title": "Partner – Corporate (Law)",
+  "description": "",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "partner"
+ },
+ {
+  "title": "Junior Partner – Strategy Practice",
+  "description": "",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "partner grade despite 'Junior'"
+ },
+ {
+  "title": "Vice President – Investment Banking",
+  "description": "",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "VP in banking is senior"
+ },
+ {
+  "title": "Executive Director – Equities",
+  "description": "",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "executive director"
+ },
+ {
+  "title": "Managing Director, Technology",
+  "description": "",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "managing director"
+ },
+ {
+  "title": "Senior Associate Solicitor (7+ PQE)",
+  "description": "",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "7+ PQE"
+ },
+ {
+  "title": "Legal Director – Litigation",
+  "description": "",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "director"
+ },
+ {
+  "title": "Consultant Cardiologist",
+  "description": "",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "NHS consultant doctor is the most senior grade"
+ },
+ {
+  "title": "Band 7 Ward Manager",
+  "description": "",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "Band 7 ward manager"
+ },
+ {
+  "title": "Band 8a Lead Pharmacist",
+  "description": "",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "Band 8a lead"
+ },
+ {
+  "title": "Lead Nurse – Critical Care",
+  "description": "",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "lead nurse"
+ },
+ {
+  "title": "Deputy Director (SCS1)",
+  "description": "",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "senior civil service"
+ },
+ {
+  "title": "Grade 6 – Head of Policy",
+  "description": "",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "grade 6 head of"
+ },
+ {
+  "title": "Headteacher",
+  "description": "",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "head of a school"
+ },
+ {
+  "title": "Assistant Headteacher",
+  "description": "",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "school senior leadership team"
+ },
+ {
+  "title": "Head of Science",
+  "description": "",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "head of department"
+ },
+ {
+  "title": "Head Chef",
+  "description": "",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "head chef"
+ },
+ {
+  "title": "Executive Chef",
+  "description": "",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "runs kitchens"
+ },
+ {
+  "title": "Associate Professor of Computer Science",
+  "description": "",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "established academic"
+ },
+ {
+  "title": "Senior Lecturer in Computing",
+  "description": "",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "senior lecturer"
+ },
+ {
+  "title": "Senior Civil Engineer (CEng)",
+  "description": "",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "senior chartered"
+ },
+ {
+  "title": "Analyst",
+  "description": "",
+  "label": "junior",
+  "ambiguous": true,
+  "why": "bank/consulting entry rank vs generic analyst"
+ },
+ {
+  "title": "Associate",
+  "description": "",
+  "label": "mid",
+  "ambiguous": true,
+  "why": "entry rung in some firms, post-analyst in banks"
+ },
+ {
+  "title": "Senior Associate",
+  "description": "",
+  "label": "mid",
+  "ambiguous": true,
+  "why": "2nd-3rd year at Big 4, 5+ PQE at law firms"
+ },
+ {
+  "title": "Senior Associate – Audit & Assurance",
+  "description": "",
+  "label": "mid",
+  "ambiguous": true,
+  "why": "Big 4 senior associate is ~2-4 years; 'Senior' keyword"
+ },
+ {
+  "title": "Executive Officer (EO)",
+  "description": "",
+  "label": "junior",
+  "ambiguous": true,
+  "why": "civil-service entry management grade; junior vs mid"
+ },
+ {
+  "title": "Senior Executive Officer (SEO)",
+  "description": "",
+  "label": "mid",
+  "ambiguous": true,
+  "why": "middle civil-service grade with 'Senior' in name"
+ },
+ {
+  "title": "Grade 7 Economist",
+  "description": "",
+  "label": "senior",
+  "ambiguous": true,
+  "why": "G7 is senior-ish but not unambiguous"
+ },
+ {
+  "title": "Software Engineer III",
+  "description": "",
+  "label": "senior",
+  "ambiguous": true,
+  "why": "III is senior at some firms, mid at others"
+ },
+ {
+  "title": "Junior/Mid Developer",
+  "description": "",
+  "label": "junior",
+  "ambiguous": true,
+  "why": "spans two bands"
+ },
+ {
+  "title": "Mid-Senior Software Engineer",
+  "description": "",
+  "label": "mid",
+  "ambiguous": true,
+  "why": "spans two bands"
+ },
+ {
+  "title": "Software Engineer (Junior–Mid)",
+  "description": "",
+  "label": "junior",
+  "ambiguous": true,
+  "why": "spans two bands"
+ },
+ {
+  "title": "Software Engineer - Junior to Senior",
+  "description": "",
+  "label": "mid",
+  "ambiguous": true,
+  "why": "spans all bands"
+ },
+ {
+  "title": "Software Engineer (All Levels)",
+  "description": "",
+  "label": "mid",
+  "ambiguous": true,
+  "why": "all levels"
+ },
+ {
+  "title": "Founding Engineer",
+  "description": "",
+  "label": "senior",
+  "ambiguous": true,
+  "why": "often senior but not stated"
+ },
+ {
+  "title": "Member of Technical Staff",
+  "description": "",
+  "label": "mid",
+  "ambiguous": true,
+  "why": "used for every level at some labs"
+ },
+ {
+  "title": "Software Architect",
+  "description": "",
+  "label": "senior",
+  "ambiguous": true,
+  "why": "usually senior, not stated"
+ },
+ {
+  "title": "Senior Graduate Engineer",
+  "description": "",
+  "label": "junior",
+  "ambiguous": true,
+  "why": "second/third-year graduate grade"
+ },
+ {
+  "title": "Junior Doctor",
+  "description": "",
+  "label": "junior",
+  "ambiguous": true,
+  "why": "UK 'junior doctor' spans FY1 to senior registrar"
+ },
+ {
+  "title": "Specialty Registrar (ST3) – Anaesthetics",
+  "description": "",
+  "label": "mid",
+  "ambiguous": true,
+  "why": "medical training grade"
+ },
+ {
+  "title": "Band 6 Senior Staff Nurse",
+  "description": "",
+  "label": "mid",
+  "ambiguous": true,
+  "why": "Band 6 is mid but title says Senior"
+ },
+ {
+  "title": "Staff Nurse",
+  "description": "",
+  "label": "junior",
+  "ambiguous": true,
+  "why": "usually Band 5; experience varies"
+ },
+ {
+  "title": "Staff Accountant",
+  "description": "",
+  "label": "mid",
+  "ambiguous": true,
+  "why": "US junior-to-mid title"
+ },
+ {
+  "title": "Senior Care Assistant",
+  "description": "",
+  "label": "mid",
+  "ambiguous": true,
+  "why": "promoted care role; 'Senior' relative"
+ },
+ {
+  "title": "Junior Sous Chef",
+  "description": "",
+  "label": "mid",
+  "ambiguous": true,
+  "why": "above chef de partie despite 'Junior'"
+ },
+ {
+  "title": "Audit Senior",
+  "description": "",
+  "label": "mid",
+  "ambiguous": true,
+  "why": "Big 4 audit senior is ~3 years"
+ },
+ {
+  "title": "Summer Associate – Corporate Law",
+  "description": "",
+  "label": "junior",
+  "ambiguous": true,
+  "why": "internship for law/MBA students with varying experience"
+ },
+ {
+  "title": "Associate, Equity Research",
+  "description": "",
+  "label": "junior",
+  "ambiguous": true,
+  "why": "research associate sits below analyst"
+ },
+ {
+  "title": "Assistant Vice President (AVP) – Risk",
+  "description": "",
+  "label": "mid",
+  "ambiguous": true,
+  "why": "AVP is mid in banking titles"
+ },
+ {
+  "title": "Postdoctoral Research Associate",
+  "description": "",
+  "label": "mid",
+  "ambiguous": true,
+  "why": "early-career researcher with PhD"
+ },
+ {
+  "title": "Senior Leader Master's Degree Apprenticeship (Level 7)",
+  "description": "",
+  "label": "senior",
+  "ambiguous": true,
+  "why": "apprenticeship aimed at senior leaders"
+ },
+ {
+  "title": "Assistant Project Manager",
+  "description": "",
+  "label": "junior",
+  "ambiguous": true,
+  "why": "junior vs mid"
+ },
+ {
+  "title": "Programme Manager",
+  "description": "",
+  "label": "senior",
+  "ambiguous": true,
+  "why": "often senior, not a people manager"
+ },
+ {
+  "title": "1st Line Support Analyst",
+  "description": "",
+  "label": "junior",
+  "ambiguous": true,
+  "why": "support tier 1 is entry-ish"
+ },
+ {
+  "title": "Art Director",
+  "description": "",
+  "label": "mid",
+  "ambiguous": true,
+  "why": "agency title spanning levels"
+ },
+ {
+  "title": "Assistant Manager",
+  "description": "",
+  "label": "mid",
+  "ambiguous": true,
+  "why": "first-line management"
+ },
+ {
+  "title": "Investment Banking Analyst",
+  "description": "",
+  "label": "junior",
+  "ambiguous": true,
+  "why": "analyst rank, but lateral hires are 1-3 years"
+ },
+ {
+  "title": "Business Analyst",
+  "description": "",
+  "label": "mid",
+  "ambiguous": true,
+  "why": "generic BA vs consulting entry rank"
+ },
+ {
+  "title": "Graduate Recruitment Manager",
+  "description": "",
+  "label": "senior",
+  "ambiguous": true,
+  "why": "manages graduate recruitment; may not manage people"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "We're looking for recent graduates (2025 or 2026) with a degree in Computer Science or a related subject. No commercial experience required — full training provided.",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "recent graduates, no experience"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "About the role\nThis is an entry-level position for someone starting their career in software.\n\nRequirements\n- 0-2 years of professional experience\n- Some familiarity with Python or JavaScript",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "entry-level, 0-2 years"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "Ideally you'll have up to 2 years' experience writing production code, but we're just as interested in your personal projects.",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "up to 2 years"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "Join our two-year graduate scheme! You'll rotate across four engineering teams, spending six months in each, before moving into a permanent role.",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "graduate scheme; 'two-year' is scheme length"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "Founded in 1998, Acme Payments has spent over 25 years building infrastructure for Europe's biggest banks. As part of our 2027 graduate intake you'll be paired with a mentor and complete our 12-week Academy before joining a product team.",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "graduate intake; 25 years is company history"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "Our engineering team has a combined 80+ years of experience in fintech, and we're hiring a junior engineer to learn from them. You'll pair daily with our senior engineers.",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "junior hire; 80+ years is team experience"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "No prior experience needed — if you've built something in your own time and you're curious about how things work, we'll teach you the rest.",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "no prior experience"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "This is a 12-month industrial placement for students in the penultimate year of an engineering or computing degree, starting July 2027.",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "industrial placement"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "Applicants must be on track to graduate in summer 2027 with (or expecting) a 2:1 or above in a STEM subject.",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "finishing degree in 2027"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "Salary: £28,000 – £32,000\nStart date: September 2027\nThis role is part of our Technology Graduate Programme.",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "graduate programme"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "6+ months of experience with SQL (internships and placements count).",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "6 months experience"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "Experience: 12–24 months in a software development role, or a relevant placement year.",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "12-24 months"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "What we're looking for:\n• A degree in a numerate subject (or graduating in 2027)\n• Some exposure to Java or C# through coursework, a placement or side projects\n• Enthusiasm to learn — we don't expect commercial experience",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "bullet list, graduating, no commercial experience"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "You'll be mentored by our Principal Engineer and supported by a dedicated graduate buddy. Open to 2026 and 2027 graduates.",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "graduates; 'Principal' is the mentor"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "Summer Internship 2027: a 10-week paid internship for undergraduates. You'll own a real project, present to our leadership team at the end, and could receive a graduate offer.",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "internship; leadership team is audience"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "We're looking for a placement year student (sandwich course) to join us for 12 months from summer 2027.",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "placement year"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "This is a Level 4 Software Developer apprenticeship. You'll spend four days a week with us and one day at college, working towards a nationally recognised qualification.",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "apprenticeship"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "Trainee position — full training is provided through our in-house academy. You'll earn while you learn and gain an industry certification within 6 months.",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "trainee"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "You won't need 5+ years of experience for this one — we care about potential. Recent graduates and bootcamp career-changers are very welcome.",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "negated 5+ years; graduates welcome"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "You don't need to be a senior engineer to apply. We welcome graduates and people with up to two years' experience.",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "negated senior; up to two years"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "Master's or PhD in a quantitative field. No industry experience required — this is our entry-level research engineering track.",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "entry-level, no industry experience"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "Previous internship experience is a plus. Open to final-year students and recent graduates.",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "final-year students and recent graduates"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "Seniority level\nEntry level\nEmployment type\nFull-time\nJob function\nEngineering and Information Technology",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "LinkedIn entry level"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "Seniority level\nInternship\nEmployment type\nInternship\nIndustries\nSoftware Development",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "LinkedIn internship"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "Job Requisition ID: R-0045821\nTime Type: Full time\nJob Family: Software Engineering\nCareer Level: P1 – Entry\nLocation: Manchester",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "Workday career level entry"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "Job details\nJob type: Full-time\nExperience:\n• Python: 1 year (preferred)\nEducation:\n• Bachelor's (required)\nWork Location: Hybrid remote in Leeds",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "Indeed: only 1 year preferred"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "🎓 Perfect for recent grads! 🚀 You'll ship code in your first week and get a dedicated mentor. 💻 No commercial experience needed.",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "emoji, recent grads"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "Expérience : 0 à 2 ans. Diplômé(e) d'une école d'ingénieur ou équivalent.",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "French 0-2 years"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "Must have:\n- 1-2 years of professional experience (a placement year counts)\n- Solid fundamentals in data structures\nNice to have:\n- Exposure to Kubernetes or Terraform",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "required 1-2 years"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "Required: a degree or equivalent practical experience.\nPreferred: up to 1 year of experience in a software role.",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "preferred up to 1 year"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "At least 18 months' experience in a development role (apprenticeships count).",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "18 months"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "At least one year of experience building web applications.",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "one year"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "This role is ideal for someone at the very start of their career — maybe you've just finished university, a bootcamp or an apprenticeship.",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "start of career"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "During your placement year you'll lead a small project of your own and present your work to our CTO and Head of Engineering at the end of the scheme.",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "placement; lead/CTO/Head are not about the candidate's level"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "Requirements:\n1. Graduating in 2027 with a degree in Computer Science, Maths or Physics\n2. Strong problem-solving skills\n3. Right to work in the UK",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "numbered list, graduating 2027"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "<p>We are hiring <strong>graduate</strong> engineers to join our 2027 cohort.</p><ul><li>No experience required</li><li>Full training provided</li></ul>",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "HTML markup, graduate"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "Experience level: Entry Level\nSalary: £30,000\nLocation: Bristol | Hybrid",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "entry level"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "You have 0–1 years of professional experience (internships and hackathons count!).",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "0-1 years"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "We're a 150-year-old engineering firm, and every one of our directors started as a graduate here. This role is for 2027 graduates joining our Early Careers programme.",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "early careers; history and directors are context"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "Junior role, ideal for someone with 6–12 months of experience.",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "junior, 6-12 months"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "Open to apprentices, school leavers with A-levels, and graduates. You'll complete a Level 3 qualification in your first year.",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "school leavers/apprentices"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "You'll have no more than 2 years' work experience since graduating — this programme is designed for people early in their careers.",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "no more than 2 years"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "Less than one year of commercial experience? Perfect — this role is built for you.",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "less than one year"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "Experience: between 1 and 2 years in any programming language.",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "1-2 years"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "About Us\nFounded in 2004, Northwind has grown from a two-person consultancy into a 600-person technology company. Our leadership team brings over 100 years of combined experience in retail and logistics.\n\nThe Role\nWe're hiring graduate engineers to join our 2027 cohort. You'll spend your first 12 weeks in our Academy, then join a product squad led by a senior engineer.\n\nWhat we're looking for\n- A degree (or expected degree) in a STEM subject\n- 0–1 years of commercial experience — internships welcome\n- Curiosity and a willingness to learn\n\nWhat we offer\n- £32,000 salary\n- 25 days' holiday\n- Bonus up to 10%",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "long posting: graduate cohort, 0-1 years; history/senior/up to are distractors"
+ },
+ {
+  "title": "Data Analyst",
+  "description": "This is a junior position. You'll learn SQL and Python from our analytics team.",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "junior position"
+ },
+ {
+  "title": "Engineer",
+  "description": "Our Graduate Engineer Development Programme is accredited by the IMechE and leads to Chartered status. Open to 2027 MEng/BEng graduates.",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "graduate development programme"
+ },
+ {
+  "title": "Analyst",
+  "description": "Join our 2027 Analyst Programme in Investment Banking. Open to final-year undergraduates and recent graduates; no prior experience required.",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "graduate analyst programme"
+ },
+ {
+  "title": "Staff Nurse",
+  "description": "Job summary\nAre you a newly qualified nurse, or a student nurse due to qualify in September 2027? Our Band 5 preceptorship programme offers 12 months of structured support.\n\nAbout us\nThe Trust has served the local community for over 70 years.",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "newly qualified Band 5 preceptorship"
+ },
+ {
+  "title": "Caseworker",
+  "description": "Grade: Administrative Officer (AO)\nThis is an entry-level role and full training is given. You'll support senior caseworkers to process applications.",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "AO entry level; 'senior caseworkers' are colleagues"
+ },
+ {
+  "title": "Solicitor",
+  "description": "We're looking for an NQ to 2 PQE solicitor to join our private client team.",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "NQ to 2 PQE"
+ },
+ {
+  "title": "Physiotherapist",
+  "description": "Band 5 rotational post. Applications are welcome from newly qualified physiotherapists and final-year students due to graduate in 2027.",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "Band 5 newly qualified"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "Level: Associate (entry level)\nTeam: Payments\nLocation: Edinburgh",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "associate entry level"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "We run a 3–6 month paid internship starting in June 2027 for current university students.",
+  "label": "junior",
+  "ambiguous": false,
+  "why": "internship; months are duration"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "You'll be mentored by senior engineers and work closely with our lead architect to design new services.",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "no level stated; senior/lead are colleagues"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "This is not a graduate role; you'll need at least 3 years of commercial experience with TypeScript.",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "negated graduate; 3 years"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "Not a senior role — ideal for someone with 3–4 years' experience who wants to keep growing.",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "negated senior; 3-4 years"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "We're not looking for a lead or a manager; this is a hands-on individual contributor role for engineers with 3–5 years of experience.",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "negated lead/manager; 3-5 years"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "Required: 3+ years of experience with Python.\nPreferred: 5+ years with Kubernetes and Terraform.",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "required 3+, preferred 5+"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "Many of our senior engineers started on our graduate scheme. For this role, though, we need someone with 3+ years' commercial experience.",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "3+ years; graduate scheme is context"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "Founded in 2010, we've been building logistics software for over 15 years. Our CTO previously led engineering at a FTSE 100 retailer.",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "no level stated; history and CTO are context"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "Our team of 12 includes four senior engineers and a principal engineer. You'll need around 3 years' experience with React.",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "around 3 years; team composition is context"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "We serve over 2 million senior citizens across the UK through our home-care platform. You'll build features for carers and families.",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "no level; 'senior citizens' is domain"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "You'll build internal tools and work with our international teams in Lisbon and Toronto.",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "no level; internal/international not intern"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "We also run a thriving apprenticeship and graduate programme (separate roles — see our careers page). This position requires 4+ years of experience.",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "4+ years; programmes are separate"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "Three to four years' experience building REST APIs.",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "three to four years in words"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "You'll have around 4 yrs exp in a product engineering team.",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "around 4 years"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "Job details\nExperience:\n• Software development: 3 years (required)\nWork Location: In person",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "Indeed 3 years required"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "Location: London | Salary: £55k | Experience: 3 yrs+ | Hybrid (3 days in office)",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "3 years+; 3 days is office pattern"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "Unfortunately we cannot consider junior applicants for this role. You'll have 4 years of experience shipping production services.",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "negated junior; 4 years"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "This isn't an entry-level role, but it isn't a senior one either — we're looking for a solid mid-level engineer.",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "explicit mid-level, double negation"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "Experience level: Mid Level\nEmployment type: Permanent\nSalary: £50,000 - £60,000",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "mid level"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "Job Requisition ID: JR-77812 | Career Level: P2 – Intermediate | Time Type: Full time",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "Workday intermediate"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "Principal duties and responsibilities:\n• Design, build and maintain backend services\n• Participate in code reviews\n• Work with product managers to refine requirements",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "'Principal duties' means main duties; no level"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "Key responsibilities:\n- Lead the design of new API endpoints\n- Write clean, well-tested code\n\nAbout you:\n- 3+ years' experience in backend development",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "3+ years; 'lead the design' is a task"
+ },
+ {
+  "title": "Data Analyst",
+  "description": "You'll present findings to senior stakeholders and the leadership team. 3 years' experience in a data role required.",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "3 years; senior stakeholders are audience"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "The successful candidate will be a graduate (2:1 or above) with at least 4 years' experience in data engineering.",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "4 years; 'graduate' means degree holder"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "We're looking for a graduate-calibre individual with 3+ years of experience in financial services.",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "3+ years; graduate-calibre"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "Our head office is in Manchester, with satellite offices in Leeds and Glasgow. You'll join the platform team.",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "no level; head office is location"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "We're celebrating 5 years since launch! Join us as we scale into new markets.",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "no level; 5 years is company age"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "Our customers have trusted us for 20+ years. Benefits include 25 days' holiday, a paid sabbatical after 5 years' service, and private healthcare.",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "no level; years are company age/benefit"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "Benefits: 6 months' fully paid parental leave, a £1,000 learning budget, and a bonus of up to 15%.",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "no level; months are benefit"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "Minimum 36 months' commercial experience.",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "36 months = 3 years"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "This is a 12-month fixed-term contract. You'll need a minimum of 3 years' experience with Salesforce.",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "3 years; 12 months is contract length"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "Having spent 2–3 years as a junior developer, you're now ready to take the next step in your career.",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "previous junior experience; now mid"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "Ideal for a mid-level engineer who wants more ownership of their work.",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "mid-level"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "No line management responsibilities. You'll be a hands-on engineer with 4 years' experience.",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "4 years, IC"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "No degree required, but you'll need 3 years' commercial experience.",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "3 years"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "Hours: 37.5 per week, Monday to Friday. Hybrid working: 2 days per week in our Birmingham office.",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "no level; numbers are hours/days"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "In your first 6 months you'll take ownership of our billing service and help migrate it to Kubernetes.",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "no level; 6 months is onboarding plan"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "We're a 10-year-old scale-up with 200 employees across 5 offices.",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "no level; numbers are company facts"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "Our intern programme has hosted over 300 students since 2015. This full-time role, however, requires 4+ years of professional experience.",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "4+ years; intern programme is context"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "Our engineering team has an average of 12 years' experience, and we're looking for someone with 3–4 years to join them.",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "3-4 years; 12 is team average"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "You'll lead the migration of our monolith to microservices. You'll need 3 years' experience with Java.",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "3 years; leading a migration is a task"
+ },
+ {
+  "title": "Solicitor",
+  "description": "Minimum of 3 years' post-qualification experience (PQE) in commercial property.",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "3 PQE"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "You'll mentor our two junior developers and an apprentice. 3+ years' experience required.",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "3+ years; mentoring juniors"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "Requirements:\n* Commercial experience with React (3+ yrs)\n* Familiarity with GraphQL\n* Experience working closely with designers",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "asterisk bullets, 3+ yrs"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "Help reduce lead times for our warehouse customers by building smarter routing algorithms. 3 years' Python experience needed.",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "3 years; lead times is logistics"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "SeniorCare Connect is the UK's leading platform for elderly care providers. We need an engineer with 3+ years of React Native experience.",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "3+ years; 'Senior' is in company name"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "This role reports to the Head of Engineering and works alongside our Principal Engineer and Engineering Manager.",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "no level; titles are colleagues"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "Our CTO and VP of Engineering previously led teams at large tech companies. We're hiring engineers to join one of our product squads.",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "no level; leaders are context"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "Not suitable for graduates. Requires 3 years of experience in a regulated industry.",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "negated graduate; 3 years"
+ },
+ {
+  "title": "Physiotherapist",
+  "description": "Job summary\nWe are looking for an enthusiastic Band 6 physiotherapist to join our MSK outpatient team. You will supervise Band 5 staff and students on placement.\n\nPerson specification\nEssential: HCPC registration; post-registration experience at Band 5 level.",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "Band 6; placement students are supervisees"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "Expérience : 3 à 5 ans en développement backend.",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "French 3-5 years"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "You'll have between 3 and 5 years of experience.",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "3-5 years"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "We'd love you to have 4+ years in a similar position.",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "4+ years"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "📍 London | 💷 £60k | 🧑‍💻 3+ yrs",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "emoji, 3+ yrs"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "Ideally you'll have 3 years' experience, though we'll consider slightly less for exceptional candidates.",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "ideally 3 years"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "We need someone who can hit the ground running — this isn't a training role.",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "not a training role; no senior marker"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "Applicants must be aged 18 or over and have the right to work in the UK.",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "no level; 18 is age"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "Ref: ENG/2027/05 — Closing date 30/11/2026. Interviews will take place in the week of 7 December.",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "no level; numbers are ref/dates"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "You'll have 1 year with Kotlin and at least 4 years of Android development overall.",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "4 years overall; 1 year is one technology"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "You'll have 3+ years' experience, including some mentoring of junior engineers.",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "3+ years"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "Intermediate level — 3+ years of experience with .NET.",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "intermediate, 3+ years"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "We'll work on a 3-year product roadmap and serve 5 million users.",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "no level; numbers are roadmap/users"
+ },
+ {
+  "title": "Policy Advisor",
+  "description": "Grade: Higher Executive Officer (HEO)\nContract type: Permanent\n\nJob summary\nYou'll support the Senior Responsible Owner and work closely with Grade 7 and Deputy Director colleagues across government.",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "HEO; senior grades are colleagues"
+ },
+ {
+  "title": "Associate",
+  "description": "Associate – Investment Banking Division. Candidates will have 3–4 years' experience as an Analyst at a bulge-bracket or boutique bank, or an MBA.",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "bank associate after 3-4 years as analyst"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "Job Description\n\nPrincipal Responsibilities\n- Develop and maintain .NET services for our claims platform\n- Collaborate with senior business stakeholders\n\nQualifications\n- Bachelor's degree or equivalent experience\n- 3-5 years' experience in C#/.NET\n\nAbout Us\nFor over 300 years we have protected what matters most to our customers.\n\nTime Type: Full time\nJob Requisition: REQ-88213",
+  "label": "mid",
+  "ambiguous": false,
+  "why": "long Workday posting: 3-5 years; distractors"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "You will mentor junior developers and graduates, and lead our code review process. 6+ years of professional experience required.",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "6+ years"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "This role is not suitable for graduates or junior candidates. Minimum 7 years' experience building distributed systems.",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "7 years; negated graduate/junior"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "Minimum 5 years' experience in software development.",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "5 years"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "8–10 years of experience in backend engineering, ideally in fintech.",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "8-10 years"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "Salary: £110,000 – £130,000 + bonus. You'll own the technical direction of the platform and line-manage a team of 8 engineers.",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "line manages 8"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "You will line manage 4 direct reports and be responsible for their career development.",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "direct reports"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "Five or more years of experience building production machine learning systems.",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "five or more years"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "A minimum of ten years' experience, including at least three in a leadership role.",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "ten years"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "Required: 6+ years of professional software development.\nPreferred: 8+ years, including experience with Rust.",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "required 6+"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "Requirements:\n• Strong Python\n• 7+ years building backend services\n• Experience leading small teams",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "7+ years"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "Minimum 60 months of relevant experience.",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "60 months = 5 years"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "Experience: 10 years+ in software, of which 3 years in management.",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "10 years+"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "You'll have previously held a senior or lead engineering role.",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "previously senior/lead"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "This role sits at our Senior Engineer level (L5).",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "senior level"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "Seniority level\nDirector\nEmployment type\nFull-time",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "LinkedIn director"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "Job Requisition ID: R-0098123\nCareer Level: P4 – Senior\nTime Type: Full time",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "Workday senior"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "Experience level: Senior Level | Salary: £95,000–£115,000",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "senior level"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "💼 7+ yrs exp required | 🏠 Remote-first | 💰 £100k+",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "emoji, 7+ yrs"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "Ihr Profil: Sie haben mindestens 5 Jahre Berufserfahrung in der Softwareentwicklung.",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "German: at least 5 years"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "<p>We are looking for a <strong>Senior</strong> Engineer with 6+ years of experience.</p>",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "HTML markup, senior, 6+ years"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "You will be our first engineering hire and will build and lead the team as we grow from 0 to 20 engineers.",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "builds and leads the team"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "You'll act as tech lead for a squad of 6 engineers, setting technical direction and running hiring.",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "tech lead of 6"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "This role does not involve people management, but you'll need 8+ years of experience and deep expertise in distributed databases.",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "8+ years, negated management"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "You'll supervise our summer interns and mentor graduates. 8+ years' experience required.",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "8+ years; interns are supervisees"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "No graduates please — this role requires 5+ years of commercial experience.",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "5+ years; negated graduates"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "Entry-level candidates should apply via our Early Careers page instead. This role requires 6+ years in a similar position.",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "6+ years; entry-level redirected"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "The successful candidate will be a graduate (2:1 or above) with at least 5 years' experience in a consultancy environment.",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "5 years; 'graduate' means degree holder"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "Postgraduate degree preferred. 6+ years in applied ML research.",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "6+ years"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "This is a 6-month contract (outside IR35) for an experienced engineer with 5+ years of Kotlin.",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "5+ years; 6 months is contract"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "5yrs+ experience with AWS.",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "5 years"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "Experience of 5 years+ in a commercial setting.",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "5 years"
+ },
+ {
+  "title": "Solicitor",
+  "description": "Minimum 7 PQE in banking and finance.",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "7 PQE"
+ },
+ {
+  "title": "Solicitor",
+  "description": "We are seeking a Senior Associate with 6+ years' PQE to join our Banking team.",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "law-firm senior associate with 6+ PQE"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "You'll lead a team of 5 engineers, run 1:1s and own hiring for the team.",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "leads team of 5"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "Founded in 2019, we're a young company — but this role needs someone with 6+ years of hands-on experience.",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "6+ years"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "We need a principal-level engineer with 10+ years' experience to set our architecture direction.",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "principal level, 10+ years"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "You will report directly to the CEO and manage the engineering, data and IT teams (25 people).",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "manages 25 people"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "5–7 years' experience in a backend role.",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "5-7 years"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "Required: 5+ years in software engineering. Nice to have: experience mentoring graduates and apprentices.",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "5+ years"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "We're looking for a Staff-level engineer (equivalent to Principal) with 8+ years' experience.",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "staff level, 8+ years"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "Our graduates and apprentices will look to you for guidance: you'll line-manage three early-careers engineers. 6 years' experience minimum.",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "line manager, 6 years"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "You'll have 2 years' experience with Rust and at least 6 years in systems programming overall.",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "6 years overall; 2 years is one language"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "Seven years of experience in a product engineering organisation.",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "seven years in words"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "We pay up to £120k for engineers with 8+ years of experience.",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "8+ years"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "Who we are\nWe're a Series B climate-tech startup (founded 2021) on a mission to decarbonise heating. Our team of 40 includes engineers from big tech, fintech and the energy sector.\n\nWhat you'll do\n• Set the technical direction for our heat-pump control platform\n• Line-manage and grow a team of 5 engineers, including two graduates\n• Work with our Head of Product on the roadmap\n\nWhat you'll bring\n• 7+ years of software engineering experience\n• Experience leading teams through rapid growth\n\nSalary: £105,000–£125,000 + equity",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "long Lever posting: 7+ years, line manages"
+ },
+ {
+  "title": "Data Analyst",
+  "description": "This is a senior position: you'll set the analytics strategy and line-manage two analysts. 6+ years' experience required.",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "senior position, line manages"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "This is a senior position.",
+  "label": "senior",
+  "ambiguous": false,
+  "why": "explicit senior"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "5+ years of experience preferred, but we warmly welcome applications from graduates.",
+  "label": "senior",
+  "ambiguous": true,
+  "why": "preferred 5+ but graduates welcome"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "Ideally 2–3 years' experience, but we'd consider strong graduates.",
+  "label": "mid",
+  "ambiguous": true,
+  "why": "mid target, graduates considered"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "Seniority level\nMid-Senior level\nEmployment type\nFull-time",
+  "label": "mid",
+  "ambiguous": true,
+  "why": "LinkedIn 'Mid-Senior level' spans two bands"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "Seniority level\nAssociate\nEmployment type\nFull-time",
+  "label": "junior",
+  "ambiguous": true,
+  "why": "LinkedIn 'Associate' sits between entry and mid"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "1–3 years of experience.",
+  "label": "junior",
+  "ambiguous": true,
+  "why": "straddles junior/mid boundary"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "2+ years of experience.",
+  "label": "mid",
+  "ambiguous": true,
+  "why": "boundary of junior/mid"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "Up to 5 years' experience.",
+  "label": "junior",
+  "ambiguous": true,
+  "why": "open-ended down to zero"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "4–6 years of experience.",
+  "label": "mid",
+  "ambiguous": true,
+  "why": "straddles mid/senior"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "This role would suit an experienced engineer looking to step into their first senior role.",
+  "label": "mid",
+  "ambiguous": true,
+  "why": "mid-to-senior step-up"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "We welcome applicants at all levels, from graduate to senior; the level will be agreed at offer stage.",
+  "label": "mid",
+  "ambiguous": true,
+  "why": "all levels"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "Salary: £35,000–£80,000 depending on experience (junior to senior).",
+  "label": "mid",
+  "ambiguous": true,
+  "why": "all levels"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "Experience:\n• Python: 5 years (preferred)",
+  "label": "senior",
+  "ambiguous": true,
+  "why": "only a preferred figure"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "Two to three years' experience building REST APIs.",
+  "label": "mid",
+  "ambiguous": true,
+  "why": "2-3 years straddles boundary"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "Contract: 6 months, outside IR35. Day rate £450–£550.",
+  "label": "mid",
+  "ambiguous": true,
+  "why": "contract, no level stated"
+ },
+ {
+  "title": "Software Engineer",
+  "description": "Junior candidates with strong fundamentals are welcome to apply alongside more experienced engineers.",
+  "label": "mid",
+  "ambiguous": true,
+  "why": "open to junior and experienced"
+ }
+]
