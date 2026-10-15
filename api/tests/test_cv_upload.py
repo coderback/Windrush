@@ -1,4 +1,6 @@
 """CV upload: merged into the persona, kept once per user, used by the apply flow."""
+import json
+
 import fitz
 import pytest
 
@@ -249,3 +251,41 @@ def test_apply_uses_tailored_cv_else_original(client, user, db, fake_extract, ap
     assert apply_cv_path(doc_id) == pdf_generator.get_pdf_path(doc_id)
 
     assert apply_cv_path("../../etc/passwd") == str(db / "cvs" / f"{user}.pdf")  # bad ids ignored
+
+
+LETTER_DOC = {"candidate_name": "Ada Lovelace", "headline": "", "company": "Acme", "job_title": "Engineer",
+              "company_location": "", "date": "15 October 2026", "salutation": "Dear Hiring Manager,",
+              "paragraphs": ["I would like to join Acme.", "I build engines."], "signoff": "Yours faithfully,",
+              "contact": {"email": "ada@example.com", "phone": "", "city": "London", "address_line_1": "",
+                          "postcode": "", "country": ""}}
+
+
+def test_apply_hands_the_agent_a_cover_letter_pdf(client, user, db, monkeypatch):
+    async def public(url):
+        return None
+    monkeypatch.setattr(net_guard, "assert_public_url", public)
+    captured = {}
+
+    async def fake_run_apply(*args, **kwargs):
+        captured.update(kwargs)
+        yield agent._sse("done", {"message": "Done", "submitted": False})
+    monkeypatch.setattr(main, "run_apply", fake_run_apply)
+
+    def letter_path(**form) -> str:
+        captured.clear()
+        client.post("/apply", data={"job_id": "j", "job_title": "T", "company": "C",
+                                    "job_url": "https://jobs.example.com/1", **form})
+        return captured["cover_letter_path"]
+
+    def is_pdf(path: str) -> bool:
+        return open(path, "rb").read(4) == b"%PDF"
+
+    assert letter_path() == ""                                                  # no letter, no file
+    from_text = letter_path(cover_letter="Dear team,\n\nI build engines.\n\nAda")
+    from_doc = letter_path(cover_letter="ignored", cover_letter_doc=json.dumps(LETTER_DOC))
+    assert is_pdf(from_text) and is_pdf(from_doc) and from_text != from_doc
+
+    saved = pdf_generator.get_pdf_path("e" * 32)                                # the PDF the user saved wins
+    open(saved, "wb").write(_pdf("saved letter"))
+    assert letter_path(cover_letter="x", cover_letter_doc=json.dumps(LETTER_DOC), letter_doc_id="e" * 32) == saved
+    assert is_pdf(letter_path(cover_letter="x", letter_doc_id="../../etc/passwd"))  # bad ids ignored

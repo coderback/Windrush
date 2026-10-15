@@ -14,7 +14,10 @@ import json
 import logging
 import os
 import re
+import shutil
+import tempfile
 import threading
+import unicodedata
 from typing import AsyncGenerator, Awaitable, Callable
 
 from . import azure_config
@@ -438,6 +441,8 @@ _YES_NO_QUESTIONS = (
     ("core_info", "right_to_work_uk", "Right to work / work authorisation in the UK"),
     ("core_info", "require_sponsorship", "Require visa sponsorship"),
     ("core_info", "has_government_ties", "Has government ties"),
+    ("core_info", "holds_other_nationality", "Currently holds another (dual) nationality or citizenship"),
+    ("core_info", "held_other_nationality", "Previously held another nationality or citizenship"),
     ("preferences", "relocation_willingness", "Willing to relocate"),
     ("preferences", "can_work_in_person", "Can work in-person"),
     ("preferences", "can_start_immediately", "Can start immediately"),
@@ -477,9 +482,14 @@ def _known_answers(persona: dict) -> list[tuple[str, str]]:
         ("Gender", diversity.get("gender") or "Prefer not to say"),
         ("Ethnicity / diversity questions", diversity.get("ethnicity") or "Prefer not to say"),
         ("Disability", _DISABILITY_ANSWERS.get(diversity.get("disability_status") or "", "Prefer not to say")),
-        ("Salary expectations (Annual)", screening.get("salary_canonical") or prefs.get("min_salary") or "Negotiable"),
-        ("Salary expectations (Hourly)", prefs.get("expected_hourly_rate") or "Negotiable"),
     ]
+    # Salary is the candidate's call (a figure, a range, "Negotiable"): with none in the profile it is
+    # left for them rather than answered for them.
+    annual = screening.get("salary_canonical") or prefs.get("min_salary")
+    if annual:
+        answers.append(("Salary expectations (Annual)", str(annual)))
+    if prefs.get("expected_hourly_rate"):
+        answers.append(("Salary expectations (Hourly)", str(prefs["expected_hourly_rate"])))
     if prefs.get("remote_preference"):
         answers.append(("Remote/Hybrid preference", prefs["remote_preference"]))
     locations = ", ".join(loc for loc in prefs.get("preferred_locations") or [] if loc)
@@ -493,12 +503,13 @@ def _known_answers(persona: dict) -> list[tuple[str, str]]:
         answers.append(("Are you currently employed", "Yes"))
     elif history and all(_has_ended(job.get("end_date")) for job in history):
         answers.append(("Are you currently employed", "No"))
-    answers.append(("How did you hear about us", "Website / Internet search"))
+    answers.append(("How did you hear about us / about this role",
+                    "Website / Internet search (pick the closest option, e.g. 'Company website' or 'Internet')"))
     return answers
 
 
 def _build_task(job_url: str, persona: dict, cover_letter: str,
-                job_email: str, job_password: str, cv_path: str) -> str:
+                job_email: str, job_password: str, cv_path: str, cover_letter_path: str = "") -> str:
     lines = []
     if job_email:
         # The real password is never in the prompt: browser-use substitutes the placeholder at
@@ -531,6 +542,11 @@ def _build_task(job_url: str, persona: dict, cover_letter: str,
     if core.get("visa_status"): profile_lines.append(f"Visa Status: {core['visa_status']}")
     if core.get("visa_type"): profile_lines.append(f"Visa Type: {core['visa_type']}")
     if core.get("security_clearance"): profile_lines.append(f"Security Clearance: {core['security_clearance']}")
+    if core.get("nationality"): profile_lines.append(f"Nationality: {core['nationality']}")
+    if core.get("holds_other_nationality") and core.get("other_nationalities"):
+        profile_lines.append(f"Other current nationalities / citizenships: {core['other_nationalities']}")
+    if core.get("held_other_nationality") and core.get("previous_nationalities"):
+        profile_lines.append(f"Previously held nationalities / citizenships: {core['previous_nationalities']}")
 
     # Certifications
     for cert in persona.get("certifications", []):
@@ -609,7 +625,15 @@ def _build_task(job_url: str, persona: dict, cover_letter: str,
     if persona.get("custom_directives"):
         task += f"\n\nCustom Directives to follow: {persona['custom_directives']}"
 
-    task += f"\n\nFull cover letter to paste into any cover letter field:\n{cover_letter}"
+    if cover_letter_path:
+        task += (f"\n\nCover letter: if the form takes it as a file (an upload / attach option), upload the file at: "
+                 f"{cover_letter_path}")
+    if cover_letter.strip():
+        # The model never re-types the letter: paste_cover_letter puts the exact text in, in one step.
+        task += ("\n\nIf the form only has a text box for the cover letter (open any 'Enter manually' option first), "
+                 "fill it with the paste_cover_letter action, giving the box's index. Never type the letter yourself."
+                 f"\n\nThe cover letter, for reference when a question asks why the candidate wants the role:"
+                 f"\n{cover_letter}")
     task += (
         "\n\nFill in the application completely: every required field, plus optional ones you have an answer for "
         "(leave optional fields blank if you don't). Logging in, creating an account, uploading the CV and moving "
@@ -781,6 +805,184 @@ async def _submit_with_agent(llm, browser_session, sensitive_data: dict | None,
         return False, error[:200]
 
 
+# ── Documents, the cover-letter box and the empty-field check ───────────────
+
+def _upload_name(persona: dict, kind: str) -> str:
+    """'Ada_Lovelace_CV.pdf': the name an employer sees on an uploaded document (stored files are
+    named by id). ASCII only, since some applicant-tracking systems mangle anything else."""
+    core = persona.get("core_info") or {}
+    words: list[str] = []
+    for part in (core.get("first_name"), core.get("last_name"), kind):
+        plain = unicodedata.normalize("NFKD", str(part or "")).encode("ascii", "ignore").decode()
+        words += re.findall(r"[A-Za-z0-9]+", plain)
+    return "_".join(words) + ".pdf"
+
+
+def _named_copy(src: str, folder: str, name: str) -> str:
+    if not src or not os.path.isfile(src):
+        return ""
+    dest = os.path.join(folder, name)
+    shutil.copyfile(src, dest)
+    return dest
+
+
+# Focus the element, scroll it into view and select what it holds, so an insert replaces it.
+_SELECT_CONTENTS_JS = """function () {
+  this.scrollIntoView({block: 'center'});
+  this.focus();
+  if (typeof this.select === 'function') { this.select(); return; }
+  const range = document.createRange();
+  range.selectNodeContents(this);
+  const selection = window.getSelection();
+  selection.removeAllRanges();
+  selection.addRange(range);
+}"""
+
+
+async def _paste_text(browser_session, node, text: str) -> str:
+    """
+    Replace a text box's contents with `text` in one go and return what the box then holds. One CDP
+    insertText fires the input events a paste would, so React-controlled boxes take it. browser-use's
+    `input` types key by key and needs the model to write the whole letter into the action, which it
+    chunks, trims or retypes: a 500-word letter took a live run 20+ steps.
+    """
+    cdp = await browser_session.cdp_client_for_node(node)
+    send, session_id = cdp.cdp_client.send, cdp.session_id
+    resolved = await send.DOM.resolveNode(params={"backendNodeId": node.backend_node_id}, session_id=session_id)
+    object_id = resolved["object"]["objectId"]
+    await send.Runtime.callFunctionOn(
+        params={"objectId": object_id, "functionDeclaration": _SELECT_CONTENTS_JS}, session_id=session_id)
+    await send.Input.insertText(params={"text": text}, session_id=session_id)
+    held = await send.Runtime.callFunctionOn(
+        params={"objectId": object_id, "returnByValue": True,
+                "functionDeclaration": "function () { return 'value' in this ? this.value : this.innerText; }"},
+        session_id=session_id)
+    return str((held.get("result") or {}).get("value") or "")
+
+
+def _apply_tools(cover_letter: str, browser_session) -> "Tools":
+    """The fill agent's tools: the password-scoped set, plus paste_cover_letter (acting on this
+    session) when there's a letter."""
+    tools = _secret_scoped_tools()
+    if not cover_letter.strip():
+        return tools
+
+    @tools.action(
+        "Fill a cover-letter text box with the candidate's whole cover letter in one step: give the index of "
+        "the box (a textarea or rich-text editor). It replaces whatever the box holds. Use this instead of "
+        "typing the letter.")
+    async def paste_cover_letter(index: int) -> ActionResult:
+        node = await browser_session.get_element_by_index(index)
+        if node is None:
+            return ActionResult(error=f"Element index {index} isn't available - the page may have changed.")
+        try:
+            held = await _paste_text(browser_session, node, cover_letter)
+        except Exception as exc:
+            return ActionResult(error=f"Couldn't paste into element {index}: {type(exc).__name__}: {exc}"[:300])
+        if " ".join(held.split()) != " ".join(cover_letter.split()):
+            return ActionResult(error=f"Pasted, but element {index} now holds {len(held)} characters, not the "
+                                      f"letter's {len(cover_letter)}: check it is the cover-letter box.")
+        done = f"Pasted the whole cover letter ({len(cover_letter)} characters) into element {index}."
+        return ActionResult(extracted_content=done, long_term_memory=done)
+
+    return tools
+
+
+# Labels of required form fields still empty, read from the page: the agent's own "Needs your input"
+# list is written from memory and missed a required dropdown in a live run. Covers native inputs,
+# selects, radio/checkbox groups, rich-text boxes and react-select style comboboxes, whose <input>
+# stays empty once an option is picked (the pick shows as a "single-value" element or in a hidden
+# input beside it). A field is required when marked so or when its label ends in "*". Checked
+# against a live Greenhouse form, whose dropdowns are react-select.
+_EMPTY_REQUIRED_JS = r"""() => {
+  const docs = [document];
+  for (const frame of document.querySelectorAll('iframe')) {
+    try { if (frame.contentDocument) docs.push(frame.contentDocument); } catch (e) {}
+  }
+  const text = node => (node && node.textContent) || '';
+  const clean = t => t.replace(/\*/g, ' ').replace(/\s+/g, ' ').trim();
+  const starred = t => /\*\s*$/.test(t.trim());
+  const shown = el => {
+    const style = el.ownerDocument.defaultView.getComputedStyle(el);
+    const box = el.getBoundingClientRect();
+    return style.display !== 'none' && style.visibility !== 'hidden' && (box.width > 0 || box.height > 0);
+  };
+  const markedRequired = el => el.required || el.getAttribute('aria-required') === 'true';
+  const labelOf = (el, doc) => {
+    if (el.labels && el.labels.length) return text(el.labels[0]);
+    const ids = (el.getAttribute('aria-labelledby') || '').split(/\s+/).filter(Boolean);
+    if (ids.length) return ids.map(id => text(doc.getElementById(id))).join(' ');
+    if (el.getAttribute('aria-label')) return el.getAttribute('aria-label');
+    const set = el.closest('fieldset');
+    if (set && set.querySelector('legend')) return text(set.querySelector('legend'));
+    return el.getAttribute('placeholder') || el.getAttribute('name') || '';
+  };
+  const controls = 'input:not([type=hidden]), select, textarea, [contenteditable=true]';
+  // The widest ancestor holding no other form control: the field's own widget.
+  const ownBox = el => {
+    let box = el;
+    while (box.parentElement && box.parentElement.querySelectorAll(controls).length === 1) box = box.parentElement;
+    return box;
+  };
+  const pickedInBox = el => {
+    const box = ownBox(el);
+    if (box.querySelector('[class*=single-value], [class*=singleValue], [class*=multi-value], [class*=multiValue]')) return true;
+    return [...box.querySelectorAll('input[type=hidden]')].some(h => h.value);
+  };
+  const found = [];
+  const groupsSeen = new Set();
+  for (const doc of docs) {
+    for (const el of doc.querySelectorAll(controls)) {
+      const type = (el.getAttribute('type') || '').toLowerCase();
+      if (['submit', 'button', 'reset', 'image', 'file'].includes(type) || el.disabled) continue;
+      // e.g. the unlabelled required stub react-select renders while it has no value
+      if (el.closest('[aria-hidden=true]')) continue;
+      if (type === 'radio' || type === 'checkbox') {
+        const key = el.name || el.id || labelOf(el, doc);
+        if (groupsSeen.has(key)) continue;
+        groupsSeen.add(key);
+        const group = el.name ? [...doc.querySelectorAll('input[type=' + type + ']')].filter(g => g.name === el.name) : [el];
+        const set = el.closest('fieldset');
+        const legend = set && set.querySelector('legend') ? text(set.querySelector('legend')) : '';
+        const label = type === 'radio' || group.length > 1 ? (legend || labelOf(el, doc)) : labelOf(el, doc);
+        const required = group.some(markedRequired) || starred(label) || (set && set.getAttribute('aria-required') === 'true');
+        if (required && group.some(shown) && !group.some(g => g.checked)) found.push(clean(label));
+        continue;
+      }
+      const combobox = el.getAttribute('role') === 'combobox';
+      if (!shown(el) && !combobox) continue;
+      const label = labelOf(el, doc);
+      if (!markedRequired(el) && !starred(label)) continue;
+      let empty;
+      if (el.getAttribute('contenteditable') === 'true') empty = !el.textContent.trim();
+      else if (combobox && el.tagName === 'INPUT') empty = !el.value.trim() && !pickedInBox(el);
+      else empty = !String(el.value || '').trim();
+      if (empty) found.push(clean(label) || 'A required field with no label');
+    }
+  }
+  return JSON.stringify([...new Set(found)]);
+}"""
+
+
+async def _empty_required_fields(browser_session) -> list[str]:
+    """Labels of the required fields still empty on the focused page; [] if it can't be read."""
+    try:
+        page, _ = await _focused_page(browser_session)
+        labels = json.loads(await page.evaluate(_EMPTY_REQUIRED_JS))
+    except Exception as exc:
+        logger.debug("empty-field check failed: %s", exc)
+        return []
+    return [str(label)[:150] for label in labels if str(label).strip()][:25] if isinstance(labels, list) else []
+
+
+def _with_empty_fields(notes: str, empty: list[str]) -> str:
+    """The agent's notes, headed by the required fields the page shows as still empty."""
+    if not empty:
+        return notes
+    block = "Required fields still empty on the form:\n" + "\n".join(f"- {label}" for label in empty)
+    return f"{block}\n\n{notes}".strip()
+
+
 async def apply_with_browser(
     job_url: str,
     cv_profile: dict,
@@ -790,10 +992,12 @@ async def apply_with_browser(
     job_email: str = "",
     job_password: str = "",
     cv_path: str = "",
+    cover_letter_path: str = "",
 ) -> AsyncGenerator[dict, None]:
     """
     Async generator: the browser-use agent fills the application, then the user reviews it and
-    decides whether to submit (see module docstring). Yields dicts:
+    decides whether to submit (see module docstring). The CV and cover-letter PDFs are uploaded
+    under the candidate's name ("Ada_Lovelace_CV.pdf"), not their stored ids. Yields dicts:
       { action, screenshot (base64|None), blocked (bool), reason (str|None), done (bool),
         interactive (bool, optional), submitted (bool, only on the final done event),
         notes (str, only on the first review event: the agent's summary, "Needs your input" first) }
@@ -805,8 +1009,6 @@ async def apply_with_browser(
             "screenshot": None, "blocked": False, "reason": None, "done": True,
         }
         return
-
-    task = _build_task(job_url, cv_profile, cover_letter, job_email, job_password, cv_path)
 
     yield {"action": "Browser agent starting…", "screenshot": None, "blocked": False, "reason": None, "done": False}
 
@@ -835,16 +1037,22 @@ async def apply_with_browser(
 
     agent_task: asyncio.Task | None = None
     screencast_task: asyncio.Task | None = None
+    upload_dir = ""
     _register_secret(job_password)  # masked in logs until the finally below
     try:
+        # Named copies for the upload, removed in the finally below.
+        upload_dir = tempfile.mkdtemp(prefix="windrush-apply-")
+        cv_upload = _named_copy(cv_path, upload_dir, _upload_name(cv_profile, "CV"))
+        letter_upload = _named_copy(cover_letter_path, upload_dir, _upload_name(cv_profile, "Cover Letter"))
+        task = _build_task(job_url, cv_profile, cover_letter, job_email, job_password, cv_upload, letter_upload)
         agent = Agent(
             task=task,
             llm=llm,
             browser_session=browser_session,
             register_new_step_callback=on_step,
             use_vision=False,
-            available_file_paths=[cv_path] if cv_path else [],
-            tools=_secret_scoped_tools(),
+            available_file_paths=[path for path in (cv_upload, letter_upload) if path],
+            tools=_apply_tools(cover_letter, browser_session),
             sensitive_data=sensitive_data,
             # The judge LLM call grades the run from the RAW step history, which browser-use does not
             # redact — e.g. an evaluate() that reads the form back carries the typed password. We
@@ -887,10 +1095,16 @@ async def apply_with_browser(
                    "blocked": False, "reason": None, "done": True}
             return
 
+        empty = await _empty_required_fields(browser_session)
+        notes = _with_empty_fields(notes, empty)[:_MAX_NOTES_CHARS]
         see_notes = " — see the agent's notes" if notes else ""
         if agent_error:
             intro = f"The agent hit a problem — handing control to you ({agent_error})"
             reason = "Finish the form yourself, then type 'submit' (or 'done' if you submitted it), or 'skip'."
+        elif ready and empty:
+            count = f"{len(empty)} required field{'' if len(empty) == 1 else 's'}"
+            intro = f"Form filled, but {count} still empty — see the notes"
+            reason = "Fill them in by clicking/typing, then type 'submit' to send it — or 'skip' to cancel."
         elif ready:
             intro = "Form filled — review it before anything is sent" + see_notes
             reason = "Type 'submit' to send it, click/type to fix anything first, or 'skip' to cancel."
@@ -922,3 +1136,5 @@ async def apply_with_browser(
             logger.debug("browser kill failed: %s", exc)
         finally:
             _unregister_secret(job_password)
+            if upload_dir:
+                shutil.rmtree(upload_dir, ignore_errors=True)
