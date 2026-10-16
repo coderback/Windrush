@@ -22,6 +22,7 @@ from . import tracker
 from . import auth
 from . import pdf_generator
 from . import doc_render
+from . import doc_check
 from . import jobs_db
 from . import net_guard
 from . import seniority
@@ -1029,6 +1030,27 @@ async def preview_document(
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
     return {"html": html}
+
+
+@app.post("/documents/check")
+async def check_document(
+    body: dict,
+    current_user: Annotated[auth.User, Depends(auth.get_current_user)],
+):
+    """
+    Check a tailored CV or cover letter before it goes out: the ad's keywords it shows or misses,
+    claims your persona doesn't back up, machine-sounding words, and the rendered PDF read back as
+    an applicant tracking system reads it. No model calls.
+    """
+    doc_type = body.get("type", "cv")
+    if doc_type not in ("cv", "cover_letter"):
+        raise HTTPException(status_code=400, detail="type must be 'cv' or 'cover_letter'")
+    doc = body.get("doc") or {}
+    job = body.get("job") or {}
+    persona = tracker.get_user_persona(current_user.id)
+    return await asyncio.to_thread(
+        doc_check.check_document, doc_type, doc, persona, job, body.get("template_id"), bool(body.get("ats", True)),
+    )
 
 
 from fastapi.responses import FileResponse  # noqa: E402

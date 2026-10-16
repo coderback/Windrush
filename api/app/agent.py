@@ -1,4 +1,5 @@
 import asyncio
+import copy
 import json
 import logging
 import os
@@ -10,7 +11,7 @@ from typing import AsyncGenerator
 
 from openai import AsyncOpenAI, BadRequestError
 
-from . import azure_config, doc_render
+from . import azure_config, doc_check, doc_render
 from .company_names import normalise_company_name as _normalise_company_name
 from . import http_client
 from . import tracker
@@ -554,6 +555,140 @@ def _restore_project_depth(cv_projects: list, base_projects: list) -> list:
     return out
 
 
+_MAX_ROW_SKILLS = 8
+
+
+def _top_up_skills(skills: list[dict], base: list[dict], cv: dict, job: dict) -> tuple[list[dict], list[str]]:
+    """
+    Add the ad's technical terms that the candidate lists as skills but the tailored CV leaves out,
+    each to the row it belongs in (its profile group's, else the row holding most of its group).
+    Only the profile's own skills, in its spelling, so nothing is invented. Returns (rows, added).
+    """
+    ad = doc_check.terms_in(f"{job.get('title', '')}\n{job.get('description', '')}")
+    wanted = ad - doc_check.terms_in(doc_check.document_text("cv", {**cv, "skills": skills}))
+    if not wanted:
+        return skills, []
+    rows = [{"category": g.get("category") or "Other", "items": list(g.get("items") or [])} for g in skills]
+    have = {str(s).lower() for r in rows for s in r["items"]}
+    added: list[str] = []
+    for g in base:
+        mates = {str(x).lower() for x in g.get("items") or []}
+        for s in g.get("items") or []:
+            hit = doc_check.terms_in(str(s)) & wanted
+            if not hit or str(s).lower() in have:
+                continue
+            open_rows = [r for r in rows if len(r["items"]) < _MAX_ROW_SKILLS]
+            row = next((r for r in open_rows if r["category"].lower() == str(g.get("category") or "").lower()), None)
+            if row is None and open_rows:
+                best = max(open_rows, key=lambda r: len(mates & {str(x).lower() for x in r["items"]}))
+                row = best if mates & {str(x).lower() for x in best["items"]} else None
+            if row is None:
+                if len(rows) < doc_render.MAX_SKILL_GROUPS:
+                    row = {"category": g.get("category") or "Other", "items": []}
+                    rows.append(row)
+                elif open_rows:
+                    row = open_rows[-1]
+                else:
+                    continue
+            row["items"].append(s)
+            have.add(str(s).lower())
+            wanted -= hit
+            added.append(str(s))
+    return rows, added
+
+
+def _finding_keys(findings: list[dict]) -> set[tuple[str, str]]:
+    return {(f["kind"], str(f["value"]).lower()) for f in findings}
+
+
+def _issue_lines(findings: list[dict]) -> str:
+    lines = []
+    for f in findings:
+        fix = ("use plain wording instead" if f["kind"] == "word"
+               else "remove it, or replace it with a fact the candidate data states")
+        lines.append(f"- {f['label']}: {f['message']} — {fix}")
+    return "\n".join(lines)
+
+
+async def _revise_cv_text(cv: dict, findings: list[dict], candidate: dict, job: dict) -> dict | None:
+    """
+    One targeted pass over the CV's free text to fix what the document check flagged: claims the
+    candidate data doesn't back, and machine-sounding words. Returns the CV with the revised summary,
+    bullets and project text, or None when the reply doesn't keep the CV's shape.
+    """
+    text = {
+        "summary": cv.get("summary", ""),
+        "experience": [{"title": r.get("title", ""), "employer": r.get("employer", ""), "bullets": r.get("bullets", [])}
+                       for r in cv.get("experience") or []],
+        "projects": [{"name": p.get("name", ""), "description": p.get("description", ""), "tech": p.get("tech", [])}
+                     for p in cv.get("projects") or []],
+    }
+    data = await _llm_json(
+        system=(
+            "You check a tailored CV against the candidate's own data. Fix ONLY the listed issues and leave "
+            "every other word as it is. A number, technology, employer or project the candidate data doesn't "
+            "state must be removed or replaced by one it does state — never invent, estimate or round one. "
+            "Keep each bullet's meaning and length. Return ONLY JSON in exactly the shape you were given: "
+            '{"summary": str, "experience": [{"title", "employer", "bullets": [str]}], '
+            '"projects": [{"name", "description", "tech": [str]}]}, same roles and projects in the same order.'
+        ),
+        user=(f"ISSUES TO FIX:\n{_issue_lines(findings)}\n\nCV TEXT (JSON):\n{json.dumps(text, ensure_ascii=False)}\n\n"
+              f"TARGET JOB: {job.get('title', '')} at {job.get('company', '')}\n\n"
+              f"CANDIDATE DATA (JSON):\n{json.dumps(candidate, ensure_ascii=False)}"),
+        max_tokens=2048,
+        label="revise_cv",
+    )
+    if not isinstance(data, dict):
+        return None
+    roles, projects = data.get("experience"), data.get("projects")
+    if (not isinstance(roles, list) or len(roles) != len(text["experience"])
+            or not isinstance(projects, list) or len(projects) != len(text["projects"])):
+        return None
+    out = copy.deepcopy(cv)
+    if isinstance(data.get("summary"), str) and data["summary"].strip():
+        out["summary"] = data["summary"].strip()
+    for role, new in zip(out.get("experience") or [], roles):
+        bullets = new.get("bullets") if isinstance(new, dict) else None
+        if isinstance(bullets, list) and all(isinstance(b, str) for b in bullets):
+            role["bullets"] = [b.strip() for b in bullets if b.strip()]
+    for proj, new in zip(out.get("projects") or [], projects):
+        if not isinstance(new, dict):
+            continue
+        if isinstance(new.get("description"), str) and new["description"].strip():
+            proj["description"] = new["description"].strip()
+        if isinstance(new.get("tech"), list):
+            proj["tech"] = [str(t).strip() for t in new["tech"] if str(t).strip()]
+    return out
+
+
+async def _revise_letter_text(letter: dict, findings: list[dict], persona: dict, job: dict) -> dict | None:
+    """The cover-letter counterpart of _revise_cv_text: fixes the flagged paragraphs only."""
+    data = await _llm_json(
+        system=(
+            "You check a cover letter against the candidate's own data and the job ad. Fix ONLY the listed "
+            "issues and leave every other word as it is. A number or technology that neither the candidate "
+            "data nor the job ad states must be removed or replaced by one they do state — never invent one. "
+            'Return ONLY JSON: {"paragraphs": [str]}, the same number of paragraphs in the same order.'
+        ),
+        user=(f"ISSUES TO FIX:\n{_issue_lines(findings)}\n\n"
+              f"LETTER (JSON):\n{json.dumps({'paragraphs': letter.get('paragraphs', [])}, ensure_ascii=False)}\n\n"
+              f"JOB: {job.get('title', '')} at {job.get('company', '')}\nDESCRIPTION: {job.get('description', '')[:2500]}\n\n"
+              f"CANDIDATE PERSONA (JSON): {json.dumps(_llm_persona(persona), ensure_ascii=False)}"),
+        max_tokens=1024,
+        label="revise_letter",
+    )
+    paragraphs = data.get("paragraphs") if isinstance(data, dict) else None
+    if (not isinstance(paragraphs, list) or len(paragraphs) != len(letter.get("paragraphs") or [])
+            or not all(isinstance(p, str) and p.strip() for p in paragraphs)):
+        return None
+    return {**letter, "paragraphs": [p.strip() for p in paragraphs]}
+
+
+def _better(before: list[dict], after: list[dict]) -> bool:
+    """A revision is kept only when it clears findings and introduces none of its own."""
+    return len(after) < len(before) and _finding_keys(after) <= _finding_keys(before)
+
+
 def _seniority(persona: dict) -> str:
     """
     Classify a persona as 'junior' (recent grad / early career) or 'experienced'.
@@ -1020,9 +1155,28 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
         )
         letter["signoff"] = "Yours faithfully," if _generic_salutation else "Yours sincerely,"
 
+        # Numbers and tools the persona, the ad and the company research don't state, and
+        # machine-sounding words: one targeted revision, kept only if it clears them.
+        revision = "fallback"
+        if data:
+            findings = (doc_check.check_facts("cover_letter", letter, persona, job, company_research)
+                        + doc_check.check_style("cover_letter", letter))
+            revision = "clean"
+            if findings:
+                revised = await _revise_letter_text(letter, findings, persona, job)
+                if revised is None:
+                    revision = f"{len(findings)} found, bad reply"
+                else:
+                    after = (doc_check.check_facts("cover_letter", revised, persona, job, company_research)
+                             + doc_check.check_style("cover_letter", revised))
+                    kept = _better(findings, after)
+                    revision = f"{len(findings)}->{len(after)} {'kept' if kept else 'rejected'}"
+                    if kept:
+                        letter = revised
+
         (logger.warning if data is None else logger.info)(
-            "cover_letter: llm_used=%s, paragraphs=%d, archetype=%s, level=%s | job=%r",
-            data is not None, len(letter["paragraphs"]), archetype, level,
+            "cover_letter: llm_used=%s, paragraphs=%d, archetype=%s, level=%s, revision=%s | job=%r",
+            data is not None, len(letter["paragraphs"]), archetype, level, revision,
             (job.get("title") or "")[:60],
         )
 
@@ -1217,15 +1371,35 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
             cv["experience"] = _restore_role_dates(cv["experience"], base_cv["experience"])
         if not cv.get("name"):
             cv["name"] = base_cv["name"]
+        # The ad's terms the candidate lists as skills but the model left out go into the skills rows.
+        added_skills: list[str] = []
+        if chosen:
+            cv["skills"], added_skills = _top_up_skills(cv["skills"], base_cv["skills"], cv, job)
+        # Check the text against the candidate's data; one targeted revision when it flags something.
+        revision = "fallback"
+        if not used_fallback:
+            findings = doc_check.check_facts("cv", cv, persona, job) + doc_check.check_style("cv", cv)
+            revision = "clean"
+            if findings:
+                revised = await _revise_cv_text(cv, findings, llm_cv, job)
+                if revised is None:
+                    revision = f"{len(findings)} found, bad reply"
+                else:
+                    after = doc_check.check_facts("cv", revised, persona, job) + doc_check.check_style("cv", revised)
+                    kept = _better(findings, after)
+                    revision = f"{len(findings)}->{len(after)} {'kept' if kept else 'rejected'}"
+                    if kept:
+                        cv = revised
         cv["seniority"] = level  # drives section order in the renderer
 
         # Diagnostic: confirms how often the bad-JSON fallback fires AND whether the
         # same projects recur across roles (the model is meant to tailor the selection).
         final_proj_names = [(p.get("name") or "")[:40] for p in (cv.get("projects") or [])][:5]
         (logger.warning if used_fallback else logger.info)(
-            "tailored_cv: fallback=%s, level=%s, skills chosen=%s, projects base=%d model=%d final=%d %s | job=%r",
-            used_fallback, level, chosen is not None, base_proj_n, model_proj_n, len(cv.get("projects") or []),
-            final_proj_names, (job.get("title") or "")[:60],
+            "tailored_cv: fallback=%s, level=%s, skills chosen=%s, added=%s, revision=%s, projects base=%d model=%d "
+            "final=%d %s | job=%r",
+            used_fallback, level, chosen is not None, added_skills, revision, base_proj_n, model_proj_n,
+            len(cv.get("projects") or []), final_proj_names, (job.get("title") or "")[:60],
         )
         return {"cv": cv, "template_id": template_id}
 
