@@ -1566,8 +1566,9 @@ async def run_apply(
     job_password: str = "",
     cv_path: str = "",
     cover_letter_path: str = "",
+    answerer=None,
 ) -> AsyncGenerator[str, None]:
-    """Apply phase: browser automation."""
+    """Apply phase: browser automation. `answerer` answers the form's questions (see answers.py)."""
     persona = tracker.get_user_persona(user_id)
     skill_risks = skill_risks or []
 
@@ -1580,7 +1581,7 @@ async def run_apply(
         async with aclosing(apply_with_browser(
             job_url, persona, cover_letter, instruction_queue, frame_queue,
             job_email=job_email, job_password=job_password, cv_path=cv_path,
-            cover_letter_path=cover_letter_path,
+            cover_letter_path=cover_letter_path, answerer=answerer,
         )) as steps:
             async for step in steps:
                 event_type = "browser_blocked" if step.get("blocked") else "browser_action"
@@ -1592,6 +1593,8 @@ async def run_apply(
                 }
                 if step.get("notes"):
                     event["notes"] = step["notes"]
+                if step.get("questions"):
+                    event["questions"] = step["questions"]
                 yield _sse(event_type, event)
                 if step.get("done"):
                     submitted = bool(step.get("submitted"))

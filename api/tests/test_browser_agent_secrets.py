@@ -290,12 +290,15 @@ def test_without_sensitive_data_actions_pass_through(scoped_tools):
 
 
 def test_both_agents_get_the_scoped_tools_and_the_secret(fake_browser, monkeypatch):
-    marker = object()
-    monkeypatch.setattr(ba, "_secret_scoped_tools", lambda: marker)
+    made = []
+    scoped = ba._secret_scoped_tools
+    monkeypatch.setattr(ba, "_secret_scoped_tools", lambda: made.append(scoped()) or made[-1])
     _apply(["submit"])
     fill, submit = fake_browser
     assert submit["task"] == ba._SUBMIT_TASK
-    assert fill["tools"] is marker and submit["tools"] is marker
+    # The fill agent's set is the scoped one with answer_questions and fill_answer added to it.
+    assert fill["tools"] is made[0] and submit["tools"] is made[1]
+    assert {"answer_questions", "fill_answer"} <= set(fill["tools"].registry.registry.actions)
     assert fill["sensitive_data"] == submit["sensitive_data"] == {SCOPE: {"job_password": SECRET}}
 
 

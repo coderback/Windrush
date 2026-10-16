@@ -20,8 +20,9 @@ import threading
 import unicodedata
 from typing import AsyncGenerator, Awaitable, Callable
 
+from pydantic import BaseModel, Field
+
 from . import azure_config
-from .models import is_present_end_date
 
 # browser-use's product telemetry (PostHog) and cloud sync are ON unless these say otherwise: every
 # run would send the task prompt (the applicant's personal data), action history, visited URLs and
@@ -358,6 +359,7 @@ async def _interactive_session(
     intro_reason: str,
     on_submit: Callable[[], Awaitable[tuple[bool, str]]],
     notes: str = "",
+    questions: list[dict] | None = None,
 ) -> AsyncGenerator[dict, None]:
     """
     Hand control to the user until they finish. Commands (from BrowserView.tsx):
@@ -366,7 +368,8 @@ async def _interactive_session(
       'done'   → the user submitted it themselves
       'skip' / 'cancel' / 'abort' → abandon (not submitted)
       any other text → typed into the focused field
-    `notes` (the agent's own summary) rides on the first event only; the UI keeps it for the review.
+    `notes` (the agent's own summary) and `questions` (what answer_questions answered) ride on the first
+    event only; the UI keeps them for the review.
     """
     def interactive(action: str, reason: str, screenshot: str) -> dict:
         return {"action": action, "screenshot": screenshot or None, "blocked": True,
@@ -375,6 +378,8 @@ async def _interactive_session(
     intro = interactive(intro_action, intro_reason, await _screenshot_b64(browser_session))
     if notes:
         intro["notes"] = notes
+    if questions:
+        intro["questions"] = questions
     yield intro
     again = "Click the screenshot or type below. 'submit' sends it, 'done' if you submitted it yourself, 'skip' cancels."
 
@@ -435,79 +440,6 @@ async def _interactive_session(
         yield interactive(label, again, await _screenshot_b64(browser_session))
 
 
-# Yes/no facts stated on the candidate's behalf. Unanswered (None/missing) ones are left out of
-# the prompt entirely, so the agent never asserts something the user hasn't told us.
-_YES_NO_QUESTIONS = (
-    ("core_info", "right_to_work_uk", "Right to work / work authorisation in the UK"),
-    ("core_info", "require_sponsorship", "Require visa sponsorship"),
-    ("core_info", "has_government_ties", "Has government ties"),
-    ("core_info", "holds_other_nationality", "Currently holds another (dual) nationality or citizenship"),
-    ("core_info", "held_other_nationality", "Previously held another nationality or citizenship"),
-    ("preferences", "relocation_willingness", "Willing to relocate"),
-    ("preferences", "can_work_in_person", "Can work in-person"),
-    ("preferences", "can_start_immediately", "Can start immediately"),
-    ("preferences", "has_reliable_transportation", "Has reliable transportation"),
-    ("preferences", "needs_accommodations", "Needs accommodations"),
-)
-
-_DISABILITY_ANSWERS = {"yes": "Yes", "no": "No", "prefer_not_to_say": "Prefer not to say"}
-
-# A year (19xx/20xx) in a role's end date: the role has actually ended — unless a present word is
-# in it too, as when "Mid-2019-Present" splits at its first hyphen or a CV lists stints ("Nov 2012,
-# Dec 2012 – Present").
-_END_YEAR = re.compile(r"(?<!\d)(?:19|20)\d{2}(?!\d)")
-_PRESENT_WORD = re.compile(r"\b(?:present|current(?:ly)?|now|ongoing|today|(?:to|till|until)\s+date)\b", re.I)
-
-
-def _has_ended(end_date) -> bool:
-    end = str(end_date or "")
-    return bool(_END_YEAR.search(end)) and not _PRESENT_WORD.search(end)
-
-
-def _known_answers(persona: dict) -> list[tuple[str, str]]:
-    core = persona.get("core_info") or {}
-    prefs = persona.get("preferences") or {}
-    screening = persona.get("screening") or {}
-    diversity = persona.get("diversity") or {}
-    sections = {"core_info": core, "preferences": prefs}
-
-    answers = []
-    for section, field, question in _YES_NO_QUESTIONS:
-        value = sections[section].get(field)
-        if isinstance(value, bool):
-            answers.append((question, "Yes" if value else "No"))
-
-    # Declining to answer is always a true statement, so it's the fallback for diversity questions.
-    answers += [
-        ("Gender", diversity.get("gender") or "Prefer not to say"),
-        ("Ethnicity / diversity questions", diversity.get("ethnicity") or "Prefer not to say"),
-        ("Disability", _DISABILITY_ANSWERS.get(diversity.get("disability_status") or "", "Prefer not to say")),
-    ]
-    # Salary is the candidate's call (a figure, a range, "Negotiable"): with none in the profile it is
-    # left for them rather than answered for them.
-    annual = screening.get("salary_canonical") or prefs.get("min_salary")
-    if annual:
-        answers.append(("Salary expectations (Annual)", str(annual)))
-    if prefs.get("expected_hourly_rate"):
-        answers.append(("Salary expectations (Hourly)", str(prefs["expected_hourly_rate"])))
-    if prefs.get("remote_preference"):
-        answers.append(("Remote/Hybrid preference", prefs["remote_preference"]))
-    locations = ", ".join(loc for loc in prefs.get("preferred_locations") or [] if loc)
-    if locations:
-        answers.append(("Preferred work locations", locations))
-    # Parsed CVs often leave is_current off and put "Present" (or nothing) in end_date, so "No" needs
-    # every role to have really ended — an end date with a year in it; anything less certain is left
-    # for the user (an end date we don't recognise may still mean "present").
-    history = [job for job in persona.get("history") or [] if isinstance(job, dict)]
-    if any(job.get("is_current") or is_present_end_date(job.get("end_date")) for job in history):
-        answers.append(("Are you currently employed", "Yes"))
-    elif history and all(_has_ended(job.get("end_date")) for job in history):
-        answers.append(("Are you currently employed", "No"))
-    answers.append(("How did you hear about us / about this role",
-                    "Website / Internet search (pick the closest option, e.g. 'Company website' or 'Internet')"))
-    return answers
-
-
 def _build_task(job_url: str, persona: dict, cover_letter: str,
                 job_email: str, job_password: str, cv_path: str, cover_letter_path: str = "") -> str:
     lines = []
@@ -520,8 +452,7 @@ def _build_task(job_url: str, persona: dict, cover_letter: str,
         lines.append(f"If asked to upload a CV/resume, upload the file at: {cv_path}")
 
     core = persona.get("core_info", {})
-    prefs = persona.get("preferences", {})
-    
+
     profile_lines = []
     full_name = f"{core.get('first_name', '')} {core.get('last_name', '')}".strip()
     if full_name: profile_lines.append(f"Full name: {full_name}")
@@ -539,14 +470,8 @@ def _build_task(job_url: str, persona: dict, cover_letter: str,
     if core.get("github"): profile_lines.append(f"GitHub: {core['github']}")
     if core.get("twitter"): profile_lines.append(f"Twitter/X: {core['twitter']}")
     if core.get("portfolio"): profile_lines.append(f"Portfolio/Website: {core['portfolio']}")
-    if core.get("visa_status"): profile_lines.append(f"Visa Status: {core['visa_status']}")
-    if core.get("visa_type"): profile_lines.append(f"Visa Type: {core['visa_type']}")
-    if core.get("security_clearance"): profile_lines.append(f"Security Clearance: {core['security_clearance']}")
-    if core.get("nationality"): profile_lines.append(f"Nationality: {core['nationality']}")
-    if core.get("holds_other_nationality") and core.get("other_nationalities"):
-        profile_lines.append(f"Other current nationalities / citizenships: {core['other_nationalities']}")
-    if core.get("held_other_nationality") and core.get("previous_nationalities"):
-        profile_lines.append(f"Previously held nationalities / citizenships: {core['previous_nationalities']}")
+    # Visas, nationality, clearance and every other screening fact go through answer_questions, so each
+    # answer on the form is recorded with where it came from.
 
     # Certifications
     for cert in persona.get("certifications", []):
@@ -586,21 +511,6 @@ def _build_task(job_url: str, persona: dict, cover_letter: str,
             f"Outcomes: {proj.get('outcomes', '')}. URL: {proj.get('url', '')}"
         )
 
-    # Story Bank for behavioral questions
-    stories_block = ""
-    if persona.get("story_bank"):
-        stories_block = "\n\nUse these stories to answer behavioral questions. ALWAYS use the STAR method (Situation, Task, Action, Result) in your answers:\n"
-        for story in persona["story_bank"]:
-            stories_block += f"- {story['title']}: {story['scenario']} -> {story['action']} -> {story['result']}\n"
-
-    # Screening Vault
-    screening = persona.get("screening", {})
-    screening_block = ""
-    if any(screening.values()):
-        screening_block = "\n\nUse these pre-written answers for screening questions:\n"
-        for k, v in screening.items():
-            if v: screening_block += f"- {k.replace('_', ' ').title()}: {v}\n"
-
     creds_block = "\n".join(lines)
     profile_block = "\n".join(profile_lines)
     task = f"Apply for the job at: {job_url}"
@@ -608,18 +518,15 @@ def _build_task(job_url: str, persona: dict, cover_letter: str,
         task += f"\n\n{creds_block}"
     if profile_block:
         task += f"\n\nApplicant details:\n{profile_block}"
-    if screening_block:
-        task += screening_block
-    if stories_block:
-        task += stories_block
 
-    task += "\n\nFor dropdown / multiple-choice questions use these answers:\n" + "\n".join(
-        f"- {question}: {answer}" for question, answer in _known_answers(persona)
-    )
     task += (
-        "\n\nOnly state facts given above. If a question asks for a fact about the candidate that isn't "
-        "covered (for example work authorisation, sponsorship, criminal record, notice period), do NOT guess: "
-        "leave it unanswered and list it at the start of your final summary under 'Needs your input'."
+        "\n\nQuestions: the details above are for the form's name, contact, education and employment fields. For "
+        "every other question (right to work, visas and sponsorship, nationality, notice period, salary, "
+        "availability, preferences, equality monitoring, consent and declarations, and any question that asks "
+        "for a written answer) call answer_questions first, with all of the page's questions in one call: each "
+        "label exactly as the form shows it, with its options for a dropdown, radio or checkbox question. Then "
+        "fill in exactly what it returns. Never answer one of these questions yourself, and leave blank every "
+        "question it says to leave blank: those are facts only the candidate can give. Do NOT guess."
     )
 
     if persona.get("custom_directives"):
@@ -631,9 +538,7 @@ def _build_task(job_url: str, persona: dict, cover_letter: str,
     if cover_letter.strip():
         # The model never re-types the letter: paste_cover_letter puts the exact text in, in one step.
         task += ("\n\nIf the form only has a text box for the cover letter (open any 'Enter manually' option first), "
-                 "fill it with the paste_cover_letter action, giving the box's index. Never type the letter yourself."
-                 f"\n\nThe cover letter, for reference when a question asks why the candidate wants the role:"
-                 f"\n{cover_letter}")
+                 "fill it with the paste_cover_letter action, giving the box's index. Never type the letter yourself.")
     task += (
         "\n\nFill in the application completely: every required field, plus optional ones you have an answer for "
         "(leave optional fields blank if you don't). Logging in, creating an account, uploading the CV and moving "
@@ -860,10 +765,109 @@ async def _paste_text(browser_session, node, text: str) -> str:
     return str((held.get("result") or {}).get("value") or "")
 
 
-def _apply_tools(cover_letter: str, browser_session) -> "Tools":
-    """The fill agent's tools: the password-scoped set, plus paste_cover_letter (acting on this
-    session) when there's a letter."""
+# ── The form's questions ────────────────────────────────────────────────────
+# Every screening question goes through answer_questions, which asks the run's answerer (answers.py in
+# production: the answer bank, then the persona, then a draft for written ones) and records each answer
+# with its source for the review. The fill agent is never given the facts to answer from itself.
+
+Answerer = Callable[[list[dict]], Awaitable[list[dict]]]
+
+
+class FormQuestion(BaseModel):
+    question: str = Field(description="The question's label exactly as the form shows it")
+    options: list[str] = Field(default_factory=list,
+                               description="Its choices, for a dropdown, radio or checkbox question")
+    max_length: int | None = Field(
+        default=None, description="The text box's own character limit (its maxlength attribute), if it has one. "
+                                  "Leave it out for a word limit the question states: that stays in the question.")
+
+
+class AnswerQuestionsParams(BaseModel):
+    questions: list[FormQuestion]
+
+
+class FillAnswerParams(BaseModel):
+    index: int = Field(description="The index of the text box (a textarea, input or rich-text editor)")
+    answer: int = Field(description="The answer's number, as answer_questions numbered it")
+
+
+async def _no_answers(questions: list[dict]) -> list[dict]:
+    """The answerer when a run has none: nothing is known, so nothing is stated."""
+    return [{"question": q["question"], "options": q.get("options") or [], "kind": "fact", "source": "needs_you",
+             "answer": "", "because": "", "bank_id": "", "flags": []} for q in questions]
+
+
+def _question_key(question: str) -> str:
+    return " ".join(re.findall(r"[a-z0-9]+", str(question or "").lower()))
+
+
+def _answer_line(n: int, result: dict) -> str:
+    question = result["question"]
+    if result["source"] == "needs_you" or not result["answer"]:
+        return (f'{n}. "{question}": LEAVE BLANK. Only the candidate can answer this; don\'t pick or type '
+                f"anything for it.")
+    if result["kind"] == "written":
+        return (f'{n}. "{question}": a written answer ({len(result["answer"])} characters). Put it in with '
+                f"fill_answer(index=<the text box's index>, answer={n}); never type it yourself.")
+    verb = "choose" if result.get("options") else "enter"
+    return f'{n}. "{question}": {verb} "{result["answer"]}"'
+
+
+def _apply_tools(cover_letter: str, browser_session, answerer: Answerer | None = None,
+                 asked: dict[str, dict] | None = None) -> "Tools":
+    """The fill agent's tools: the password-scoped set, answer_questions and fill_answer (recording what
+    was answered in `asked`, by question), and paste_cover_letter when there's a letter."""
     tools = _secret_scoped_tools()
+    answerer = answerer or _no_answers
+    asked = asked if asked is not None else {}
+    numbered: dict[int, dict] = {}
+
+    @tools.action(
+        "Get the candidate's answers to the form's questions: every question except name, contact details, "
+        "education and employment history, and file uploads. Call it once per page with all of the page's "
+        "questions, before filling them in, and give each one's label exactly as shown, with its options for a "
+        "dropdown, radio or checkbox question. Then fill in exactly what it returns.",
+        param_model=AnswerQuestionsParams)
+    async def answer_questions(params: AnswerQuestionsParams) -> ActionResult:
+        questions = [q.model_dump() for q in params.questions if q.question.strip()]
+        if not questions:
+            return ActionResult(error="Give at least one question.")
+        try:
+            results = await answerer(questions)
+        except Exception as exc:
+            logger.warning("answering the form's questions failed: %s", exc)
+            results = await _no_answers(questions)
+        lines = []
+        for result in results:
+            n = len(numbered) + 1
+            numbered[n] = result
+            asked[_question_key(result["question"])] = result
+            lines.append(_answer_line(n, result))
+        text = "Answers:\n" + "\n".join(lines)
+        return ActionResult(extracted_content=text, long_term_memory=text)
+
+    @tools.action(
+        "Put a written answer from answer_questions into its text box in one step: give the box's index and the "
+        "answer's number. It replaces whatever the box holds.",
+        param_model=FillAnswerParams)
+    async def fill_answer(params: FillAnswerParams) -> ActionResult:
+        result = numbered.get(params.answer)
+        if not result or not result.get("answer"):
+            return ActionResult(error=f"There's no answer numbered {params.answer} to fill in.")
+        node = await browser_session.get_element_by_index(params.index)
+        if node is None:
+            return ActionResult(error=f"Element index {params.index} isn't available - the page may have changed.")
+        text = result["answer"]
+        try:
+            held = await _paste_text(browser_session, node, text)
+        except Exception as exc:
+            return ActionResult(error=f"Couldn't fill element {params.index}: {type(exc).__name__}: {exc}"[:300])
+        if " ".join(held.split()) != " ".join(text.split()):
+            return ActionResult(error=f"Filled, but element {params.index} now holds {len(held)} characters, not "
+                                      f"the answer's {len(text)}: check it is the box for that question.")
+        done = f"Filled answer {params.answer} ({len(text)} characters) into element {params.index}."
+        return ActionResult(extracted_content=done, long_term_memory=done)
+
     if not cover_letter.strip():
         return tools
 
@@ -975,12 +979,18 @@ async def _empty_required_fields(browser_session) -> list[str]:
     return [str(label)[:150] for label in labels if str(label).strip()][:25] if isinstance(labels, list) else []
 
 
-def _with_empty_fields(notes: str, empty: list[str]) -> str:
-    """The agent's notes, headed by the required fields the page shows as still empty."""
-    if not empty:
-        return notes
-    block = "Required fields still empty on the form:\n" + "\n".join(f"- {label}" for label in empty)
-    return f"{block}\n\n{notes}".strip()
+def _with_empty_fields(notes: str, empty: list[str], left_blank: list[str] = ()) -> str:
+    """The agent's notes, headed by the questions left blank for the candidate (answer_questions had no
+    answer) and the required fields the page shows as still empty (one of those questions isn't repeated)."""
+    blank_keys = [_question_key(q) for q in left_blank]
+    empty = [label for label in empty
+             if not any(k and (k in _question_key(label) or _question_key(label) in k) for k in blank_keys)]
+    blocks = []
+    if left_blank:
+        blocks.append("Questions only you can answer (left blank):\n" + "\n".join(f"- {q}" for q in left_blank))
+    if empty:
+        blocks.append("Required fields still empty on the form:\n" + "\n".join(f"- {label}" for label in empty))
+    return "\n\n".join(blocks + [notes]).strip()
 
 
 async def apply_with_browser(
@@ -993,14 +1003,19 @@ async def apply_with_browser(
     job_password: str = "",
     cv_path: str = "",
     cover_letter_path: str = "",
+    answerer: Answerer | None = None,
 ) -> AsyncGenerator[dict, None]:
     """
     Async generator: the browser-use agent fills the application, then the user reviews it and
     decides whether to submit (see module docstring). The CV and cover-letter PDFs are uploaded
-    under the candidate's name ("Ada_Lovelace_CV.pdf"), not their stored ids. Yields dicts:
+    under the candidate's name ("Ada_Lovelace_CV.pdf"), not their stored ids. `answerer` answers the
+    form's questions (answers.answer_questions); without one, every question is left for the user.
+    Yields dicts:
       { action, screenshot (base64|None), blocked (bool), reason (str|None), done (bool),
         interactive (bool, optional), submitted (bool, only on the final done event),
-        notes (str, only on the first review event: the agent's summary, "Needs your input" first) }
+        notes (str, only on the first review event: the agent's summary, "Needs your input" first),
+        questions (list, only on the first review event: each question answer_questions answered,
+                   with its answer and source) }
     The browser is always killed on exit — including when the client disconnects mid-run.
     """
     if not BROWSER_USE_AVAILABLE:
@@ -1038,6 +1053,7 @@ async def apply_with_browser(
     agent_task: asyncio.Task | None = None
     screencast_task: asyncio.Task | None = None
     upload_dir = ""
+    asked: dict[str, dict] = {}   # question key → its latest answer, filled in by answer_questions
     _register_secret(job_password)  # masked in logs until the finally below
     try:
         # Named copies for the upload, removed in the finally below.
@@ -1052,7 +1068,7 @@ async def apply_with_browser(
             register_new_step_callback=on_step,
             use_vision=False,
             available_file_paths=[path for path in (cv_upload, letter_upload) if path],
-            tools=_apply_tools(cover_letter, browser_session),
+            tools=_apply_tools(cover_letter, browser_session, answerer, asked),
             sensitive_data=sensitive_data,
             # The judge LLM call grades the run from the RAW step history, which browser-use does not
             # redact — e.g. an evaluate() that reads the form back carries the typed password. We
@@ -1096,11 +1112,17 @@ async def apply_with_browser(
             return
 
         empty = await _empty_required_fields(browser_session)
-        notes = _with_empty_fields(notes, empty)[:_MAX_NOTES_CHARS]
+        questions = list(asked.values())
+        left_blank = [q["question"] for q in questions if q["source"] == "needs_you"]
+        notes = _with_empty_fields(notes, empty, left_blank)[:_MAX_NOTES_CHARS]
         see_notes = " — see the agent's notes" if notes else ""
         if agent_error:
             intro = f"The agent hit a problem — handing control to you ({agent_error})"
             reason = "Finish the form yourself, then type 'submit' (or 'done' if you submitted it), or 'skip'."
+        elif ready and left_blank:
+            count = f"{len(left_blank)} question{'' if len(left_blank) == 1 else 's'} only you can answer"
+            intro = f"Form filled, but {count} — see the notes"
+            reason = "Answer them on the form by clicking/typing, then type 'submit' to send it — or 'skip' to cancel."
         elif ready and empty:
             count = f"{len(empty)} required field{'' if len(empty) == 1 else 's'}"
             intro = f"Form filled, but {count} still empty — see the notes"
@@ -1115,7 +1137,7 @@ async def apply_with_browser(
         async for step in _interactive_session(
             browser_session, instruction_queue, intro, reason,
             on_submit=lambda: _submit_with_agent(llm, browser_session, sensitive_data, job_password),
-            notes=notes,
+            notes=notes, questions=questions,
         ):
             yield step
             if step.get("done"):

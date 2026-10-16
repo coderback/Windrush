@@ -19,6 +19,7 @@ from .agent import run_apply, execute_tool
 from .company_names import normalise_company_name as _normalise_company_name
 from .guardrails import check_cv_for_injection, GuardrailViolation
 from . import tracker
+from . import answers
 from . import auth
 from . import pdf_generator
 from . import doc_render
@@ -413,6 +414,7 @@ async def apply(
     job_title: str = Form(default=""),
     company: str = Form(default=""),
     location: str = Form(default=""),
+    job_description: str = Form(default=""),
     composite_score: float = Form(default=0.0),
     exposure_score: float = Form(default=0.5),
     fit_score: float = Form(default=0.0),
@@ -476,6 +478,13 @@ async def apply(
     _browser_queues[session_id] = q
     _browser_frames[session_id] = fq
 
+    # The form's questions are answered from the answer bank as it stands when each page is reached.
+    answer_job = {"title": job_title, "company": company, "location": location, "description": job_description}
+
+    async def answerer(questions: list[dict]) -> list[dict]:
+        return await answers.answer_questions(questions, persona, tracker.list_answers(current_user.id),
+                                              answer_job, cover_letter)
+
     async def cleanup_gen():
         user_confirmed = False
         try:
@@ -483,13 +492,15 @@ async def apply(
             async with aclosing(run_apply(
                 current_user.id, job_id, job_url, cover_letter, risks, session_id, q, fq,
                 job_email=effective_email, job_password=effective_password, cv_path=cv_path,
-                cover_letter_path=letter_path,
+                cover_letter_path=letter_path, answerer=answerer,
             )) as chunks:
                 async for chunk in chunks:
                     try:
                         payload = json.loads(chunk.removeprefix("data: ").strip())
                         if payload.get("type") == "done" and payload.get("submitted") is True:
                             user_confirmed = True
+                        if app_id and payload.get("questions"):
+                            tracker.set_application_questions(app_id, payload["questions"], user_id=current_user.id)
                     except Exception:
                         pass
                     yield chunk
@@ -1051,6 +1062,63 @@ async def check_document(
     return await asyncio.to_thread(
         doc_check.check_document, doc_type, doc, persona, job, body.get("template_id"), bool(body.get("ats", True)),
     )
+
+
+# ── The answer bank: your own answers to application-form questions (answers.py) ──
+
+@app.get("/answers")
+async def list_saved_answers(current_user: Annotated[auth.User, Depends(auth.get_current_user)]):
+    """Your saved answers, most recently changed first."""
+    return tracker.list_answers(current_user.id)
+
+
+@app.post("/answers")
+async def save_answer(body: dict, current_user: Annotated[auth.User, Depends(auth.get_current_user)]):
+    """
+    Save your answer to a question, replacing any saved for the same question. `kind` is 'fact' or
+    'written'; `company` is the job's employer, and the answer is kept for that employer only when the
+    question or the answer names it.
+    """
+    try:
+        return answers.save(current_user.id, body.get("question", ""), body.get("answer", ""),
+                            body.get("kind", "fact"), body.get("company", ""))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.put("/answers/{answer_id}")
+async def edit_saved_answer(answer_id: str, body: dict,
+                            current_user: Annotated[auth.User, Depends(auth.get_current_user)]):
+    text = str(body.get("answer") or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="An answer is needed; delete it instead.")
+    updated = tracker.update_answer(current_user.id, answer_id, text)
+    if not updated:
+        raise HTTPException(status_code=404, detail="No such saved answer")
+    return updated
+
+
+@app.delete("/answers/{answer_id}")
+async def delete_saved_answer(answer_id: str, current_user: Annotated[auth.User, Depends(auth.get_current_user)]):
+    if not tracker.delete_answer(current_user.id, answer_id):
+        raise HTTPException(status_code=404, detail="No such saved answer")
+    return {"deleted": answer_id}
+
+
+@app.post("/answers/draft")
+async def draft_answers(body: dict, current_user: Annotated[auth.User, Depends(auth.get_current_user)]):
+    """
+    Answers to a job's application questions, as the apply agent gets them: each saved, from your
+    profile, drafted (written ones) or needs_you, never guessed. `questions` are strings or
+    {question, options?, max_length?}; `job` is {title, company, location, description}. Nothing is saved.
+    """
+    questions = body.get("questions")
+    if not isinstance(questions, list) or not questions:
+        raise HTTPException(status_code=400, detail="questions must be a non-empty list")
+    job = body.get("job") if isinstance(body.get("job"), dict) else {}
+    persona = tracker.get_user_persona(current_user.id)
+    return {"answers": await answers.answer_questions(questions, persona, tracker.list_answers(current_user.id),
+                                                      job, str(body.get("cover_letter") or ""))}
 
 
 from fastapi.responses import FileResponse  # noqa: E402

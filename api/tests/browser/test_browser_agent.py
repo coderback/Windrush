@@ -284,3 +284,77 @@ def test_cover_letter_is_pasted_whole_and_files_go_up_under_the_candidates_name(
     assert review["notes"].startswith("Required fields still empty on the form:\n"
                                       + "\n".join(f"- {label}" for label in EMPTY_REQUIRED))
     assert_no_chromium_left()
+
+
+class QuestionsLLM(ScriptedLLM):
+    """Asks answer_questions about the page's questions, fills the written one with fill_answer, reads the
+    box back with JS, then finishes."""
+
+    QUESTIONS = [{"question": "Will you require visa sponsorship?", "options": ["Yes", "No"]},
+                 {"question": "Why do you want to join us?"},
+                 {"question": "Do you have any unspent criminal convictions?", "options": ["Yes", "No"]}]
+
+    def __init__(self):
+        super().__init__()
+        self.step = 0
+
+    def next_action(self, text: str) -> list[dict]:
+        self.step += 1
+        if self.step == 1:
+            return [{"answer_questions": {"questions": self.QUESTIONS}}]
+        box = re.search(r"\[(\d+)\]<textarea[^\n]*?id=why", text)
+        if self.step == 2 and box:
+            return [{"fill_answer": {"index": int(box.group(1)), "answer": 2}}]
+        if self.step == 3:
+            return [{"evaluate": {"code": "(function(){var w=document.getElementById('why');"
+                                          "return 'WHY:'+w.value.length+':'+(window.__whyInputs||0)})()"}}]
+        return [{"done": {"text": "Filled what I could.", "success": True}}]
+
+
+WHY = ("I want to build the booking services behind your ferry routes, as I built a FastAPI service that "
+       "ingests 40k sensor readings a day at Brightwave Analytics.")
+
+
+def test_questions_go_through_answer_questions_and_written_answers_are_filled_whole(ba, site, monkeypatch):
+    llm = QuestionsLLM()
+    monkeypatch.setattr(ba, "_make_browser_llm", lambda: llm)
+
+    async def answerer(questions):
+        by_question = {
+            "Will you require visa sponsorship?": ("fact", "profile", "No"),
+            "Why do you want to join us?": ("written", "drafted", WHY),
+            "Do you have any unspent criminal convictions?": ("fact", "needs_you", ""),
+        }
+        return [{"question": q["question"], "options": q["options"], "kind": by_question[q["question"]][0],
+                 "source": by_question[q["question"]][1], "answer": by_question[q["question"]][2],
+                 "because": "", "bank_id": "", "flags": []} for q in questions]
+
+    async def flow():
+        queue: asyncio.Queue = asyncio.Queue()
+        events = []
+        async for event in ba.apply_with_browser(f"{site}/questions.html", {"core_info": {"first_name": "Ada"}}, "",
+                                                 queue, answerer=answerer):
+            events.append(event)
+            if event.get("interactive"):
+                await queue.put("skip")
+            if event.get("done"):
+                break
+        return events
+    events = asyncio.run(flow())
+    seen = "\n".join(llm.seen)
+
+    # browser-use took the nested questions, and the agent was told what to fill and what to leave.
+    assert '1. "Will you require visa sponsorship?": choose "No"' in seen
+    assert f"a written answer ({len(WHY)} characters)" in seen and WHY not in seen.split("Answers:")[1][:400]
+    assert '3. "Do you have any unspent criminal convictions?": LEAVE BLANK' in seen
+    # The draft went in exactly, in one paste.
+    assert f"Filled answer 2 ({len(WHY)} characters)" in seen
+    length, inputs = map(int, re.search(r"WHY:(\d+):(\d+)", seen).groups())
+    assert length == len(WHY) and inputs >= 1
+
+    review = next(e for e in events if e.get("interactive"))
+    assert [q["source"] for q in review["questions"]] == ["profile", "drafted", "needs_you"]
+    assert review["notes"].startswith("Questions only you can answer (left blank):\n"
+                                      "- Do you have any unspent criminal convictions?\n\n"
+                                      "Required fields still empty on the form:\n- Will you require visa sponsorship?")
+    assert_no_chromium_left()

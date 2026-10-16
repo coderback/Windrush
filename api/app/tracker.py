@@ -73,6 +73,24 @@ CREATE TABLE IF NOT EXISTS job_marks (
 """
 JOB_MARKS = ("offered", "not_offered")
 
+# The answer bank: the user's own answers to application-form questions, reused on later forms (see
+# answers.py). question_key is the question as answers.question_key() normalises it, for exact matches;
+# company is set when the answer is about one employer, so only that employer's forms reuse it.
+_CREATE_ANSWER_BANK_TABLE = """
+CREATE TABLE IF NOT EXISTS answer_bank (
+    id           TEXT PRIMARY KEY,
+    user_id      TEXT NOT NULL,
+    question     TEXT NOT NULL,
+    question_key TEXT NOT NULL,
+    answer       TEXT NOT NULL,
+    kind         TEXT NOT NULL,
+    company      TEXT NOT NULL DEFAULT '',
+    created_at   TEXT NOT NULL,
+    updated_at   TEXT NOT NULL
+);
+"""
+ANSWER_KINDS = ("fact", "written")
+
 
 def init_db(db_path: str = "") -> None:
     global _DB_PATH
@@ -86,6 +104,8 @@ def init_db(db_path: str = "") -> None:
         con.execute(_CREATE_USERS_TABLE)
         con.execute(_CREATE_TABLE)
         con.execute(_CREATE_JOB_MARKS_TABLE)
+        con.execute(_CREATE_ANSWER_BANK_TABLE)
+        con.execute("CREATE INDEX IF NOT EXISTS idx_answer_bank_user ON answer_bank(user_id)")
         # Migrations — safe to run on existing DBs
         for stmt in [
             "ALTER TABLE users ADD COLUMN persona TEXT DEFAULT '{}'",
@@ -93,6 +113,8 @@ def init_db(db_path: str = "") -> None:
             "ALTER TABLE applications ADD COLUMN tailored_cv TEXT",
             "ALTER TABLE applications ADD COLUMN user_id TEXT",
             "ALTER TABLE users ADD COLUMN job_password_enc TEXT",
+            # The questions the agent met on the application's form, with each answer and its source.
+            "ALTER TABLE applications ADD COLUMN questions TEXT",
         ]:
             try:
                 con.execute(stmt)
@@ -371,6 +393,7 @@ def list_applications(user_id: str, status: str | None = None) -> list[dict]:
         for row in rows:
             d = dict(row)
             d["skill_gaps"] = json.loads(d.get("skill_gaps") or "[]")
+            d["questions"] = json.loads(d.get("questions") or "[]")
             # Don't expose full CV/cover letter in list view
             d.pop("cv_profile", None)
             d.pop("cover_letter", None)
@@ -438,3 +461,76 @@ def get_job_marks(user_id: str) -> dict[str, str]:
     rows = con.execute("SELECT job_id, sponsorship FROM job_marks WHERE user_id = ?", (user_id,)).fetchall()
     con.close()
     return dict(rows)
+
+
+def set_application_questions(app_id: str, questions: list[dict], *, user_id: str) -> bool:
+    """Record the questions the agent met on this application's form (see answers.answer_questions)."""
+    con = sqlite3.connect(_DB_PATH)
+    with con:
+        cur = con.execute("UPDATE applications SET questions=? WHERE id=? AND user_id=?",
+                          (json.dumps(questions, ensure_ascii=False), app_id, user_id))
+    con.close()
+    return cur.rowcount == 1
+
+
+# ── The answer bank ───────────────────────────────────────────────────────────
+
+_ANSWER_COLUMNS = "id, question, question_key, answer, kind, company, created_at, updated_at"
+
+
+def list_answers(user_id: str) -> list[dict]:
+    """The user's saved answers, most recently changed first."""
+    con = sqlite3.connect(_DB_PATH)
+    con.row_factory = sqlite3.Row
+    rows = con.execute(f"SELECT {_ANSWER_COLUMNS} FROM answer_bank WHERE user_id=? ORDER BY updated_at DESC",
+                       (user_id,)).fetchall()
+    con.close()
+    return [dict(r) for r in rows]
+
+
+def get_answer(user_id: str, answer_id: str) -> dict | None:
+    con = sqlite3.connect(_DB_PATH)
+    con.row_factory = sqlite3.Row
+    row = con.execute(f"SELECT {_ANSWER_COLUMNS} FROM answer_bank WHERE id=? AND user_id=?",
+                      (answer_id, user_id)).fetchone()
+    con.close()
+    return dict(row) if row else None
+
+
+def save_answer(user_id: str, question: str, question_key: str, answer: str, kind: str, company: str = "") -> dict:
+    """Save an answer, replacing the one already saved for the same question (and employer, if any)."""
+    if kind not in ANSWER_KINDS:
+        raise ValueError(f"kind must be one of {ANSWER_KINDS}")
+    now = _now()
+    con = sqlite3.connect(_DB_PATH)
+    with con:
+        row = con.execute("SELECT id FROM answer_bank WHERE user_id=? AND question_key=? AND lower(company)=lower(?)",
+                          (user_id, question_key, company)).fetchone()
+        if row:
+            answer_id = row[0]
+            con.execute("UPDATE answer_bank SET question=?, answer=?, kind=?, company=?, updated_at=? WHERE id=?",
+                        (question, answer, kind, company, now, answer_id))
+        else:
+            answer_id = uuid.uuid4().hex
+            con.execute(f"INSERT INTO answer_bank ({_ANSWER_COLUMNS}, user_id) VALUES (?,?,?,?,?,?,?,?,?)",
+                        (answer_id, question, question_key, answer, kind, company, now, now, user_id))
+    con.close()
+    return get_answer(user_id, answer_id)
+
+
+def update_answer(user_id: str, answer_id: str, answer: str) -> dict | None:
+    """Change a saved answer's text; None if the user has no such answer."""
+    con = sqlite3.connect(_DB_PATH)
+    with con:
+        cur = con.execute("UPDATE answer_bank SET answer=?, updated_at=? WHERE id=? AND user_id=?",
+                          (answer, _now(), answer_id, user_id))
+    con.close()
+    return get_answer(user_id, answer_id) if cur.rowcount == 1 else None
+
+
+def delete_answer(user_id: str, answer_id: str) -> bool:
+    con = sqlite3.connect(_DB_PATH)
+    with con:
+        cur = con.execute("DELETE FROM answer_bank WHERE id=? AND user_id=?", (answer_id, user_id))
+    con.close()
+    return cur.rowcount == 1
