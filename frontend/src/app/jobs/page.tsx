@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { authFetch } from "../api";
@@ -14,7 +15,8 @@ import { parseCommaList } from "@/components/CommaListInput";
 import { jobKey, workSetting } from "@/lib/format";
 import { jobHref, rememberFeed, rememberJob } from "@/lib/jobs";
 import { discardJob } from "@/lib/actions";
-import type { Job } from "@/lib/types";
+import { useResource } from "@/lib/store";
+import type { Job, Persona } from "@/lib/types";
 
 const PAGE_SIZE = 20;
 const WIDE = "(min-width: 1000px)";
@@ -101,6 +103,8 @@ function FeedPage() {
   const [sponsorshipApplied, setSponsorshipApplied] = useState("any");
   const [showFilters, setShowFilters] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
+  const persona = useResource<Persona>("/api/persona");
+  const hasTitles = (persona.data?.preferences.target_titles?.length ?? 0) > 0;
 
   // Live discovery runs server-side in the background when the feed is thin; while it does,
   // re-poll page 1 quietly so new matches appear without a manual refresh.
@@ -294,8 +298,12 @@ function FeedPage() {
             ) : visible.length === 0 && !discovering ? (
               <EmptyState action={activeCount > 0 ? (
                 <button type="button" onClick={clearAll} className={buttonClass("secondary", "sm")}>Clear filters</button>
+              ) : !hasTitles && persona.data ? (
+                <Link href="/profile#prefs" className={buttonClass("secondary", "sm")}>Add target titles</Link>
               ) : undefined}>
-                {activeCount > 0 ? "No roles match these filters." : "No roles yet. Add target titles to your persona so discovery knows what to look for."}
+                {activeCount > 0 ? "No roles match these filters."
+                  : hasTitles ? "No roles here yet. Discovery looks again each time the feed runs low."
+                  : "No roles yet. Add target job titles to your persona so discovery knows what to look for."}
               </EmptyState>
             ) : (
               visible.map((job) => (
