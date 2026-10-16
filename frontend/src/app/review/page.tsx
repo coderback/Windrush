@@ -4,6 +4,7 @@ import Link from "next/link";
 import { Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { BrowserFrame } from "@/components/BrowserView";
+import FormQuestions from "@/components/FormQuestions";
 import ReviewLayout from "@/components/ReviewLayout";
 import Icon from "@/components/ui/Icon";
 import { Page } from "@/components/ui/TopBar";
@@ -160,6 +161,8 @@ function ReviewQueue() {
               submit={{ onClick: () => { if (workspace) { workspace.remember(); router.push(workspace.href); } }, disabled: !workspace,
                 label: "Submit from the workspace", hint: "Submitting needs the agent's browser open." }}
             />
+            <FormQuestions key={current.id} questions={current.questions ?? []} company={current.company}
+              savedNote="Saved. When you run the agent again, it fills this in from your saved answers." />
           </>
         )}
       </Page>

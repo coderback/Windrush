@@ -16,8 +16,9 @@ Built with FastAPI, Next.js, [browser-use](https://github.com/browser-use/browse
 6. **Per-job analysis** — fit score (LLM semantic match) and AI risk for a single role.
 7. **Tailored CV + Cover Letter** — structured, ATS-aware documents with a live in-app preview and PDF export (HTML/CSS → WeasyPrint).
 8. **Browser Application** — a headless Chrome agent fills the application form and **stops before the final submit**. You review it in a live view (and can take over with clicks/typing), then `submit`, `done` (you submitted it yourself) or `skip`.
-9. **Skill Roadmap** — 6 AI-resilient skill-development recommendations for your industry and target role.
-10. **Application Tracker** — every application through a status lifecycle (Saved → Pending Review → Evaluated → Applied → Responded → Interview → Offer → Rejected / Discarded).
+9. **Application questions** — every screening question on a form is answered from your answer bank, then your persona; written ones ("Why us?", "A time when…") are drafted for the job and fact-checked. A fact nothing you've given states is never guessed: it's left blank, and what you answer in the review is saved for the next form.
+10. **Skill Roadmap** — 6 AI-resilient skill-development recommendations for your industry and target role.
+11. **Application Tracker** — every application through a status lifecycle (Saved → Pending Review → Evaluated → Applied → Responded → Interview → Offer → Rejected / Discarded).
 
 ---
 
@@ -158,6 +159,9 @@ Long-running endpoints stream **Server-Sent Events (SSE)**. Protected endpoints 
 | `POST` | `/documents/pdf` | Render a structured doc (or legacy text) to PDF |
 | `POST` | `/documents/preview` | Render a structured doc to HTML for the live preview |
 | `GET` | `/documents/{doc_id}/download` | Download a generated PDF |
+| `GET` / `POST` | `/answers` | Your answer bank / save an answer (`kind` fact or written; kept for one employer only when it names it) |
+| `PUT` / `DELETE` | `/answers/{id}` | Change / delete a saved answer |
+| `POST` | `/answers/draft` | Answer a job's application questions as the agent would (saved, profile, drafted or needs_you); nothing is saved |
 | `GET` | `/health` | Liveness check |
 
 ---
@@ -196,6 +200,7 @@ Labels: **High ≥ 65 %**, **Medium 35–65 %**, **Low < 35 %**. **Job fit** (`s
 - **No telemetry** — browser-use's product telemetry (PostHog) and cloud sync default to on and would send each run's task prompt, actions and visited URLs to browser-use; `browser_agent.py` defaults `ANONYMIZED_TELEMETRY` / `BROWSER_USE_CLOUD_SYNC` to `false` and `docker-compose.yml` sets both.
 - **Network limits** — the agent's browser can't open raw-IP URLs, `localhost` or the internal service hostnames.
 - **CV upload** — the tailored CV PDF if you generated one, otherwise your uploaded original.
+- **Questions** — the agent isn't given facts to answer from. It sends each page's questions to an `answer_questions` action (`answers.py`), which answers from your saved answers, then your persona, and drafts written ones, and says where each answer came from. A model maps each question to the fact that answers it, but the value comes from the fact, and code checks the reading (a cited fact, one of the form's options, a yes/no fact's direction, a UK fact not used for another country). Contact details, salary and equality answers reach that model only as "this fact exists". Questions nothing answers are left blank and listed first in the review, which shows every answer and its source.
 
 ---
 
@@ -256,6 +261,8 @@ The CV and cover-letter PDF tests need WeasyPrint's Pango libraries; where those
 cd api && set -a && . ../.env && set +a
 WINDRUSH_LLM_EVAL=1 pytest evals -s   # -s prints the scores; per-item answers go to evals/last_run.json
 ```
+
+`evals/test_answers_eval.py` puts 40 real application questions to a test persona with an answer bank. It fails if a fact is answered outside its labelled answers (a guess, a wrong option, a UK fact used for the US), a draft keeps an unsupported claim, or a private value reaches the model.
 
 **Frontend smoke tests** (`frontend/e2e/`) drive the built app in Chromium with the API mocked:
 

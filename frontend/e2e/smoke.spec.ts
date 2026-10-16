@@ -261,3 +261,77 @@ test("the job workspace tailors a CV and checks it against the persona", async (
   expect(checked[0]).toMatchObject({ type: "cv", doc: { name: "Sam Okafor" }, job: { title: job.title } });
   api.expectAllMocked();
 });
+
+const answered = (question: string, source: string, answer: string, extra: object = {}) => ({
+  question, options: [], kind: "fact", source, answer, because: "", bank_id: "", flags: [], ...extra,
+});
+
+test("the review shows where each answer came from and saves the one only you can answer", async ({ page }) => {
+  await signIn(page);
+  const posted: unknown[] = [];
+  const questions = [
+    answered("Do you have the right to work in the UK?", "profile", "Yes",
+      { options: ["Yes", "No"], because: "Your profile: Right to work / work authorisation in the UK = Yes" }),
+    answered("Why do you want to join Company a1?", "drafted", "I want to build your booking services.",
+      { kind: "written", flags: ["Paragraph 1: Kafka isn't in your persona"] }),
+    answered("Have you ever been convicted of a criminal offence?", "needs_you", "", { options: ["Yes", "No"] }),
+  ];
+  const api = await mockApi(page, {
+    "GET /api/persona": PERSONA,
+    "GET /api/applications": [app("a1", "Pending Review", { questions })],
+    "POST /api/answers": (request) => {
+      posted.push(request.postDataJSON());
+      return { id: "b1", question: "q", answer: "No", kind: "fact", company: "", created_at: "", updated_at: "" };
+    },
+  });
+  await page.goto("/review");
+  const panel = page.getByRole("region", { name: "Questions on this form" });
+  await expect(panel).toContainText("1 only you can answer");
+  await expect(panel).toContainText("1 drafted, check it");
+  await expect(panel).toContainText("Your profile: Right to work / work authorisation in the UK = Yes");
+  await expect(panel).toContainText("Kafka isn't in your persona");
+
+  // The question nothing answered comes first, with the form's own options.
+  await panel.getByLabel("Have you ever been convicted of a criminal offence?").selectOption("No");
+  await panel.getByRole("button", { name: "Save answer" }).click();
+  await expect.poll(() => posted).toEqual([{ question: "Have you ever been convicted of a criminal offence?",
+    answer: "No", kind: "fact", company: "Company a1" }]);
+  await expect(panel).toContainText("it fills this in from your saved answers");
+  api.expectAllMocked();
+});
+
+test("saved answers can be edited and deleted from your persona", async ({ page }) => {
+  await signIn(page);
+  const saved = { id: "b1", question: "Do you hold a full UK driving licence?", answer: "No", kind: "fact",
+                  company: "", created_at: "2026-10-16T10:00:00Z", updated_at: "2026-10-16T10:00:00Z" };
+  const puts: unknown[] = [];
+  let deleted = false;
+  const api = await mockApi(page, {
+    ...SHELL,
+    "GET /api/answers": [saved],
+    "PUT /api/answers/b1": (request) => {
+      puts.push(request.postDataJSON());
+      return { ...saved, answer: "Yes", updated_at: "2026-10-16T11:00:00Z" };
+    },
+    "DELETE /api/answers/b1": () => {
+      deleted = true;
+      return { deleted: "b1" };
+    },
+  });
+  await page.goto("/profile");
+  await page.getByRole("button", { name: /^Saved answers/ }).click();
+  await expect(page).toHaveURL(/#answers$/);
+  await expect(page.getByText("Do you hold a full UK driving licence?")).toBeVisible();
+
+  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByLabel("Do you hold a full UK driving licence?").fill("Yes");
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect.poll(() => puts).toEqual([{ answer: "Yes" }]);
+  await expect(page.getByText("Yes", { exact: true })).toBeVisible();
+
+  await page.getByRole("button", { name: "Delete", exact: true }).click();
+  await page.getByRole("button", { name: "Delete it" }).click();
+  await expect.poll(() => deleted).toBe(true);
+  await expect(page.getByText("Nothing saved yet.", { exact: false })).toBeVisible();
+  api.expectAllMocked();
+});

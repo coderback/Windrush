@@ -8,6 +8,7 @@ import { buttonClass, Callout, Card, cx, Skeleton, Spinner } from "@/components/
 import {
   AreaField, ChipInput, dateRange, EntryCard, monthLabel, SelectField, TextField, YesNoField,
 } from "@/components/persona/fields";
+import AnswerBank from "@/components/persona/AnswerBank";
 import { load, mutate, requestJson } from "@/lib/store";
 import { MIN_STORIES, personaChecks, personaStrength, type SectionKey } from "@/lib/persona";
 import type {
@@ -525,6 +526,8 @@ export default function ProfilePage() {
             </div>
           </SectionCard>
         );
+      case "answers":
+        return <AnswerBank />;
       case "prefs":
         return (
           <SectionCard title="Job preferences" intro="This shapes your feed. Discovery searches each title in each location.">

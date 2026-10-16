@@ -6,31 +6,36 @@ import sqlite3
 import pytest
 
 import app.browser_agent as ba
-from app import agent, net_guard, tracker
+from app import agent, answers as answers_module, net_guard, tracker
 from app.models import is_present_end_date
 
-UNSET_FACTS = ["Right to work", "Require visa sponsorship", "Has government ties", "Willing to relocate",
-               "Can work in-person", "Can start immediately", "Has reliable transportation",
-               "Needs accommodations", "Are you currently employed", "Remote/Hybrid preference",
-               "Salary expectations", "Currently holds another", "Previously held another"]
+UNSET_FACTS = ["right_to_work_uk", "require_sponsorship", "has_government_ties", "relocation_willingness",
+               "can_work_in_person", "can_start_immediately", "has_reliable_transportation",
+               "needs_accommodations", "currently_employed", "remote_preference",
+               "salary_annual", "salary_hourly", "holds_other_nationality", "held_other_nationality"]
 
 
 def _answers(persona):
-    return dict(ba._known_answers(persona))
+    """The persona's facts that answer_questions can answer from, by id."""
+    return {fact.id: fact.value for fact in answers_module.profile_facts(persona)}
 
 
 def test_unanswered_facts_are_left_out_not_defaulted():
     answers = _answers({"core_info": {"first_name": "Ada"}})
-    for question in UNSET_FACTS:
-        assert not any(q.startswith(question) for q in answers), question
+    for fact in UNSET_FACTS:
+        assert fact not in answers, fact
 
 
-def test_unanswered_facts_are_not_in_the_task_and_the_agent_is_told_not_to_guess():
-    task = ba._build_task("https://x.example/job", {"core_info": {"first_name": "Ada"}}, "", "", "", "")
-    assert "work authorisation in the UK:" not in task
-    assert "Require visa sponsorship:" not in task
-    assert "Remote/Hybrid preference:" not in task
-    assert "do NOT guess" in task and "Needs your input" in task
+def test_the_task_states_no_screening_facts_and_sends_every_question_to_answer_questions():
+    persona = {"core_info": {"first_name": "Ada", "right_to_work_uk": True, "nationality": "Nigerian",
+                             "visa_status": "Graduate visa"},
+               "screening": {"why_this_role": "I like robots", "notice_period_canonical": "2 weeks"},
+               "story_bank": [{"title": "Rescue", "scenario": "s", "action": "a", "result": "r"}]}
+    task = ba._build_task("https://x.example/job", persona, "", "", "", "")
+    for fact in ("work authorisation in the UK", "Nigerian", "Graduate visa", "I like robots", "2 weeks", "Rescue"):
+        assert fact not in task, fact
+    assert "call answer_questions first" in task and "Never answer one of these questions yourself" in task
+    assert "Do NOT guess" in task and "Needs your input" in task
 
 
 def test_agent_is_told_to_open_its_summary_with_what_needs_input():
@@ -44,26 +49,26 @@ def test_given_answers_are_stated_including_no():
         "preferences": {"relocation_willingness": True, "can_start_immediately": False},
     }
     answers = _answers(persona)
-    assert answers["Right to work / work authorisation in the UK"] == "No"
-    assert answers["Require visa sponsorship"] == "Yes"
-    assert answers["Has government ties"] == "No"
-    assert answers["Willing to relocate"] == "Yes"
-    assert answers["Can start immediately"] == "No"
-    assert "Needs accommodations" not in answers
+    assert answers["right_to_work_uk"] == "No"
+    assert answers["require_sponsorship"] == "Yes"
+    assert answers["has_government_ties"] == "No"
+    assert answers["relocation_willingness"] == "Yes"
+    assert answers["can_start_immediately"] == "No"
+    assert "needs_accommodations" not in answers
 
 
 def test_diversity_falls_back_to_prefer_not_to_say_and_maps_stored_values():
-    assert _answers({})["Disability"] == "Prefer not to say"
-    assert _answers({"diversity": {"disability_status": "no"}})["Disability"] == "No"
-    assert _answers({"diversity": {"disability_status": "prefer_not_to_say"}})["Disability"] == "Prefer not to say"
-    assert _answers({})["Gender"] == "Prefer not to say"
+    assert _answers({})["disability"] == "Prefer not to say"
+    assert _answers({"diversity": {"disability_status": "no"}})["disability"] == "No"
+    assert _answers({"diversity": {"disability_status": "prefer_not_to_say"}})["disability"] == "Prefer not to say"
+    assert _answers({})["gender"] == "Prefer not to say"
 
 
 def test_currently_employed_means_a_current_role_not_any_past_one():
     past = {"history": [{"employer": "Old Co", "title": "Intern", "is_current": False, "end_date": "2022"}]}
     current = {"history": [{"employer": "Now Co", "title": "Analyst", "is_current": True}]}
-    assert _answers(past)["Are you currently employed"] == "No"
-    assert _answers(current)["Are you currently employed"] == "Yes"
+    assert _answers(past)["currently_employed"] == "No"
+    assert _answers(current)["currently_employed"] == "Yes"
 
 
 @pytest.mark.parametrize("end_date", [
@@ -76,7 +81,7 @@ def test_a_present_end_date_counts_as_currently_employed(end_date):
     # How parsed CVs often store a current role: is_current left off, the CV's word in end_date.
     persona = {"history": [{"employer": "Old Co", "end_date": "2019"},
                            {"employer": "Now Co", "is_current": False, "end_date": end_date}]}
-    assert _answers(persona)["Are you currently employed"] == "Yes"
+    assert _answers(persona)["currently_employed"] == "Yes"
 
 
 @pytest.mark.parametrize("end_date", ["2021", "Mar 2019", "Nov 2020", "Nowhere Ltd", "Dated"])
@@ -87,17 +92,17 @@ def test_an_ended_role_is_not_mistaken_for_a_present_one(end_date):
 def test_currently_employed_is_no_only_when_every_role_has_really_ended():
     ended = {"history": [{"employer": "A", "end_date": "2021"}, {"employer": "B", "end_date": "Mar 2019"},
                          {"employer": "C", "end_date": "03/2018"}, {"employer": "D", "end_date": "2016-07"}]}
-    assert _answers(ended)["Are you currently employed"] == "No"
+    assert _answers(ended)["currently_employed"] == "No"
 
     # A role with no end date may be the current one: don't claim either way.
     unclear = {"history": [{"employer": "A", "end_date": "2021"}, {"employer": "B", "end_date": ""}]}
-    assert "Are you currently employed" not in _answers(unclear)
-    assert "Are you currently employed" not in _answers({"history": [{"employer": "A"}]})
+    assert "currently_employed" not in _answers(unclear)
+    assert "currently_employed" not in _answers({"history": [{"employer": "A"}]})
 
     # Nor one whose end date has no year: it isn't a date we can read, so it may still mean "present".
     for end_date in ("Recently", "Summer", "Left", "Mar"):
         unread = {"history": [{"employer": "A", "end_date": "2021"}, {"employer": "B", "end_date": end_date}]}
-        assert "Are you currently employed" not in _answers(unread), end_date
+        assert "currently_employed" not in _answers(unread), end_date
 
 
 @pytest.mark.parametrize("end_date", [
@@ -106,18 +111,18 @@ def test_currently_employed_is_no_only_when_every_role_has_really_ended():
 ])
 def test_an_end_date_with_a_year_and_a_present_word_has_not_ended(end_date):
     persona = {"history": [{"employer": "A", "end_date": "2018"}, {"employer": "B", "end_date": end_date}]}
-    assert "Are you currently employed" not in _answers(persona)
+    assert "currently_employed" not in _answers(persona)
 
 
 @pytest.mark.parametrize("end_date", ["Nov 2022", "2016 - 2018", "Nowtel Ltd 2020", "Known as of 2021"])
 def test_a_year_without_a_present_word_has_ended(end_date):
     persona = {"history": [{"employer": "A", "end_date": "2018"}, {"employer": "B", "end_date": end_date}]}
-    assert _answers(persona)["Are you currently employed"] == "No"
+    assert _answers(persona)["currently_employed"] == "No"
 
 
 def test_remote_preference_is_stated_only_when_the_user_picked_one():
-    assert "Remote/Hybrid preference" not in _answers({"preferences": {"remote_preference": ""}})
-    assert _answers({"preferences": {"remote_preference": "hybrid"}})["Remote/Hybrid preference"] == "hybrid"
+    assert "remote_preference" not in _answers({"preferences": {"remote_preference": ""}})
+    assert _answers({"preferences": {"remote_preference": "hybrid"}})["remote_preference"] == "hybrid"
 
 
 def test_saving_a_profile_without_a_work_setting_leaves_it_unanswered_everywhere(client, user):
@@ -130,12 +135,12 @@ def test_saving_a_profile_without_a_work_setting_leaves_it_unanswered_everywhere
 
 def test_salary_is_stated_only_as_the_candidate_gave_it():
     # Unset: left out (see UNSET_FACTS) rather than "None", or a "Negotiable" they never chose.
-    assert not any(q.startswith("Salary") for q in _answers({"preferences": {"min_salary": None}}))
+    assert not any(q.startswith("salary") for q in _answers({"preferences": {"min_salary": None}}))
     answers = _answers({"screening": {"salary_canonical": "£32,000 - £36,000"},
                         "preferences": {"min_salary": 30000, "expected_hourly_rate": 18.5}})
-    assert answers["Salary expectations (Annual)"] == "£32,000 - £36,000"   # the written answer wins
-    assert answers["Salary expectations (Hourly)"] == "18.5"
-    assert _answers({"preferences": {"min_salary": 30000}})["Salary expectations (Annual)"] == "30000"
+    assert answers["salary_annual"] == "£32,000 - £36,000"   # the written answer wins
+    assert answers["salary_hourly"] == "18.5"
+    assert _answers({"preferences": {"min_salary": 30000}})["salary_annual"] == "30000"
 
 
 def test_nationality_answers_are_stated_with_their_details():
@@ -143,11 +148,10 @@ def test_nationality_answers_are_stated_with_their_details():
                              "held_other_nationality": True, "previous_nationalities": "Ghanaian",
                              "other_nationalities": "stale text from before"}}
     answers = _answers(persona)
-    assert answers["Currently holds another (dual) nationality or citizenship"] == "No"
-    assert answers["Previously held another nationality or citizenship"] == "Yes"
-    task = ba._build_task("https://x.example/job", persona, "", "", "", "")
-    assert "Nationality: Nigerian" in task and "Previously held nationalities / citizenships: Ghanaian" in task
-    assert "stale text" not in task                     # details only follow a "Yes"
+    assert answers["holds_other_nationality"] == "No"
+    assert answers["held_other_nationality"] == "Yes"
+    assert answers["nationality"] == "Nigerian" and answers["previous_nationalities"] == "Ghanaian"
+    assert "other_nationalities" not in answers         # details only follow a "Yes"
 
 
 @pytest.mark.parametrize("core, kind, name", [
