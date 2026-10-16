@@ -31,3 +31,4 @@ frontend/playwright-report/
 
 # Model evaluation output (api/evals)
 /api/evals/last_run.json
+/api/evals/last_doc_run.json
