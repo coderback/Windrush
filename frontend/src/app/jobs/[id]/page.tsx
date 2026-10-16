@@ -9,6 +9,7 @@ import SponsorshipPanel, { useSponsorship, VERDICT_TONE, viewVerdict } from "@/c
 import DocEditor, { CVDoc, LetterDoc, letterToText } from "@/components/DocEditor";
 import ReviewLayout, { AgentNotes, type LogLine } from "@/components/ReviewLayout";
 import JobDescription from "@/components/JobDescription";
+import DocChecks from "@/components/DocChecks";
 import Icon from "@/components/ui/Icon";
 import TopBar, { Page } from "@/components/ui/TopBar";
 import StepTracker from "@/components/ui/StepTracker";
@@ -533,6 +534,7 @@ export default function JobDetailPage() {
               </div>
               {docToolbar("cv")}
             </div>
+            {cvDoc && !streamingCv && <DocChecks kind="cv" doc={cvDoc} job={job} templateId={templateId} />}
             {streamingCv ? docSkeleton("Tailoring your CV for this role…") : cvDoc ? (
               <DocEditor kind="cv" templateId={templateId} cv={cvDoc} onCvChange={(c) => { setCvDoc(c); setCvDocId(null); }} />
             ) : (
@@ -560,6 +562,7 @@ export default function JobDetailPage() {
               </div>
               {docToolbar("cover_letter")}
             </div>
+            {letterDoc && !streamingLetter && <DocChecks kind="cover_letter" doc={letterDoc} job={job} templateId={templateId} />}
             {streamingLetter ? docSkeleton("Writing your cover letter…") : letterDoc ? (
               <DocEditor kind="cover_letter" templateId={templateId} letter={letterDoc}
                 onLetterChange={(l) => { setLetterDoc(l); setLetterDocId(null); }} />
