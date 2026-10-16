@@ -1,6 +1,8 @@
 import { expect, type Page, type Request } from "@playwright/test";
 
 type Reply = { status?: number; json: unknown };
+/** A server-sent event stream: each object is sent as one `data:` line. */
+type Stream = { sse: object[] };
 /** The JSON body, { status, json }, or a function of the request returning either. */
 type Mock = ((request: Request) => unknown) | object;
 
@@ -22,6 +24,10 @@ export async function mockApi(page: Page, handlers: Record<string, Mock>) {
     }
     const mock = handlers[key];
     const reply = typeof mock === "function" ? mock(request) : mock;
+    if (typeof reply === "object" && reply !== null && "sse" in reply) {
+      const body = (reply as Stream).sse.map((ev) => `data: ${JSON.stringify(ev)}\n\n`).join("");
+      return route.fulfill({ status: 200, headers: { "content-type": "text/event-stream" }, body });
+    }
     const isReply = typeof reply === "object" && reply !== null && "json" in reply;
     await route.fulfill(isReply ? { status: (reply as Reply).status ?? 200, json: (reply as Reply).json }
                                 : { status: 200, json: reply });

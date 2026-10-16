@@ -216,3 +216,45 @@ test("the theme switch applies dark mode and remembers it", async ({ page }) => 
   await expect(page.locator("html")).not.toHaveClass(/\bdark\b/);
   api.expectAllMocked();
 });
+
+test("the job workspace tailors a CV and checks it against the persona", async ({ page }) => {
+  await signIn(page);
+  const job = { ...JOBS[0], description: "Python and FastAPI services on PostgreSQL. Docker a plus." };
+  await page.addInitScript((j) => sessionStorage.setItem("job_1", JSON.stringify(j)), job);
+  const cv = {
+    name: "Sam Okafor", contact: { email: "sam@example.com" }, summary: "Graduate who builds Python services.",
+    skills: [{ category: "Backend", items: ["Python", "FastAPI"] }],
+    experience: [{ title: "Intern", employer: "Brightwave", bullets: ["Cut latency by 35%."] }],
+    education: [], projects: [], certifications: [],
+  };
+  const checked: unknown[] = [];
+  const api = await mockApi(page, {
+    ...SHELL,
+    "GET /api/jobs/1/sponsorship": { sponsorship: "offered", evidence: "", clearance: "", licensed_sponsor: false, sponsor_name: "", mark: "" },
+    "POST /api/jobs/analyze": { sse: [{ type: "job_fit", ranked_jobs: [{ fit_score: 84, level_match: "strong",
+      matched_skills: ["Python"], skill_gaps: ["Kubernetes"], reasoning: "Strong backend overlap." }] }] },
+    "POST /api/jobs/tailored-cv": { sse: [{ type: "tailored_cv", cv }] },
+    "POST /api/documents/preview": { html: "<html><body>CV</body></html>" },
+    "POST /api/documents/check": (request) => {
+      checked.push(request.postDataJSON());
+      return {
+        keywords: { matched: ["FastAPI", "Python"], missing_have: ["Docker"], gaps: ["PostgreSQL"], in_ad: 4, score: 67 },
+        facts: [{ kind: "number", field: "experience.0.bullets.0", label: "Experience: Intern at Brightwave",
+                  value: "35%", message: "“35%” isn't in your persona" }],
+        style: [], ats: { pages: 1, checks: [{ check: "Text can be read", ok: true, detail: "212 words" }] },
+      };
+    },
+  });
+  await page.goto("/jobs/1");
+  await expect(page.getByRole("heading", { name: "Strong fit" })).toBeVisible();
+  await page.getByRole("button", { name: "Continue to tailored CV" }).click();
+
+  const checks = page.getByRole("button", { name: /^Checks/ });
+  await expect(checks).toContainText("1 thing to check");
+  await expect(checks).toContainText("Keywords 2 of 3 you have");
+  await checks.click();
+  await expect(page.getByText("“35%” isn't in your persona")).toBeVisible();
+  await expect(page.getByText("Docker", { exact: true })).toBeVisible();
+  expect(checked[0]).toMatchObject({ type: "cv", doc: { name: "Sam Okafor" }, job: { title: job.title } });
+  api.expectAllMocked();
+});
