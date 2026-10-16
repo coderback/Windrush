@@ -223,3 +223,66 @@ def test_a_letter_with_a_flagged_word_is_revised(replies):
                      json.dumps({"paragraphs": ["I use FastAPI daily.", "Your team of 40 engineers ships daily."]})]
     letter = asyncio.run(agent.execute_tool("generate_cover_letter", {"job": AD, "persona": GRADUATE}))["letter"]
     assert letter["paragraphs"] == ["I use FastAPI daily.", "Your team of 40 engineers ships daily."]
+
+
+# ── Critique and revise (writing quality) ─────────────────────────────────────────────────────
+
+@pytest.fixture
+def critique(monkeypatch, replies):
+    monkeypatch.setattr(agent, "_DOC_CRITIQUE", {"cv", "letter"})
+    return replies
+
+
+GOOD_BULLET = "Built a FastAPI service ingesting 40k readings a day into PostgreSQL."
+
+
+def _critique_reply(summary: str, bullet: str = GOOD_BULLET, issues=("Summary misses the ad's FastAPI focus",)) -> str:
+    text = json.loads(_text_reply(bullet))
+    text["summary"] = summary
+    return json.dumps({"issues": list(issues), "revised": text})
+
+
+def _generate(kind: str):
+    tool = "generate_tailored_cv" if kind == "cv" else "generate_cover_letter"
+    return asyncio.run(agent.execute_tool(tool, {"job": AD, "persona": GRADUATE}))
+
+
+def test_a_critique_rewrite_that_holds_up_is_kept(critique):
+    better = "Computer Science graduate building Python and FastAPI services on PostgreSQL."
+    critique.queue = [json.dumps(_model_cv(GOOD_BULLET)), _critique_reply(better)]
+    out = _generate("cv")
+    assert out["cv"]["summary"] == better
+    assert out["review"] == {"issues": ["Summary misses the ad's FastAPI focus"], "kept": True}
+    assert "demanding recruiter" in critique.prompts[1] and "RELEVANCE" in critique.prompts[1]
+
+
+def test_a_critique_rewrite_that_invents_a_claim_is_dropped(critique):
+    critique.queue = [json.dumps(_model_cv(GOOD_BULLET)),
+                      _critique_reply("Graduate who cut latency by 35% with FastAPI.")]
+    out = _generate("cv")
+    assert out["cv"]["summary"] == "Computer Science graduate who builds Python and FastAPI services."
+    assert out["review"]["kept"] is False
+
+
+def test_a_critique_rewrite_that_runs_long_is_dropped(critique):
+    long_summary = "Computer Science graduate who builds Python and FastAPI services. " * 6
+    critique.queue = [json.dumps(_model_cv(GOOD_BULLET)), _critique_reply(long_summary)]
+    assert _generate("cv")["review"]["kept"] is False
+
+
+def test_no_issues_leaves_the_cv_alone(critique):
+    critique.queue = [json.dumps(_model_cv(GOOD_BULLET)), json.dumps({"issues": [], "revised": {}})]
+    out = _generate("cv")
+    assert out["cv"]["experience"][0]["bullets"] == [GOOD_BULLET]
+    assert out["review"] == {"issues": [], "kept": False}
+
+
+def test_the_letter_critique_rewrites_the_flagged_paragraph(critique):
+    first = {"salutation": "Dear Hiring Manager,", "signoff": "Yours faithfully,", "headline": "Graduate",
+             "paragraphs": ["I am writing to apply for this role.", "I build FastAPI services on PostgreSQL."]}
+    critique.queue = [json.dumps(first), json.dumps({
+        "issues": ["Opening is generic"],
+        "paragraphs": ["Northwind's API platform is where I want to build.", "I build FastAPI services on PostgreSQL."]})]
+    out = _generate("letter")
+    assert out["letter"]["paragraphs"][0] == "Northwind's API platform is where I want to build."
+    assert out["review"] == {"issues": ["Opening is generic"], "kept": True}

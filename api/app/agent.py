@@ -610,36 +610,137 @@ def _issue_lines(findings: list[dict]) -> str:
     return "\n".join(lines)
 
 
-async def _revise_cv_text(cv: dict, findings: list[dict], candidate: dict, job: dict) -> dict | None:
-    """
-    One targeted pass over the CV's free text to fix what the document check flagged: claims the
-    candidate data doesn't back, and machine-sounding words. Returns the CV with the revised summary,
-    bullets and project text, or None when the reply doesn't keep the CV's shape.
-    """
-    text = {
+_CV_TEXT_SHAPE = ('{"summary": str, "experience": [{"title", "employer", "bullets": [str]}], '
+                  '"projects": [{"name", "description", "tech": [str]}]}')
+
+
+def _cv_text(cv: dict) -> dict:
+    """The CV's free text (what a revision may change), with names to keep each part in place."""
+    return {
         "summary": cv.get("summary", ""),
         "experience": [{"title": r.get("title", ""), "employer": r.get("employer", ""), "bullets": r.get("bullets", [])}
                        for r in cv.get("experience") or []],
         "projects": [{"name": p.get("name", ""), "description": p.get("description", ""), "tech": p.get("tech", [])}
                      for p in cv.get("projects") or []],
     }
+
+
+def _word_count(value) -> int:
+    return sum(len(s.split()) for s in doc_check._flatten(value))
+
+
+async def _revise_cv_text(cv: dict, findings: list[dict], candidate: dict, job: dict) -> dict | None:
+    """
+    One targeted pass over the CV's free text to fix what the document check flagged: claims the
+    candidate data doesn't back, and machine-sounding words. Returns the CV with the revised summary,
+    bullets and project text, or None when the reply doesn't keep the CV's shape.
+    """
     data = await _llm_json(
         system=(
             "You check a tailored CV against the candidate's own data. Fix ONLY the listed issues and leave "
             "every other word as it is. A number, technology, employer or project the candidate data doesn't "
             "state must be removed or replaced by one it does state — never invent, estimate or round one. "
             "Keep each bullet's meaning and length. Return ONLY JSON in exactly the shape you were given: "
-            '{"summary": str, "experience": [{"title", "employer", "bullets": [str]}], '
-            '"projects": [{"name", "description", "tech": [str]}]}, same roles and projects in the same order.'
+            f"{_CV_TEXT_SHAPE}, same roles and projects in the same order."
         ),
-        user=(f"ISSUES TO FIX:\n{_issue_lines(findings)}\n\nCV TEXT (JSON):\n{json.dumps(text, ensure_ascii=False)}\n\n"
+        user=(f"ISSUES TO FIX:\n{_issue_lines(findings)}\n\nCV TEXT (JSON):\n{json.dumps(_cv_text(cv), ensure_ascii=False)}\n\n"
               f"TARGET JOB: {job.get('title', '')} at {job.get('company', '')}\n\n"
               f"CANDIDATE DATA (JSON):\n{json.dumps(candidate, ensure_ascii=False)}"),
         max_tokens=2048,
         label="revise_cv",
     )
+    return _merge_cv_text(cv, data)
+
+
+_CV_RUBRIC = (
+    "1. RELEVANCE: the ad's three most important requirements are visibly answered in the summary and in the "
+    "first bullet of the most relevant role or project, in the ad's own words where the candidate data supports "
+    "them. 2. EVIDENCE: every bullet is a strong verb + what was built or done + a concrete result or scope that "
+    "the candidate data states; no generic claims ('collaborated with cross-functional teams', 'worked on "
+    "various projects'). 3. SUMMARY: a specific specialism and domain plus one concrete strength; no cliché "
+    "openers or closing filler, no pronouns. 4. PROJECTS: what it does, how it works, and a real result, framed "
+    "for this job's domain. 5. ORDER: the most job-relevant bullet comes first in each role."
+)
+
+_LETTER_RUBRIC = (
+    "1. SPECIFIC TO THEM: the 'why them' paragraph passes the swap test — if another employer's name could "
+    "replace theirs and it still reads fine, it fails. 2. EVIDENCE: two or three requirements named in the ad "
+    "are each proved by a named project or role from the candidate data, with a real result. 3. OPENING: a "
+    "specific hook tied to this employer, never 'I am writing to apply'. 4. ENDING: short and concrete; no perks "
+    "or salary. 5. LANGUAGE: active, confident, no hedging ('I believe', 'I feel'), no clichés or filler."
+)
+
+
+async def _critique_cv_text(cv: dict, candidate: dict, job: dict) -> tuple[dict | None, list[str]]:
+    """
+    A critique-and-revise pass on writing quality: the model reviews the CV text against _CV_RUBRIC
+    and the ad, lists what falls short, and rewrites only those parts. Returns (revised CV or None,
+    issues found). The caller keeps the revision only if it passes the document check.
+    """
+    data = await _llm_json(
+        system=(
+            "You are a demanding recruiter reviewing a tailored CV for one job. Judge the CV text against this "
+            f"rubric: {_CV_RUBRIC} "
+            "List each real shortfall in 'issues' (short, specific: where and what). Then rewrite ONLY the parts "
+            "with an issue in 'revised'; copy everything else exactly. STRICT: use only facts the candidate data "
+            "states — never add a number, technology, employer or project it doesn't, and never estimate one. Keep "
+            "names, the same roles and projects in the same order, and about the same length (the CV must still "
+            "fit one page). If nothing falls short, return an empty 'issues' list. Return ONLY JSON: "
+            f'{{"issues": [str], "revised": {_CV_TEXT_SHAPE}}}.'
+        ),
+        user=(f"TARGET JOB: {job.get('title', '')} at {job.get('company', '')}\n"
+              f"JOB DESCRIPTION:\n{job.get('description', '')[:2500]}\n\n"
+              f"CV TEXT (JSON):\n{json.dumps(_cv_text(cv), ensure_ascii=False)}\n\n"
+              f"CANDIDATE DATA (JSON):\n{json.dumps(candidate, ensure_ascii=False)}"),
+        max_tokens=3000,
+        label="critique_cv",
+    )
+    if not isinstance(data, dict):
+        return None, []
+    issues = [str(i).strip() for i in data.get("issues") or [] if str(i).strip()]
+    if not issues:
+        return None, []
+    return _merge_cv_text(cv, data.get("revised")), issues
+
+
+async def _critique_letter_text(letter: dict, persona: dict, job: dict, research: str) -> tuple[dict | None, list[str]]:
+    """The cover-letter counterpart of _critique_cv_text, judged against _LETTER_RUBRIC."""
+    data = await _llm_json(
+        system=(
+            "You are a demanding recruiter reviewing a cover letter for one job. Judge it against this rubric: "
+            f"{_LETTER_RUBRIC} "
+            "List each real shortfall in 'issues' (short, specific: which paragraph and what). Then rewrite ONLY "
+            "the paragraphs with an issue; copy the others exactly. STRICT: use only facts from the candidate "
+            "data, the job ad and the company research — never add a number or technology none of them states. "
+            "Keep the same number of paragraphs and about the same length (one page). If nothing falls short, "
+            'return an empty \'issues\' list. Return ONLY JSON: {"issues": [str], "paragraphs": [str]}.'
+        ),
+        user=(f"JOB: {job.get('title', '')} at {job.get('company', '')}\n"
+              f"DESCRIPTION: {job.get('description', '')[:2500]}\n\n"
+              f"LETTER (JSON):\n{json.dumps({'paragraphs': letter.get('paragraphs', [])}, ensure_ascii=False)}\n\n"
+              f"CANDIDATE PERSONA (JSON): {json.dumps(_llm_persona(persona), ensure_ascii=False)}"
+              + (f"\n\nCOMPANY RESEARCH:\n{research}" if research else "")),
+        max_tokens=1500,
+        label="critique_letter",
+    )
+    if not isinstance(data, dict):
+        return None, []
+    issues = [str(i).strip() for i in data.get("issues") or [] if str(i).strip()]
+    paragraphs = data.get("paragraphs")
+    if not issues:
+        return None, []
+    if (not isinstance(paragraphs, list) or len(paragraphs) != len(letter.get("paragraphs") or [])
+            or not all(isinstance(p, str) and p.strip() for p in paragraphs)):
+        return None, issues
+    return {**letter, "paragraphs": [p.strip() for p in paragraphs]}, issues
+
+
+def _merge_cv_text(cv: dict, data) -> dict | None:
+    """The CV with a revision's summary, bullets and project text, or None when the revision doesn't
+    keep the CV's shape (same roles and projects, in the same order)."""
     if not isinstance(data, dict):
         return None
+    text = _cv_text(cv)
     roles, projects = data.get("experience"), data.get("projects")
     if (not isinstance(roles, list) or len(roles) != len(text["experience"])
             or not isinstance(projects, list) or len(projects) != len(text["projects"])):
@@ -682,6 +783,25 @@ async def _revise_letter_text(letter: dict, findings: list[dict], persona: dict,
             or not all(isinstance(p, str) and p.strip() for p in paragraphs)):
         return None
     return {**letter, "paragraphs": [p.strip() for p in paragraphs]}
+
+
+# Which documents get the critique-and-revise pass on writing quality: DOC_CRITIQUE is a comma-separated
+# list of "cv" and "letter" ("0" or empty for none). Letters only by default. On the quality eval
+# (evals/test_doc_quality_eval.py, three runs of six adverts) the critiqued letter beat its draft every run
+# (4-2, 5-1, then 2-1 with 3 ties when judged in both orders); CVs were mixed (1-3, 4-0, 2-0), so for CVs
+# it isn't yet worth the extra model call.
+_DOC_CRITIQUE = {k.strip() for k in os.environ.get("DOC_CRITIQUE", "letter").split(",")} & {"cv", "letter"}
+_CRITIQUE_GROWTH = 1.15   # a rewrite may run this much longer before it would crowd the page
+
+
+def _critique_holds(doc_type: str, before: dict, after: dict, persona: dict, job: dict, research: str = "") -> bool:
+    """A quality rewrite is kept only if the document check finds nothing new in it and it hasn't grown
+    past _CRITIQUE_GROWTH."""
+    def found(doc):
+        return doc_check.check_facts(doc_type, doc, persona, job, research) + doc_check.check_style(doc_type, doc)
+    text = (lambda d: d.get("paragraphs")) if doc_type == "cover_letter" else _cv_text
+    return (_finding_keys(found(after)) <= _finding_keys(found(before))
+            and _word_count(text(after)) <= _CRITIQUE_GROWTH * max(1, _word_count(text(before))))
 
 
 def _better(before: list[dict], after: list[dict]) -> bool:
@@ -1155,6 +1275,16 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
         )
         letter["signoff"] = "Yours faithfully," if _generic_salutation else "Yours sincerely,"
 
+        # Critique and revise against the rubric; kept only if it adds no unsupported claim and
+        # stays about the same length.
+        review: dict = {"issues": [], "kept": False}
+        if data and "letter" in _DOC_CRITIQUE:
+            revised, review["issues"] = await _critique_letter_text(letter, persona, job, company_research)
+            if revised is not None:
+                review["kept"] = _critique_holds("cover_letter", letter, revised, persona, job, company_research)
+                if review["kept"]:
+                    letter = revised
+
         # Numbers and tools the persona, the ad and the company research don't state, and
         # machine-sounding words: one targeted revision, kept only if it clears them.
         revision = "fallback"
@@ -1175,9 +1305,10 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
                         letter = revised
 
         (logger.warning if data is None else logger.info)(
-            "cover_letter: llm_used=%s, paragraphs=%d, archetype=%s, level=%s, revision=%s | job=%r",
-            data is not None, len(letter["paragraphs"]), archetype, level, revision,
-            (job.get("title") or "")[:60],
+            "cover_letter: llm_used=%s, paragraphs=%d, archetype=%s, level=%s, critique=%d issues %s, revision=%s "
+            "| job=%r",
+            data is not None, len(letter["paragraphs"]), archetype, level, len(review["issues"]),
+            "kept" if review["kept"] else "not kept", revision, (job.get("title") or "")[:60],
         )
 
         return {
@@ -1187,6 +1318,7 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
             "candidate_name": full_name,
             "letter": letter,
             "archetype": archetype,
+            "review": review,
         }
 
     elif name == "generate_skill_roadmap":
@@ -1375,6 +1507,15 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
         added_skills: list[str] = []
         if chosen:
             cv["skills"], added_skills = _top_up_skills(cv["skills"], base_cv["skills"], cv, job)
+        # Critique and revise against the rubric; kept only if it adds no unsupported claim and
+        # stays about the same length (the page fit is measured on the final text).
+        review: dict = {"issues": [], "kept": False}
+        if not used_fallback and "cv" in _DOC_CRITIQUE:
+            revised, review["issues"] = await _critique_cv_text(cv, llm_cv, job)
+            if revised is not None:
+                review["kept"] = _critique_holds("cv", cv, revised, persona, job)
+                if review["kept"]:
+                    cv = revised
         # Check the text against the candidate's data; one targeted revision when it flags something.
         revision = "fallback"
         if not used_fallback:
@@ -1396,12 +1537,13 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
         # same projects recur across roles (the model is meant to tailor the selection).
         final_proj_names = [(p.get("name") or "")[:40] for p in (cv.get("projects") or [])][:5]
         (logger.warning if used_fallback else logger.info)(
-            "tailored_cv: fallback=%s, level=%s, skills chosen=%s, added=%s, revision=%s, projects base=%d model=%d "
-            "final=%d %s | job=%r",
-            used_fallback, level, chosen is not None, added_skills, revision, base_proj_n, model_proj_n,
+            "tailored_cv: fallback=%s, level=%s, skills chosen=%s, added=%s, critique=%d issues %s, revision=%s, "
+            "projects base=%d model=%d final=%d %s | job=%r",
+            used_fallback, level, chosen is not None, added_skills, len(review["issues"]),
+            "kept" if review["kept"] else "not kept", revision, base_proj_n, model_proj_n,
             len(cv.get("projects") or []), final_proj_names, (job.get("title") or "")[:60],
         )
-        return {"cv": cv, "template_id": template_id}
+        return {"cv": cv, "template_id": template_id, "review": review}
 
     return {"error": f"Unknown tool: {name}"}
 

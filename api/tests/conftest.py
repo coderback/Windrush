@@ -71,6 +71,8 @@ os.environ.update({
     "GROQ_API_KEY": "test-key",
     "OLLAMA_HOST": f"http://127.0.0.1:{_ollama.server_address[1]}",
     "ANONYMIZED_TELEMETRY": "false",
+    # The critique pass is one more model call per document; tests that cover it turn it on.
+    "DOC_CRITIQUE": "0",
 })
 
 

@@ -233,7 +233,8 @@ test("the job workspace tailors a CV and checks it against the persona", async (
     "GET /api/jobs/1/sponsorship": { sponsorship: "offered", evidence: "", clearance: "", licensed_sponsor: false, sponsor_name: "", mark: "" },
     "POST /api/jobs/analyze": { sse: [{ type: "job_fit", ranked_jobs: [{ fit_score: 84, level_match: "strong",
       matched_skills: ["Python"], skill_gaps: ["Kubernetes"], reasoning: "Strong backend overlap." }] }] },
-    "POST /api/jobs/tailored-cv": { sse: [{ type: "tailored_cv", cv }] },
+    "POST /api/jobs/tailored-cv": { sse: [{ type: "tailored_cv", cv,
+      review: { issues: ["Summary didn't name FastAPI"], kept: true } }] },
     "POST /api/documents/preview": { html: "<html><body>CV</body></html>" },
     "POST /api/documents/check": (request) => {
       checked.push(request.postDataJSON());
@@ -252,7 +253,9 @@ test("the job workspace tailors a CV and checks it against the persona", async (
   const checks = page.getByRole("button", { name: /^Checks/ });
   await expect(checks).toContainText("1 thing to check");
   await expect(checks).toContainText("Keywords 2 of 3 you have");
+  await expect(checks).toContainText("Reviewed for this ad: 1 fix");
   await checks.click();
+  await expect(page.getByText("Summary didn't name FastAPI")).toBeVisible();
   await expect(page.getByText("“35%” isn't in your persona")).toBeVisible();
   await expect(page.getByText("Docker", { exact: true })).toBeVisible();
   expect(checked[0]).toMatchObject({ type: "cv", doc: { name: "Sam Okafor" }, job: { title: job.title } });
