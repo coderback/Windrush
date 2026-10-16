@@ -335,3 +335,88 @@ test("saved answers can be edited and deleted from your persona", async ({ page 
   await expect(page.getByText("Nothing saved yet.", { exact: false })).toBeVisible();
   api.expectAllMocked();
 });
+
+test("an answer given in the live review is put on the form by the agent", async ({ page }) => {
+  await signIn(page);
+  const job = { ...JOBS[0], description: "Python and FastAPI services." };
+  await page.addInitScript((j) => sessionStorage.setItem("job_1", JSON.stringify(j)), job);
+  // The apply stream stays open for the whole review, which a mocked route can't do: stub it in the page,
+  // with window.__pushApply(event) sending the agent's next event.
+  await page.addInitScript(() => {
+    const realFetch = window.fetch.bind(window);
+    window.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      if (!url.includes("/api/apply")) return realFetch(input, init);
+      const encode = (ev: object) => new TextEncoder().encode(`data: ${JSON.stringify(ev)}\n\n`);
+      const w = window as unknown as { __pushApply: (ev: object) => void; __applyBody: string };
+      w.__applyBody = init?.body instanceof FormData ? Array.from(init.body.keys()).join(",") : "";
+      return Promise.resolve(new Response(new ReadableStream({
+        start(controller) { w.__pushApply = (ev) => controller.enqueue(encode(ev)); },
+      }), { status: 200, headers: { "content-type": "text/event-stream" } }));
+    };
+  });
+  const cv = { name: "Sam Okafor", contact: {}, summary: "Graduate.", skills: [], experience: [], education: [],
+               projects: [], certifications: [] };
+  const letter = { candidate_name: "Sam Okafor", salutation: "Dear Hiring Manager,", paragraphs: ["I build services."],
+                   signoff: "Yours faithfully," };
+  const check = { keywords: { matched: [], missing_have: [], gaps: [], in_ad: 0, score: null }, facts: [], style: [], ats: null };
+  const inputs: { instruction: string }[] = [];
+  const saved: unknown[] = [];
+  const api = await mockApi(page, {
+    ...SHELL,
+    "GET /api/jobs/1/sponsorship": { sponsorship: "offered", evidence: "", clearance: "", licensed_sponsor: false, sponsor_name: "", mark: "" },
+    "POST /api/jobs/analyze": { sse: [{ type: "job_fit", ranked_jobs: [{ fit_score: 84, level_match: "strong",
+      matched_skills: ["Python"], skill_gaps: [], reasoning: "Strong backend overlap." }] }] },
+    "POST /api/jobs/tailored-cv": { sse: [{ type: "tailored_cv", cv }] },
+    "POST /api/jobs/cover-letter": { sse: [{ type: "cover_letter", letter }] },
+    "POST /api/documents/preview": { html: "<html><body>Doc</body></html>" },
+    "POST /api/documents/check": check,
+    "POST /api/documents/pdf": { doc_id: "0".repeat(32) },
+    "GET /api/browser-stream/sid": { sse: [] },
+    "POST /api/answers": (request) => {
+      saved.push(request.postDataJSON());
+      return { id: "b1", question: "q", answer: "No", kind: "fact", company: "", created_at: "", updated_at: "" };
+    },
+    "POST /api/browser-input/sid": (request) => {
+      inputs.push(request.postDataJSON());
+      return { queued: true };
+    },
+  });
+  await page.goto("/jobs/1");
+  await page.getByRole("button", { name: "Continue to tailored CV" }).click();
+  await page.getByRole("button", { name: /write the cover letter/ }).click();
+  await page.getByRole("button", { name: /set up the agent/ }).click();
+  await page.getByRole("button", { name: "Start the agent" }).click();
+
+  const blank = { question: "Do you have any unspent criminal convictions?", options: ["Yes", "No"], kind: "fact",
+                  source: "needs_you", answer: "", because: "Nothing you've saved says this", bank_id: "", flags: [] };
+  await page.waitForFunction(() => "__pushApply" in window);
+  expect(await page.evaluate(() => (window as unknown as { __applyBody: string }).__applyBody)).toContain("job_description");
+  await page.evaluate((q) => {
+    const push = (window as unknown as { __pushApply: (ev: object) => void }).__pushApply;
+    push({ type: "start", session_id: "sid", timestamp: 1 });
+    push({ type: "browser_blocked", action: "Form filled, but 1 question only you can answer", interactive: true,
+           reason: "Answer it", questions: [q], timestamp: 2 });
+  }, blank);
+
+  const panel = page.getByRole("region", { name: "Questions on this form" });
+  await panel.getByLabel("Do you have any unspent criminal convictions?").selectOption("No");
+  await panel.getByRole("button", { name: "Save answer" }).click();
+  await expect.poll(() => saved.length).toBe(1);
+  await panel.getByRole("button", { name: "Fill it in on the form" }).click();
+  await expect.poll(() => inputs.length).toBe(1);
+  expect(JSON.parse(inputs[0].instruction)).toEqual({ type: "answers", answers: [
+    { question: blank.question, answer: "No", kind: "fact", options: ["Yes", "No"] }] });
+  await expect(panel).toContainText("The agent is putting your answer on the form");
+
+  // The agent reports back with the record updated: the prompt to fill it goes away.
+  await page.evaluate((q) => {
+    const push = (window as unknown as { __pushApply: (ev: object) => void }).__pushApply;
+    push({ type: "browser_blocked", action: "Filled in your 1 answer — check them on the page before you submit",
+           interactive: true, reason: "", timestamp: 3,
+           questions: [{ ...q, source: "saved", answer: "No", because: "Your answer in this review" }] });
+  }, blank);
+  await expect(panel).toContainText("Your answer in this review");
+  await expect(panel.getByRole("button", { name: /Fill it in on the form/ })).toHaveCount(0);
+  api.expectAllMocked();
+});

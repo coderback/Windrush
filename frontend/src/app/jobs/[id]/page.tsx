@@ -748,7 +748,13 @@ export default function JobDetailPage() {
         {review}
         {review && (
           <FormQuestions questions={browserQuestions} company={job.company}
-            savedNote="Saved for your next form. Fill it in on the page above too, then submit." />
+            savedNote={sessionId && !ended ? "Saved for your next form." : "Saved for your next form. Fill it in on the page too, then submit."}
+            onFill={sessionId && !ended ? async (answers) => {
+              if (!browserInteractive) throw new Error("Wait until the agent has paused on the form, then try again.");
+              await sendInstruction(sessionId, { type: "answers", answers });
+              setBrowserBlocked(false);
+              setBrowserInteractive(false);
+            } : undefined} />
         )}
 
         <div className="grid gap-4 items-start grid-cols-1 lg:grid-cols-[minmax(0,2fr)_minmax(300px,1fr)]">
