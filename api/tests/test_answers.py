@@ -139,7 +139,28 @@ def test_private_values_are_filled_in_from_the_persona_not_the_model():
     assert resolve("Gender", fact("gender"), ["Man", "Woman", "Prefer not to say"])[0] == "Woman"
     # The stored value isn't an option: left for the user, not mapped by guesswork.
     assert resolve("Gender", fact("gender"), ["Female", "Male"]) is None
-    assert resolve("Desired salary band", fact("salary_annual"), ["£25k-£30k", "£30k-£35k"]) is None
+
+
+@pytest.mark.parametrize("value, picked", [
+    ("£31,500", "£30,000-£35,000"),
+    ("£40k", "£35,000+"),
+    ("£22,000", "Up to £25,000"),
+    ("£30,000", None),                    # on the boundary of two bands: not ours to pick
+    ("£32,000 - £36,000", None),          # a range that straddles two bands
+    ("Negotiable", None),
+])
+def test_a_salary_goes_in_the_band_that_holds_it(value, picked):
+    bands = ["Up to £25,000", "£25,000-£30,000", "£30,000-£35,000", "£35,000+"]
+    assert answers.pick_band(value, bands) == picked
+
+
+def test_a_salary_band_question_is_answered_from_the_salary_fact():
+    assert resolve("Desired salary band", fact("salary_annual"), ["£25k-£30k", "£30k-£35k"])[0] == "£30k-£35k"
+    assert resolve("Desired salary band", fact("salary_annual"), ["£20k-£25k", "£25k-£30k"]) is None
+    # Bands decide on their own: text matching never breaks a tie on a boundary.
+    on_boundary = {**FACTS, "salary_annual": answers.Fact("salary_annual", "Salary", "£30,000", private=True)}
+    assert answers.resolve_fact({"question": "Salary band", "options": ["£25,000-£30,000", "£30,000-£35,000"]},
+                                fact("salary_annual"), on_boundary) is None
 
 
 def test_an_option_must_be_one_the_form_offers():
@@ -322,13 +343,17 @@ class _History:
         return "Filled the form."
 
 
-def _run_with_questions(monkeypatch, answerer, questions):
-    """apply_with_browser with browser-use faked: the fill agent calls answer_questions once, then stops."""
+def _run_with_questions(monkeypatch, answerer, questions, commands=("skip",), fills=None):
+    """apply_with_browser with browser-use faked: the fill agent calls answer_questions once, then stops; the
+    review is answered with `commands`. Each review-fill agent's task and tools go into `fills`."""
     class FakeAgent:
         def __init__(self, **kwargs):
-            self.tools = kwargs["tools"]
+            self.task, self.tools = kwargs["task"], kwargs["tools"]
 
         async def run(self, max_steps):
+            if self.task.startswith(ba._FILL_TASK):
+                fills.append({"task": self.task, "tools": self.tools, "max_steps": max_steps})
+                return _History()
             action = self.tools.registry.registry.actions["answer_questions"]
             await action.function(params=ba.AnswerQuestionsParams(questions=questions))
             return _History()
@@ -357,7 +382,8 @@ def _run_with_questions(monkeypatch, answerer, questions):
 
     async def run():
         queue: asyncio.Queue = asyncio.Queue()
-        queue.put_nowait("skip")
+        for command in commands:
+            queue.put_nowait(command)
         return [e async for e in ba.apply_with_browser("https://jobs.example.com/1", {}, "", queue,
                                                        answerer=answerer)]
     return asyncio.run(run())
@@ -410,3 +436,90 @@ def test_the_apply_stream_records_the_forms_questions_on_the_application(client,
     assert next(e for e in events if e["type"] == "browser_blocked")["questions"] == asked
     assert callable(seen["answerer"])
     assert tracker.list_applications(user)[0]["questions"] == asked
+
+
+# ── Answers you give in the review go on the form ─────────────────────────────
+
+def test_review_answers_are_checked_and_capped():
+    raw = [{"question": "Convictions?", "answer": " No ", "options": ["Yes", "No", 3]},
+           {"question": "", "answer": "x"}, {"question": "Blank?", "answer": "  "}, "nonsense",
+           {"question": "Why us?", "answer": "Because.", "kind": "written"}]
+    assert ba._review_answers(raw) == [
+        {"question": "Convictions?", "answer": "No", "kind": "fact", "options": ["Yes", "No"]},
+        {"question": "Why us?", "answer": "Because.", "kind": "written", "options": []}]
+    assert ba._review_answers("not a list") == []
+    many = [{"question": f"Q{i}", "answer": "a"} for i in range(50)]
+    assert len(ba._review_answers(many)) == ba._MAX_REVIEW_ANSWERS
+
+
+def test_answers_given_in_the_review_are_put_on_the_form_and_the_record_follows(monkeypatch, model):
+    model(read={"Do you have the right to work in the UK?": fact("right_to_work_uk", answer="Yes"),
+                "Have you ever been convicted of a criminal offence?": fact(),
+                "Why do you want to join us?": fact()})
+
+    async def answerer(questions):
+        return await answers.answer_questions(questions, PERSONA, [], JOB)
+    fills = []
+    given = json.dumps({"type": "answers", "answers": [
+        {"question": "Have you ever been convicted of a criminal offence?", "answer": "No", "kind": "fact",
+         "options": ["Yes", "No"]},
+        {"question": "Why do you want to join us?", "answer": "I build booking services.", "kind": "written"}]})
+    events = _run_with_questions(monkeypatch, answerer, [
+        ba.FormQuestion(question="Do you have the right to work in the UK?", options=["Yes", "No"]),
+        ba.FormQuestion(question="Have you ever been convicted of a criminal offence?", options=["Yes", "No"]),
+        ba.FormQuestion(question="Why do you want to join us?")], commands=(given, "skip"), fills=fills)
+
+    # One short agent put both answers in, told exactly what to choose and to paste the written one.
+    assert len(fills) == 1 and fills[0]["max_steps"] == 8
+    task = fills[0]["task"]
+    assert '1. "Have you ever been convicted of a criminal offence?": choose "No"' in task
+    assert "fill_answer(index=<the text box's index>, answer=2)" in task and "do NOT submit" in task
+    assert "fill_answer" in fills[0]["tools"].registry.registry.actions
+
+    reviews = [e for e in events if e.get("interactive")]
+    assert len(reviews) == 2
+    after = reviews[1]
+    assert after["action"].startswith("Filled in your 2 answers")
+    by_question = {q["question"]: q for q in after["questions"]}
+    convictions = by_question["Have you ever been convicted of a criminal offence?"]
+    assert (convictions["source"], convictions["answer"]) == ("saved", "No")
+    assert by_question["Why do you want to join us?"]["kind"] == "written"
+    assert by_question["Do you have the right to work in the UK?"]["source"] == "profile"   # untouched
+    # Nothing is left for you, so the notes no longer lead with it, and the first pass's summary (which still
+    # listed these as needing you) gives way to what this pass did.
+    assert not after["notes"].startswith("Questions only you can answer")
+    assert after["notes"].endswith("From your review: Filled the form.")
+    assert reviews[0]["notes"].endswith("Filled the form.") and "From your review" not in reviews[0]["notes"]
+
+
+def test_a_fill_that_fails_says_so_and_the_review_carries_on(monkeypatch):
+    async def failing(*args, **kwargs):
+        return False, "Couldn't find the convictions question"
+    monkeypatch.setattr(ba, "_fill_with_agent", failing)
+    given = json.dumps({"type": "answers", "answers": [{"question": "Notice period?", "answer": "2 weeks"}]})
+    events = _run_with_questions(monkeypatch, None, [ba.FormQuestion(question="Notice period?")],
+                                 commands=(given, json.dumps({"type": "answers", "answers": []}), "skip"))
+    reviews = [e for e in events if e.get("interactive")]
+    assert reviews[1]["action"].startswith("Couldn't put every answer on the form: Couldn't find the convictions")
+    assert reviews[2]["action"] == "There were no answers to fill in"
+    assert events[-1]["action"] == "Cancelled by user"
+
+
+def test_the_apply_stream_stores_the_questions_again_after_a_fill(client, user, monkeypatch):
+    async def public(url):
+        return None
+    monkeypatch.setattr(net_guard, "assert_public_url", public)
+    before = [{"question": "Notice period?", "options": [], "kind": "fact", "source": "needs_you", "answer": "",
+               "because": "", "bank_id": "", "flags": []}]
+    after = [{**before[0], "source": "saved", "answer": "2 weeks", "because": "Your answer in this review"}]
+
+    async def fake_apply_with_browser(*args, **kwargs):
+        yield {"action": "Form filled", "screenshot": None, "blocked": True, "reason": "", "done": False,
+               "interactive": True, "questions": before}
+        yield {"action": "Filled in your 1 answer", "screenshot": None, "blocked": True, "reason": "", "done": False,
+               "interactive": True, "questions": after}
+        yield {"action": "Cancelled by user", "screenshot": None, "blocked": False, "reason": None, "done": True}
+    monkeypatch.setattr(agent, "apply_with_browser", fake_apply_with_browser)
+
+    client.post("/apply", data={"job_id": "j", "job_title": "T", "company": "C", "job_url": "https://jobs.example.com/1"})
+    assert tracker.list_applications(user)[0]["questions"] == after

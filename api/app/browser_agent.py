@@ -360,6 +360,7 @@ async def _interactive_session(
     on_submit: Callable[[], Awaitable[tuple[bool, str]]],
     notes: str = "",
     questions: list[dict] | None = None,
+    on_answers: Callable[[list[dict]], Awaitable[dict]] | None = None,
 ) -> AsyncGenerator[dict, None]:
     """
     Hand control to the user until they finish. Commands (from BrowserView.tsx):
@@ -367,6 +368,8 @@ async def _interactive_session(
       'submit' → a short agent clicks the final submit button (submitted if it confirms)
       'done'   → the user submitted it themselves
       'skip' / 'cancel' / 'abort' → abandon (not submitted)
+      JSON {type: answers, answers: [{question, answer, kind, options}]} → `on_answers` puts the answers the
+        user gave in the review on the form; its result ({action, notes, questions}) is the next event
       any other text → typed into the focused field
     `notes` (the agent's own summary) and `questions` (what answer_questions answered) ride on the first
     event only; the UI keeps them for the review.
@@ -398,6 +401,21 @@ async def _interactive_session(
         except (json.JSONDecodeError, TypeError):
             pass
         word = (cmd.get("type", "") if cmd else str(raw)).strip().lower()
+
+        if word == "answers" and cmd is not None and on_answers is not None:
+            answers = _review_answers(cmd.get("answers"))
+            if not answers:
+                yield interactive("There were no answers to fill in", again, await _screenshot_b64(browser_session))
+                continue
+            count = f"{len(answers)} answer{'' if len(answers) == 1 else 's'}"
+            yield {"action": f"Filling in your {count}…", "screenshot": None, "blocked": False, "reason": None,
+                   "done": False}
+            update = await on_answers(answers)
+            event = interactive(update.get("action", f"Filled in your {count}"), again,
+                                await _screenshot_b64(browser_session))
+            event.update({k: update[k] for k in ("notes", "questions") if k in update})
+            yield event
+            continue
 
         if word == "submit":
             yield {"action": "Submitting the application…", "screenshot": None, "blocked": False,
@@ -690,6 +708,53 @@ def _secret_scoped_tools() -> "Tools":
     return tools
 
 
+# Answers the candidate gave in the review, put on the paused form by a short follow-up agent.
+_MAX_REVIEW_ANSWERS = 20
+_FILL_TASK = (
+    "The job application form on the current page has been filled in, and the candidate has now answered some "
+    "questions that were left blank (or rewritten an answer). Put each answer below on the form exactly as given: "
+    "choose the given option for a dropdown, radio or checkbox question, type the given text into a text box, and "
+    "use fill_answer for a written answer. Change nothing else, don't navigate away, and do NOT submit the form "
+    "or click any button that sends it. Then call done with success=true, or with success=false naming each "
+    "question you couldn't find on the page.\n\n"
+)
+
+
+def _review_answers(raw) -> list[dict]:
+    """The answers a review 'answers' command carries, checked: [{question, answer, kind, options}]."""
+    out = []
+    for item in raw if isinstance(raw, list) else []:
+        if not isinstance(item, dict):
+            continue
+        question = " ".join(str(item.get("question") or "").split())[:500]
+        answer = str(item.get("answer") or "").strip()[:5000]
+        if not question or not answer:
+            continue
+        options = [str(o)[:200] for o in item.get("options") or [] if isinstance(o, str)][:300]
+        kind = "written" if item.get("kind") == "written" else "fact"
+        out.append({"question": question, "answer": answer, "kind": kind, "options": options})
+    return out[:_MAX_REVIEW_ANSWERS]
+
+
+async def _fill_with_agent(llm, browser_session, sensitive_data: dict | None, answers: list[dict],
+                           secret: str = "") -> tuple[bool, str]:
+    """Run a short follow-up agent on the paused form that puts the review's answers in. Like the submit
+    agent it gets the password-scoped tools, plus fill_answer for the written answers."""
+    numbered = {n: {**a, "source": "saved"} for n, a in enumerate(answers, 1)}
+    task = _FILL_TASK + "Answers:\n" + "\n".join(_answer_line(n, a) for n, a in numbered.items())
+    tools = _secret_scoped_tools()
+    _add_fill_answer(tools, browser_session, numbered)
+    try:
+        agent = Agent(task=task, llm=llm, browser_session=browser_session, use_vision=False, use_judge=False,
+                      directly_open_url=False, tools=tools, sensitive_data=sensitive_data)
+        history = await agent.run(max_steps=min(4 + 2 * len(answers), 16))
+        return bool(history.is_successful()), _redact(history.final_result() or "", secret)[:300]
+    except Exception as exc:
+        error = _redact(str(exc), secret)
+        logger.warning("review fill agent failed: %s", error)
+        return False, error[:300]
+
+
 async def _submit_with_agent(llm, browser_session, sensitive_data: dict | None,
                              secret: str = "") -> tuple[bool, str]:
     """Run a tiny follow-up agent on the same (kept-alive) browser to click the final submit.
@@ -813,6 +878,31 @@ def _answer_line(n: int, result: dict) -> str:
     return f'{n}. "{question}": {verb} "{result["answer"]}"'
 
 
+def _add_fill_answer(tools, browser_session, numbered: dict[int, dict]) -> None:
+    """Register fill_answer, which pastes answer `numbered[n]` whole into a text box."""
+    @tools.action(
+        "Put a written answer into its text box in one step: give the box's index and the answer's number. It "
+        "replaces whatever the box holds.",
+        param_model=FillAnswerParams)
+    async def fill_answer(params: FillAnswerParams) -> ActionResult:
+        result = numbered.get(params.answer)
+        if not result or not result.get("answer"):
+            return ActionResult(error=f"There's no answer numbered {params.answer} to fill in.")
+        node = await browser_session.get_element_by_index(params.index)
+        if node is None:
+            return ActionResult(error=f"Element index {params.index} isn't available - the page may have changed.")
+        text = result["answer"]
+        try:
+            held = await _paste_text(browser_session, node, text)
+        except Exception as exc:
+            return ActionResult(error=f"Couldn't fill element {params.index}: {type(exc).__name__}: {exc}"[:300])
+        if " ".join(held.split()) != " ".join(text.split()):
+            return ActionResult(error=f"Filled, but element {params.index} now holds {len(held)} characters, not "
+                                      f"the answer's {len(text)}: check it is the box for that question.")
+        done = f"Filled answer {params.answer} ({len(text)} characters) into element {params.index}."
+        return ActionResult(extracted_content=done, long_term_memory=done)
+
+
 def _apply_tools(cover_letter: str, browser_session, answerer: Answerer | None = None,
                  asked: dict[str, dict] | None = None) -> "Tools":
     """The fill agent's tools: the password-scoped set, answer_questions and fill_answer (recording what
@@ -846,28 +936,7 @@ def _apply_tools(cover_letter: str, browser_session, answerer: Answerer | None =
         text = "Answers:\n" + "\n".join(lines)
         return ActionResult(extracted_content=text, long_term_memory=text)
 
-    @tools.action(
-        "Put a written answer from answer_questions into its text box in one step: give the box's index and the "
-        "answer's number. It replaces whatever the box holds.",
-        param_model=FillAnswerParams)
-    async def fill_answer(params: FillAnswerParams) -> ActionResult:
-        result = numbered.get(params.answer)
-        if not result or not result.get("answer"):
-            return ActionResult(error=f"There's no answer numbered {params.answer} to fill in.")
-        node = await browser_session.get_element_by_index(params.index)
-        if node is None:
-            return ActionResult(error=f"Element index {params.index} isn't available - the page may have changed.")
-        text = result["answer"]
-        try:
-            held = await _paste_text(browser_session, node, text)
-        except Exception as exc:
-            return ActionResult(error=f"Couldn't fill element {params.index}: {type(exc).__name__}: {exc}"[:300])
-        if " ".join(held.split()) != " ".join(text.split()):
-            return ActionResult(error=f"Filled, but element {params.index} now holds {len(held)} characters, not "
-                                      f"the answer's {len(text)}: check it is the box for that question.")
-        done = f"Filled answer {params.answer} ({len(text)} characters) into element {params.index}."
-        return ActionResult(extracted_content=done, long_term_memory=done)
-
+    _add_fill_answer(tools, browser_session, numbered)
     if not cover_letter.strip():
         return tools
 
@@ -1111,10 +1180,32 @@ async def apply_with_browser(
                    "blocked": False, "reason": None, "done": True}
             return
 
+        summary = notes
         empty = await _empty_required_fields(browser_session)
         questions = list(asked.values())
         left_blank = [q["question"] for q in questions if q["source"] == "needs_you"]
-        notes = _with_empty_fields(notes, empty, left_blank)[:_MAX_NOTES_CHARS]
+        notes = _with_empty_fields(summary, empty, left_blank)[:_MAX_NOTES_CHARS]
+
+        async def put_answers_on_form(answers: list[dict]) -> dict:
+            ok, detail = await _fill_with_agent(llm, browser_session, sensitive_data, answers, job_password)
+            for a in answers:
+                key = _question_key(a["question"])
+                asked[key] = {**asked.get(key, {"bank_id": ""}), "question": asked.get(key, a)["question"],
+                              "options": a["options"], "kind": a["kind"], "source": "saved", "answer": a["answer"],
+                              "because": "Your answer in this review", "flags": []}
+            questions = list(asked.values())
+            blank = [q["question"] for q in questions if q["source"] == "needs_you"]
+            still_empty = await _empty_required_fields(browser_session)
+            count = f"{len(answers)} answer{'' if len(answers) == 1 else 's'}"
+            if ok:
+                action = f"Filled in your {count} — check them on the page before you submit"
+            else:
+                action = f"Couldn't put every answer on the form{': ' + detail if detail else ''} — check the page"
+            # The first pass's summary still lists these questions as needing you, so it gives way to what
+            # this pass did.
+            done = f"From your review: {detail}" if detail else ""
+            return {"action": action[:300], "questions": questions,
+                    "notes": _with_empty_fields(done, still_empty, blank)[:_MAX_NOTES_CHARS]}
         see_notes = " — see the agent's notes" if notes else ""
         if agent_error:
             intro = f"The agent hit a problem — handing control to you ({agent_error})"
@@ -1137,7 +1228,7 @@ async def apply_with_browser(
         async for step in _interactive_session(
             browser_session, instruction_queue, intro, reason,
             on_submit=lambda: _submit_with_agent(llm, browser_session, sensitive_data, job_password),
-            notes=notes, questions=questions,
+            notes=notes, questions=questions, on_answers=put_answers_on_form,
         ):
             yield step
             if step.get("done"):

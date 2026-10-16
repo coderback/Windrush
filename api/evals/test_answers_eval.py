@@ -67,7 +67,7 @@ FACTS = [
     ("What is your nationality?", ["British", "Irish", "Other"], {"British"}),
     ("What is your notice period?", [], {"2 weeks"}),
     ("What are your salary expectations?", [], {"£31,500"}),
-    ("Expected salary band", ["£25,000-£30,000", "£30,000-£35,000", "£35,000+"], {"£30,000-£35,000", NEEDS}),
+    ("Expected salary band", ["£25,000-£30,000", "£30,000-£35,000", "£35,000+"], {"£30,000-£35,000"}),
     ("Gender", ["Male", "Female", "Non-binary", "Prefer not to say"], {"Female"}),
     ("Do you consider yourself to have a disability?", ["Yes", "No", "Prefer not to say"], {"Prefer not to say"}),
     ("Are you 18 years of age or older?", YN, {"Yes"}),
