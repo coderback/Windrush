@@ -51,6 +51,12 @@ async function downloadPdf(docId: string, filename: string) {
   URL.revokeObjectURL(url);
 }
 
+/** The issues a kept critique rewrite fixed, from the generation event's `review`. */
+function keptIssues(review: unknown): string[] {
+  const r = review as { issues?: unknown; kept?: unknown } | undefined;
+  return r?.kept === true && Array.isArray(r.issues) ? r.issues.filter((i): i is string => typeof i === "string") : [];
+}
+
 const LEVEL_MATCH: Record<string, string> = { strong: "strong", ok: "reasonable", reach: "a stretch" };
 
 const EXPOSURE_NOTE = {
@@ -82,6 +88,8 @@ export default function JobDetailPage() {
   const [cvError, setCvError] = useState<string | null>(null);
   const [letterError, setLetterError] = useState<string | null>(null);
   const [cvChoice, setCvChoice] = useState<CvChoice>("tailored");
+  // What the critique-and-revise pass found and fixed, when its rewrite was kept.
+  const [reviewed, setReviewed] = useState<{ cv: string[]; letter: string[] }>({ cv: [], letter: [] });
 
   // PDF state
   const [cvDocId, setCvDocId] = useState<string | null>(null);
@@ -179,7 +187,11 @@ export default function JobDetailPage() {
     let got = false;
     try {
       await postStream("/api/jobs/tailored-cv", { job }, (ev) => {
-        if (ev.type === "tailored_cv" && ev.cv) { setCvDoc(ev.cv as CVDoc); got = true; }
+        if (ev.type === "tailored_cv" && ev.cv) {
+          setCvDoc(ev.cv as CVDoc);
+          setReviewed((r) => ({ ...r, cv: keptIssues(ev.review) }));
+          got = true;
+        }
       });
       if (!got) setCvError("The tailored CV didn't come through.");
     } catch (e) {
@@ -197,7 +209,11 @@ export default function JobDetailPage() {
     let got = false;
     try {
       await postStream("/api/jobs/cover-letter", { job }, (ev) => {
-        if (ev.type === "cover_letter" && ev.letter) { setLetterDoc(ev.letter as LetterDoc); got = true; }
+        if (ev.type === "cover_letter" && ev.letter) {
+          setLetterDoc(ev.letter as LetterDoc);
+          setReviewed((r) => ({ ...r, letter: keptIssues(ev.review) }));
+          got = true;
+        }
       });
       if (!got) setLetterError("The cover letter didn't come through.");
     } catch (e) {
@@ -534,7 +550,7 @@ export default function JobDetailPage() {
               </div>
               {docToolbar("cv")}
             </div>
-            {cvDoc && !streamingCv && <DocChecks kind="cv" doc={cvDoc} job={job} templateId={templateId} />}
+            {cvDoc && !streamingCv && <DocChecks kind="cv" doc={cvDoc} job={job} templateId={templateId} reviewed={reviewed.cv} />}
             {streamingCv ? docSkeleton("Tailoring your CV for this role…") : cvDoc ? (
               <DocEditor kind="cv" templateId={templateId} cv={cvDoc} onCvChange={(c) => { setCvDoc(c); setCvDocId(null); }} />
             ) : (
@@ -562,7 +578,7 @@ export default function JobDetailPage() {
               </div>
               {docToolbar("cover_letter")}
             </div>
-            {letterDoc && !streamingLetter && <DocChecks kind="cover_letter" doc={letterDoc} job={job} templateId={templateId} />}
+            {letterDoc && !streamingLetter && <DocChecks kind="cover_letter" doc={letterDoc} job={job} templateId={templateId} reviewed={reviewed.letter} />}
             {streamingLetter ? docSkeleton("Writing your cover letter…") : letterDoc ? (
               <DocEditor kind="cover_letter" templateId={templateId} letter={letterDoc}
                 onLetterChange={(l) => { setLetterDoc(l); setLetterDocId(null); }} />

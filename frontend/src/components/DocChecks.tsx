@@ -30,8 +30,10 @@ function Pill({ tone, children }: { tone: "ok" | "warn" | "neutral"; children: R
  * claims your persona doesn't back, machine-sounding words, and the PDF read back as an applicant
  * tracking system reads it. Re-runs a moment after each edit.
  */
-export default function DocChecks({ kind, doc, job, templateId = "classic" }: {
+export default function DocChecks({ kind, doc, job, templateId = "classic", reviewed = [] }: {
   kind: "cv" | "cover_letter"; doc: object; job: Job; templateId?: string;
+  /** What the review against the ad found and rewrote while the document was written. */
+  reviewed?: string[];
 }) {
   const [report, setReport] = useState<DocReport | null>(null);
   const [checking, setChecking] = useState(false);
@@ -84,6 +86,9 @@ export default function DocChecks({ kind, doc, job, templateId = "classic" }: {
       <button type="button" aria-expanded={open} aria-controls={panelId} onClick={() => setOpen((o) => !o)}
         className="w-full flex flex-wrap items-center gap-2 px-5 py-3 text-left hover:bg-subtle">
         <span className="text-[13px] font-semibold mr-1">Checks</span>
+        {reviewed.length > 0 && (
+          <Pill tone="ok">Reviewed for this ad: {reviewed.length} {reviewed.length === 1 ? "fix" : "fixes"}</Pill>
+        )}
         {showKeywords && (
           <Pill tone={kw.missing_have.length ? "warn" : "ok"}>
             Keywords {kw.matched.length} of {kw.matched.length + kw.missing_have.length} you have
@@ -130,6 +135,19 @@ export default function DocChecks({ kind, doc, job, templateId = "classic" }: {
                   </span>
                 </>
               )}
+            </section>
+          )}
+          {reviewed.length > 0 && (
+            <section className="flex flex-col gap-2 min-w-0">
+              <h3 className="m-0 text-[13px] font-semibold">Fixed when it was written</h3>
+              <ul className="m-0 p-0 list-none flex flex-col gap-2">
+                {reviewed.map((issue) => (
+                  <li key={issue} className="flex gap-2 text-[13px] leading-[1.45] text-ink-2">
+                    <Icon name="check" size={14} strokeWidth={2.4} className="text-teal mt-[2px]" />
+                    <span>{issue}</span>
+                  </li>
+                ))}
+              </ul>
             </section>
           )}
           <section className="flex flex-col gap-2 min-w-0">
