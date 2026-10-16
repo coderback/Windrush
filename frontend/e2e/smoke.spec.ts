@@ -22,31 +22,42 @@ const PERSONA = {
   story_bank: [], skills: [], summary: "", custom_directives: "",
 };
 
+const app = (id: string, status: string, extra: object = {}) => ({
+  id, job_id: `job-${id}`, job_title: `Role ${id}`, company: `Company ${id}`, location: "London",
+  job_url: `https://jobs.example.com/${id}`, status, date_applied: null, composite_score: 0, exposure_score: 0.4,
+  fit_score: 80, skill_gaps: [], level_match: "strong", notes: "", created_at: new Date().toISOString(), ...extra,
+});
+
+/** What every signed-in page asks for: the sidebar reads the persona and the applications. */
+const SHELL = { "GET /api/persona": PERSONA, "GET /api/applications": [] };
+
 test("a signed-out visitor is sent to the login page", async ({ page }) => {
   const api = await mockApi(page, {});
   await page.goto("/");
   await expect(page).toHaveURL(/\/login$/);
-  await expect(page.getByRole("heading", { name: "Welcome Back" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Welcome back" })).toBeVisible();
   api.expectAllMocked();
 });
 
 test("logging in keeps the token and opens the dashboard", async ({ page }) => {
   let form = "";
   const api = await mockApi(page, {
+    ...SHELL,
     "POST /api/login": (request) => {
       form = request.postData() ?? "";
       return { access_token: "fresh-token", token_type: "bearer" };
     },
     "GET /api/onboarding/status": { complete: true },
-    "GET /api/applications": [],
     "POST /api/score-skills": { skill_risks: [] },
+    "GET /api/jobs": { jobs: [], has_more: false, discovering: false, sponsorship: "any" },
   });
   await page.goto("/login");
-  await page.locator('input[type="email"]').fill("sam@example.com");
-  await page.locator('input[type="password"]').fill("correct horse");
+  await page.getByLabel("Email").fill("sam@example.com");
+  await page.getByLabel("Password").fill("correct horse");
   await page.getByRole("button", { name: /sign in/i }).click();
 
   await expect(page).toHaveURL(/\/dashboard$/);
+  await expect(page.getByRole("heading", { level: 1 })).toContainText("Sam");
   expect(form).toContain("sam@example.com");
   expect(await page.evaluate(() => localStorage.getItem("windrush_token"))).toBe("fresh-token");
   api.expectAllMocked();
@@ -57,8 +68,8 @@ test("a wrong password shows the server's message", async ({ page }) => {
     "POST /api/login": { status: 401, json: { detail: "Incorrect email or password" } },
   });
   await page.goto("/login");
-  await page.locator('input[type="email"]').fill("sam@example.com");
-  await page.locator('input[type="password"]').fill("wrong");
+  await page.getByLabel("Email").fill("sam@example.com");
+  await page.getByLabel("Password").fill("wrong");
   await page.getByRole("button", { name: /sign in/i }).click();
   await expect(page.getByText("Incorrect email or password")).toBeVisible();
   await expect(page).toHaveURL(/\/login$/);
@@ -68,15 +79,14 @@ test("a wrong password shows the server's message", async ({ page }) => {
 test("the feed shows each job's badges and sends the filters to the API", async ({ page }) => {
   await signIn(page);
   const api = await mockApi(page, {
+    ...SHELL,
     // The server picks "possible" for a profile that needs sponsorship and says so.
     "GET /api/jobs": { jobs: JOBS, has_more: false, discovering: false, sponsorship: "possible" },
   });
   await page.goto("/jobs");
 
-  // A card: the innermost element holding both its title and its location.
-  const card = (job: (typeof JOBS)[number]) => page.locator("div")
-    .filter({ has: page.getByRole("heading", { name: job.title, exact: true }) })
-    .filter({ hasText: job.location }).last();
+  const card = (job: (typeof JOBS)[number]) =>
+    page.getByRole("region", { name: "Roles" }).getByRole("button").filter({ hasText: job.title });
   await expect(page.getByText("2 jobs")).toBeVisible();
   for (const text of ["Visa sponsorship", "No experience needed", "Degree required"]) {
     await expect(card(JOBS[0]).getByText(text, { exact: true })).toBeVisible();
@@ -86,18 +96,16 @@ test("the feed shows each job's badges and sends the filters to the API", async 
   }
   await expect(card(JOBS[1]).getByText("Degree required")).toHaveCount(0);   // only preferred
 
-  const sponsorship = page.locator('select[title^="Possible hides"]');
-  const experience = page.locator('select[title^="Hides jobs whose ad asks"]');
-  await expect(sponsorship).toHaveValue("possible");
+  await expect(page.getByRole("checkbox", { name: "Possible" })).toBeChecked();
 
-  await experience.selectOption({ label: "No experience required" });
+  await page.getByLabel("Experience asked").selectOption({ label: "No experience required" });
   await expect.poll(() => api.params("/api/jobs").at(-1)?.get("max_years")).toBe("0");
 
-  await page.getByRole("button", { name: "🎓 No degree needed" }).click();
+  await page.getByRole("checkbox", { name: "No degree needed" }).check();
   await expect.poll(() => api.params("/api/jobs").at(-1)?.get("no_degree")).toBe("true");
   expect(api.params("/api/jobs").at(-1)?.get("max_years")).toBe("0");      // filters combine
 
-  await page.getByRole("button", { name: "✕ Clear filters" }).click();
+  await page.getByRole("button", { name: "Clear all" }).click();
   await expect.poll(() => api.params("/api/jobs").at(-1)?.has("no_degree")).toBe(false);
   const last = api.params("/api/jobs").at(-1)!;
   expect([last.has("max_years"), last.has("sponsorship"), last.get("page")]).toEqual([false, false, "1"]);
@@ -105,8 +113,9 @@ test("the feed shows each job's badges and sends the filters to the API", async 
 });
 
 test("an expired session sends you back to the login page", async ({ page }) => {
+  const expired = { status: 401, json: { detail: "Could not validate credentials" } };
   const api = await mockApi(page, {
-    "GET /api/jobs": { status: 401, json: { detail: "Could not validate credentials" } },
+    "GET /api/jobs": expired, "GET /api/persona": expired, "GET /api/applications": expired,
   });
   await page.goto("/login");
   await page.evaluate(() => localStorage.setItem("windrush_token", "expired-token"));
@@ -120,24 +129,90 @@ test("target titles and locations typed with commas are saved as lists", async (
   await signIn(page);
   let saved: typeof PERSONA | null = null;
   const api = await mockApi(page, {
-    "GET /api/persona": PERSONA,
+    ...SHELL,
     "PUT /api/persona": (request) => {
       saved = request.postDataJSON();
       return { status: "ok" };
     },
   });
   await page.goto("/profile");
-  await page.getByRole("button", { name: "Preferences", exact: true }).click();
+  await page.getByRole("button", { name: /^Job preferences/ }).click();
+  await expect(page).toHaveURL(/#prefs$/);
 
   // Typed key by key: a comma or a space must survive until the next word is typed.
-  await page.getByPlaceholder("e.g. Graduate Software Engineer, Junior ML Engineer")
-    .pressSequentially("Graduate Software Engineer, Junior ML Engineer");
-  await page.getByPlaceholder("e.g. London, Manchester, New York").pressSequentially("London, New York");
-  await page.getByRole("button", { name: "Save Persona" }).click();
+  await page.getByLabel("Target job titles").pressSequentially("Graduate Software Engineer, Junior ML Engineer");
+  await page.getByLabel("Preferred locations").pressSequentially("London, New York");
 
-  await expect.poll(() => saved).not.toBeNull();
+  // Saved on its own, a moment after the typing stops.
+  await expect.poll(() => saved?.preferences.preferred_locations).toEqual(["London", "New York"]);
   expect(saved!.preferences.target_titles).toEqual(["Graduate Software Engineer", "Junior ML Engineer"]);
-  expect(saved!.preferences.preferred_locations).toEqual(["London", "New York"]);
   expect(saved!.core_info.first_name).toBe("Sam");                       // the rest of the profile is kept
+  await expect(page.getByText("All changes saved")).toBeVisible();
+  api.expectAllMocked();
+});
+
+test("changing a status in the application panel saves it, and Esc closes the panel", async ({ page }) => {
+  await signIn(page);
+  const patches: unknown[] = [];
+  const api = await mockApi(page, {
+    "GET /api/persona": PERSONA,
+    "GET /api/applications": [app("a1", "Applied"), app("a2", "Saved")],
+    "PATCH /api/applications/a1/status": (request) => {
+      patches.push(request.postDataJSON());
+      return { updated: true };
+    },
+  });
+  await page.goto("/applications");
+  await page.getByRole("button", { name: /Role a1 at Company a1/ }).click();
+  const panel = page.getByRole("dialog", { name: "Application details" });
+  await expect(panel).toBeVisible();
+
+  await panel.getByLabel("Status").selectOption({ label: "Interview" });
+  await expect.poll(() => patches).toEqual([{ status: "Interview" }]);
+  await expect(page.getByRole("region", { name: "Interview, 1" })).toBeVisible();   // moved columns
+
+  await page.keyboard.press("Escape");
+  await expect(panel).toHaveCount(0);
+  api.expectAllMocked();
+});
+
+test("the review queue lists paused applications and records one you sent yourself", async ({ page }) => {
+  await signIn(page);
+  const patches: unknown[] = [];
+  const api = await mockApi(page, {
+    "GET /api/persona": PERSONA,
+    "GET /api/applications": [app("a1", "Pending Review"), app("a2", "Pending Review"), app("a3", "Applied")],
+    "PATCH /api/applications/a1/status": (request) => {
+      patches.push(request.postDataJSON());
+      return { updated: true };
+    },
+  });
+  await page.goto("/review");
+  await expect(page.getByRole("tab")).toHaveCount(2);
+  await expect(page.getByRole("link", { name: /Agent review/ })).toContainText("2");      // sidebar badge
+  await expect(page.getByRole("heading", { name: "Role a1 · Company a1" })).toBeVisible();
+
+  await page.getByRole("button", { name: "I submitted it myself" }).click();
+  await expect.poll(() => patches).toEqual([{ status: "Applied" }]);
+  await expect(page.getByRole("heading", { name: "Role a2 · Company a2" })).toBeVisible();
+  await expect(page.getByRole("tab")).toHaveCount(1);
+  api.expectAllMocked();
+});
+
+test("the theme switch applies dark mode and remembers it", async ({ page }) => {
+  await signIn(page);
+  const api = await mockApi(page, {
+    ...SHELL,
+    "GET /api/jobs": { jobs: [], has_more: false, discovering: false, sponsorship: "any" },
+  });
+  await page.goto("/jobs");
+  await page.getByRole("button", { name: "Dark" }).click();
+  await expect(page.locator("html")).toHaveClass(/\bdark\b/);
+  expect(await page.evaluate(() => localStorage.getItem("windrush_theme"))).toBe("dark");
+
+  await page.reload();
+  await expect(page.locator("html")).toHaveClass(/\bdark\b/);       // applied before paint, from storage
+  await page.getByRole("button", { name: "Light" }).click();
+  await expect(page.locator("html")).not.toHaveClass(/\bdark\b/);
   api.expectAllMocked();
 });
