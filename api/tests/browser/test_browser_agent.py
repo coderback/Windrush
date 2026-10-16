@@ -358,3 +358,60 @@ def test_questions_go_through_answer_questions_and_written_answers_are_filled_wh
                                       "- Do you have any unspent criminal convictions?\n\n"
                                       "Required fields still empty on the form:\n- Will you require visa sponsorship?")
     assert_no_chromium_left()
+
+
+class ReviewFillLLM(QuestionsLLM):
+    """QuestionsLLM, then as the review-fill agent: picks the candidate's answer in the dropdown, reads it back
+    with JS, then finishes."""
+
+    def __init__(self):
+        super().__init__()
+        self.review_step = 0
+
+    def next_action(self, text: str) -> list[dict]:
+        if "has now answered some" not in text:
+            return super().next_action(text)
+        self.review_step += 1
+        select = re.search(r"\[(\d+)\]<select[^\n]*?id=convictions", text)
+        if self.review_step == 1 and select:
+            return [{"select_dropdown": {"index": int(select.group(1)), "text": "No"}}]
+        if self.review_step == 2:
+            return [{"evaluate": {"code": "(function(){return 'CONV:'+document.getElementById('convictions').value})()"}}]
+        return [{"done": {"text": "Put the answer in.", "success": True}}]
+
+
+def test_an_answer_given_in_the_review_is_put_on_the_form(ba, site, monkeypatch):
+    llm = ReviewFillLLM()
+    monkeypatch.setattr(ba, "_make_browser_llm", lambda: llm)
+
+    async def answerer(questions):
+        return [{"question": q["question"], "options": q["options"], "kind": "fact", "source": "needs_you",
+                 "answer": "", "because": "", "bank_id": "", "flags": []} for q in questions]
+    given = json.dumps({"type": "answers", "answers": [
+        {"question": "Do you have any unspent criminal convictions?", "answer": "No", "kind": "fact",
+         "options": ["Yes", "No"]}]})
+
+    async def flow():
+        queue: asyncio.Queue = asyncio.Queue()
+        commands = [given, "skip"]
+        events = []
+        async for event in ba.apply_with_browser(f"{site}/questions.html", {"core_info": {"first_name": "Ada"}}, "",
+                                                 queue, answerer=answerer):
+            events.append(event)
+            if event.get("interactive") and commands:
+                await queue.put(commands.pop(0))
+            if event.get("done"):
+                break
+        return events
+    events = asyncio.run(flow())
+    seen = "\n".join(llm.seen)
+
+    assert '1. "Do you have any unspent criminal convictions?": choose "No"' in seen.split("has now answered some")[1]
+    assert "CONV:No" in seen
+    reviews = [e for e in events if e.get("interactive")]
+    assert reviews[1]["action"].startswith("Filled in your 1 answer")
+    convictions = next(q for q in reviews[1]["questions"] if q["question"].startswith("Do you have any unspent"))
+    assert (convictions["source"], convictions["answer"]) == ("saved", "No")
+    # The dropdown is filled now, so the page no longer lists it as empty.
+    assert "Do you have any unspent criminal convictions?" not in reviews[1]["notes"]
+    assert_no_chromium_left()

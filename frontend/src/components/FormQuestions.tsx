@@ -1,8 +1,8 @@
 "use client";
 
-import { useId, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import Icon from "./ui/Icon";
-import { buttonClass, Card, Chip, inputClass, Spinner, textareaClass, type ChipTone } from "./ui/kit";
+import { buttonClass, Callout, Card, Chip, inputClass, Spinner, textareaClass, type ChipTone } from "./ui/kit";
 import { saveAnswer, SOURCE_LABEL } from "@/lib/answers";
 import type { AnswerSource, FormAnswer } from "@/lib/types";
 
@@ -18,7 +18,14 @@ function count(source: AnswerSource, n: number): string {
   }
 }
 
-function Row({ q, company, savedNote }: { q: FormAnswer; company: string; savedNote: string }) {
+/** An answer you gave in the review, for the agent to put on the form. */
+export interface ReviewAnswer { question: string; answer: string; kind: FormAnswer["kind"]; options: string[] }
+
+function Row({ q, company, savedNote, onSaved }: {
+  q: FormAnswer; company: string; savedNote: string;
+  /** Called once the answer is saved, when it differs from what the agent put on the form. */
+  onSaved: (a: ReviewAnswer) => void;
+}) {
   const [value, setValue] = useState(q.answer);
   const [editing, setEditing] = useState(q.source === "needs_you");
   const [state, setState] = useState<"idle" | "saving" | "saved">("idle");
@@ -32,9 +39,13 @@ function Row({ q, company, savedNote }: { q: FormAnswer; company: string; savedN
     setState("saving");
     setError(null);
     try {
-      await saveAnswer(q.question, value.trim(), q.kind, company);
+      const answer = value.trim();
+      await saveAnswer(q.question, answer, q.kind, company);
       setState("saved");
       setEditing(false);
+      if (q.source === "needs_you" || answer !== q.answer.trim()) {
+        onSaved({ question: q.question, answer, kind: q.kind, options: q.options });
+      }
     } catch (e) {
       setState("idle");
       setError(e instanceof Error ? e.message : "Couldn't save the answer.");
@@ -112,13 +123,44 @@ function Row({ q, company, savedNote }: { q: FormAnswer; company: string; savedN
  * answer bank, your persona, or drafted for this job), and a box for those only you can answer.
  * What you answer here goes into your answer bank, so the next form gets it.
  */
-export default function FormQuestions({ questions, company, savedNote }: {
+export default function FormQuestions({ questions, company, savedNote, onFill }: {
   questions: FormAnswer[];
   company: string;
   /** Shown once you've answered a question the agent left blank. */
   savedNote: string;
+  /** While the agent's browser is paused on the form: have it put your answers on the form. */
+  onFill?: (answers: ReviewAnswer[]) => Promise<void>;
 }) {
+  // Answers saved in this review that aren't on the form yet, by question.
+  const [pending, setPending] = useState<Record<string, ReviewAnswer>>({});
+  const [filling, setFilling] = useState(false);
+  const [fillError, setFillError] = useState<string | null>(null);
+
+  // The agent sends the questions again once it has put your answers on the form: those are done.
+  // (Callers may pass a new array on every render, so nothing changes unless an answer really went in.)
+  useEffect(() => {
+    setFilling(false);
+    setPending((prev) => {
+      const left = Object.entries(prev).filter(([question, a]) =>
+        !questions.some((q) => q.question === question && q.source === "saved" && q.answer === a.answer));
+      return left.length === Object.keys(prev).length ? prev : Object.fromEntries(left);
+    });
+  }, [questions]);
+
   if (questions.length === 0) return null;
+  const waiting = Object.values(pending);
+
+  const fill = async () => {
+    if (!onFill || waiting.length === 0) return;
+    setFilling(true);
+    setFillError(null);
+    try {
+      await onFill(waiting);
+    } catch (e) {
+      setFilling(false);
+      setFillError(e instanceof Error ? e.message : "Couldn't reach the agent.");
+    }
+  };
   const sorted = [...questions].sort((a, b) => ORDER.indexOf(a.source) - ORDER.indexOf(b.source));
   const counts = ORDER.map((s) => [s, questions.filter((q) => q.source === s).length] as const).filter(([, n]) => n > 0);
 
@@ -136,8 +178,24 @@ export default function FormQuestions({ questions, company, savedNote }: {
           {counts.map(([s, n]) => <Chip key={s} tone={TONE[s]} size="sm">{count(s, n)}</Chip>)}
         </span>
       </div>
+      {onFill && waiting.length > 0 && (
+        <div role="status" className="flex flex-wrap items-center justify-between gap-3 px-[14px] py-3 rounded-inner bg-teal-soft text-teal-deep text-[13px]">
+          <span>
+            {filling
+              ? `The agent is putting your ${waiting.length === 1 ? "answer" : `${waiting.length} answers`} on the form…`
+              : `${waiting.length} saved ${waiting.length === 1 ? "answer isn't" : "answers aren't"} on the form yet.`}
+          </span>
+          <button type="button" onClick={fill} disabled={filling} className={buttonClass("commit", "sm")}>
+            {filling ? <Spinner /> : null}Fill {waiting.length === 1 ? "it" : "them"} in on the form
+          </button>
+        </div>
+      )}
+      {fillError && <Callout>{fillError}</Callout>}
       <ul className="m-0 p-0 list-none flex flex-col">
-        {sorted.map((q) => <Row key={q.question} q={q} company={company} savedNote={savedNote} />)}
+        {sorted.map((q) => (
+          <Row key={`${q.question}|${q.source}`} q={q} company={company} savedNote={savedNote}
+            onSaved={(a) => setPending((prev) => ({ ...prev, [a.question]: a }))} />
+        ))}
       </ul>
     </Card>
   );

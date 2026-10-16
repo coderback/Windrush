@@ -149,7 +149,7 @@ Long-running endpoints stream **Server-Sent Events (SSE)**. Protected endpoints 
 | `POST` | `/jobs/cover-letter` | SSE: tailored cover letter |
 | `POST` | `/jobs/tailored-cv` | SSE: tailored, structured CV |
 | `POST` | `/apply` | SSE: browser application (fill → review → submit) |
-| `POST` | `/browser-input/{session_id}` | Click/type/key/scroll/`submit`/`done`/`skip` into the live session |
+| `POST` | `/browser-input/{session_id}` | Click/type/key/scroll/`submit`/`done`/`skip` into the live session, or `{type: answers}` to put answers you gave in the review on the form |
 | `GET` | `/browser-stream/{session_id}` | SSE: live JPEG frames (CDP screencast) |
 | `GET` / `POST` | `/applications` | List / create tracked applications |
 | `PATCH` | `/applications/{id}/status` | Update one of *your* applications' status + notes |
@@ -200,7 +200,7 @@ Labels: **High ≥ 65 %**, **Medium 35–65 %**, **Low < 35 %**. **Job fit** (`s
 - **No telemetry** — browser-use's product telemetry (PostHog) and cloud sync default to on and would send each run's task prompt, actions and visited URLs to browser-use; `browser_agent.py` defaults `ANONYMIZED_TELEMETRY` / `BROWSER_USE_CLOUD_SYNC` to `false` and `docker-compose.yml` sets both.
 - **Network limits** — the agent's browser can't open raw-IP URLs, `localhost` or the internal service hostnames.
 - **CV upload** — the tailored CV PDF if you generated one, otherwise your uploaded original.
-- **Questions** — the agent isn't given facts to answer from. It sends each page's questions to an `answer_questions` action (`answers.py`), which answers from your saved answers, then your persona, and drafts written ones, and says where each answer came from. A model maps each question to the fact that answers it, but the value comes from the fact, and code checks the reading (a cited fact, one of the form's options, a yes/no fact's direction, a UK fact not used for another country). Contact details, salary and equality answers reach that model only as "this fact exists". Questions nothing answers are left blank and listed first in the review, which shows every answer and its source.
+- **Questions** — the agent isn't given facts to answer from. It sends each page's questions to an `answer_questions` action (`answers.py`), which answers from your saved answers, then your persona, and drafts written ones, and says where each answer came from. A model maps each question to the fact that answers it, but the value comes from the fact, and code checks the reading (a cited fact, one of the form's options, a yes/no fact's direction, a UK fact not used for another country). Contact details, salary and equality answers reach that model only as "this fact exists". Questions nothing answers are left blank and listed first in the review, which shows every answer and its source. What you answer there is saved, and while the browser is paused a short follow-up agent puts it on the form (like the one that clicks submit, it never sends the form). A salary question with bands gets the one band that holds your figure; on a boundary it's left for you.
 
 ---
 

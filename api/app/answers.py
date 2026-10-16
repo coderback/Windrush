@@ -311,6 +311,35 @@ def pick_option(value: str, options: list[str]) -> str | None:
     return None
 
 
+_AMOUNT = re.compile(r"(\d+(?:,\d{3})*(?:\.\d+)?)\s*(k\b|thousand\b)?", re.I)
+_OPEN_TOP = re.compile(r"\+|\b(?:above|over|more than|or more|plus|at least|minimum)\b", re.I)
+_OPEN_BOTTOM = re.compile(r"\b(?:up to|under|below|less than|or less|max(?:imum)?)\b", re.I)
+
+
+def _money_range(text: str) -> tuple[float, float] | None:
+    """The amounts a salary answer or band states, as (low, high): "£30k-£35k", "£35,000+", "Up to £25,000"."""
+    amounts = [float(n.replace(",", "")) * (1000 if unit else 1) for n, unit in _AMOUNT.findall(text)]
+    if not amounts:
+        return None
+    if len(amounts) >= 2:
+        return min(amounts[:2]), max(amounts[:2])
+    if _OPEN_TOP.search(text):
+        return amounts[0], float("inf")
+    if _OPEN_BOTTOM.search(text):
+        return 0.0, amounts[0]
+    return amounts[0], amounts[0]
+
+
+def pick_band(value: str, options: list[str]) -> str | None:
+    """The one salary band that holds the whole of `value` ("£31,500" is in "£30,000-£35,000"); None when no
+    band or more than one does (31,500 on a band boundary, a range that straddles two, "Negotiable")."""
+    wanted = _money_range(value)
+    if not wanted:
+        return None
+    holding = [o for o in options if (band := _money_range(o)) and band[0] <= wanted[0] and wanted[1] <= band[1]]
+    return holding[0] if len(holding) == 1 else None
+
+
 _UK_RE = re.compile(r"\b(?:uk|u\.k\.|united kingdom|great britain|britain|british|england|english|scotland|"
                     r"scottish|wales|welsh|northern ireland|gb)\b", re.I)
 # Bare "us" counts only in capitals ("the US"): "tell us", "join us".
@@ -370,8 +399,12 @@ def resolve_fact(question: dict, reading: dict, facts: dict[str, Fact], job_loca
     first = cited[0]
 
     if len(cited) == 1 and first.private:
-        # The model never saw the value, so it can only have said which fact applies.
-        answer = pick_option(first.value, options)
+        # The model never saw the value, so it can only have said which fact applies. A salary goes in the band
+        # that holds it.
+        if first.id.startswith("salary_") and any(_money_range(o) for o in options):
+            answer = pick_band(first.value, options)
+        else:
+            answer = pick_option(first.value, options)
         return (answer, cited) if answer else None
 
     if options:
@@ -419,7 +452,8 @@ _READ_SYSTEM = (
     "- A fact marked (private) has its value hidden: cite its id when it is the fact asked for, and leave "
     "answer \"\"; Windrush fills in the value.\n"
     "- Don't compute or estimate: years of experience, counts, grades or dates are answered only by a fact "
-    "that states them.\n"
+    "that states them. The one exception: a salary question whose options are bands or ranges is answered by "
+    "the salary expectations fact; cite it and Windrush picks the band that holds the figure.\n"
     "- Read the question's direction: 'Will you require sponsorship?' and 'Can you work without "
     "sponsorship?' take opposite answers from the same fact.\n"
     "- A declaration or consent (a privacy notice, that the information is accurate, background or reference "
