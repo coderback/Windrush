@@ -5,7 +5,7 @@ import type { Persona } from "./types";
 
 export type SectionKey =
   | "identity" | "login" | "links" | "skills" | "work" | "education" | "projects" | "certs"
-  | "stories" | "screening" | "prefs" | "equality" | "directives";
+  | "stories" | "screening" | "answers" | "prefs" | "equality" | "directives";
 
 export type SectionState = "complete" | "attention" | "optional";
 
@@ -67,6 +67,7 @@ export function personaChecks(p: Persona): SectionCheck[] {
         : `Add ${MIN_STORIES - stories} more STAR ${MIN_STORIES - stories === 1 ? "story" : "stories"}`, 10),
     check("screening", "Screening answers", screeningDone && !!salary,
       !salary ? "Set a salary expectation" : "Answer the common screening questions", 10),
+    optional("answers", "Saved answers"),
     check("prefs", "Job preferences",
       (p.preferences.target_titles || []).length > 0 && (p.preferences.preferred_locations || []).length > 0,
       "Add target job titles and locations", 5),

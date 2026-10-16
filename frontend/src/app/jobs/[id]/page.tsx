@@ -10,6 +10,7 @@ import DocEditor, { CVDoc, LetterDoc, letterToText } from "@/components/DocEdito
 import ReviewLayout, { AgentNotes, type LogLine } from "@/components/ReviewLayout";
 import JobDescription from "@/components/JobDescription";
 import DocChecks from "@/components/DocChecks";
+import FormQuestions from "@/components/FormQuestions";
 import Icon from "@/components/ui/Icon";
 import TopBar, { Page } from "@/components/ui/TopBar";
 import StepTracker from "@/components/ui/StepTracker";
@@ -24,7 +25,7 @@ import { discardJob, saveJob, trackedApplication } from "@/lib/actions";
 import { load, useResource } from "@/lib/store";
 import { fitVerdict, riskLevel, RISK } from "@/lib/status";
 import { sponsorshipVerdict } from "@/lib/sponsorship";
-import type { Analysis, Application, Job } from "@/lib/types";
+import type { Analysis, Application, FormAnswer, Job } from "@/lib/types";
 
 type CvChoice = "tailored" | "original";
 
@@ -106,6 +107,8 @@ export default function JobDetailPage() {
   const [browserInteractive, setBrowserInteractive] = useState(false);
   // The agent's summary ("Needs your input: …" first); sent once, kept for the whole review.
   const [browserNotes, setBrowserNotes] = useState<string | null>(null);
+  // The form's questions, each with its answer and where it came from; sent with the notes.
+  const [browserQuestions, setBrowserQuestions] = useState<FormAnswer[]>([]);
   const [log, setLog] = useState<LogLine[]>([]);
   const [started, setStarted] = useState(false);
   const [applying, setApplying] = useState(false);
@@ -280,6 +283,7 @@ export default function JobDetailPage() {
       }
     }
     if (typeof ev.notes === "string") setBrowserNotes(ev.notes);
+    if (Array.isArray(ev.questions)) setBrowserQuestions(ev.questions as FormAnswer[]);
     if (ev.type === "done") {
       setEnded({ submitted: ev.submitted === true });
       setBrowserBlocked(false);
@@ -295,6 +299,7 @@ export default function JobDetailPage() {
     setEnded(null);
     setApplyError(null);
     setBrowserNotes(null);
+    setBrowserQuestions([]);
     setBrowserScreenshot(null);
     setBrowserAction("");
     setBrowserBlocked(false);
@@ -314,6 +319,8 @@ export default function JobDetailPage() {
     form.append("job_title", job.title ?? "");
     form.append("company", job.company ?? "");
     form.append("location", job.location ?? "");
+    // For written answers to the form's questions.
+    form.append("job_description", job.description ?? "");
     form.append("cover_letter", letterDoc ? letterToText(letterDoc) : "");
     form.append("tailored_cv", cvDoc ? JSON.stringify(cvDoc) : "");
     form.append("cv_doc_id", cvChoice === "tailored" && effectiveCvDocId ? effectiveCvDocId : "");
@@ -739,6 +746,10 @@ export default function JobDetailPage() {
         {stepper}
 
         {review}
+        {review && (
+          <FormQuestions questions={browserQuestions} company={job.company}
+            savedNote="Saved for your next form. Fill it in on the page above too, then submit." />
+        )}
 
         <div className="grid gap-4 items-start grid-cols-1 lg:grid-cols-[minmax(0,2fr)_minmax(300px,1fr)]">
           <div className="min-w-0 flex flex-col gap-4">

@@ -44,7 +44,39 @@ export interface Application {
   level_match: string;
   notes: string | null;
   tailored_cv?: string | null;
+  /** The questions the agent met on the application form, with each answer and where it came from. */
+  questions?: FormAnswer[];
   created_at: string;
+}
+
+/* ── Application questions (mirrors api/app/answers.py) ─────────────── */
+
+/** saved: your answer bank · profile: your persona · drafted: written for this job, for you to check ·
+    needs_you: a fact nothing you've given states, so it was left blank. */
+export type AnswerSource = "saved" | "profile" | "drafted" | "needs_you";
+
+export interface FormAnswer {
+  question: string;
+  options: string[];
+  kind: "fact" | "written";
+  source: AnswerSource;
+  answer: string;
+  /** What the answer rests on, e.g. "Your profile: Notice period = 2 weeks". */
+  because: string;
+  bank_id: string;
+  /** Claims the document check still flags in a drafted answer. */
+  flags: string[];
+}
+
+export interface SavedAnswer {
+  id: string;
+  question: string;
+  answer: string;
+  kind: "fact" | "written";
+  /** Set when the answer is about one employer: only that employer's forms reuse it. */
+  company: string;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface SkillRisk {
