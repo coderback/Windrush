@@ -307,8 +307,54 @@ def pick_option(value: str, options: list[str]) -> str | None:
         if len(found) == 1:
             return found[0]
         if found:
-            return None
-    return None
+            break
+    return _covering_option(value, options)
+
+
+_OPTION_STOP = {"the", "of", "and", "a", "an", "in", "at", "for", "to", "or", "on"}
+
+
+def _option_words(text: str) -> set[str]:
+    return set(re.findall(r"[a-z0-9]+", str(text or "").lower())) - _OPTION_STOP
+
+
+def _initials(value: str) -> dict[str, set[str]]:
+    """{initials: the words they stand for} for each comma-separated part of `value` of two or more words:
+    'University of the West of England' → {'uwe': {'university', 'west', 'england'}}."""
+    out = {}
+    for part in str(value).split(","):
+        words = [w for w in re.findall(r"[a-z0-9]+", part.lower()) if w not in _OPTION_STOP]
+        if len(words) >= 2:
+            out["".join(w[0] for w in words)] = set(words)
+    return out
+
+
+def _covering_option(value: str, options: list[str]) -> str | None:
+    """
+    When no option states `value` outright: the one option holding every word of it, with the fewest other
+    words ('Black African' → 'Black (including African American, African, …)'; 'Bristol, United Kingdom' →
+    'Bristol, England, United Kingdom', not 'Little Bristol, England, …'), or the one option inside the value
+    that covers most of it. "University of Bristol" sits word for word in "The University of the West of
+    England, Bristol" and is a different university, so it doesn't count; initials stand for their words, so
+    "Bristol, UWE" does. None when that isn't one option.
+    """
+    v = _option_words(value)
+    if not v:
+        return None
+    holding = sorted((len(_option_words(o) - v), o) for o in options if v <= _option_words(o))
+    if holding:
+        return holding[0][1] if len(holding) == 1 or holding[0][0] < holding[1][0] else None
+    initials = _initials(value)
+    scored = []
+    for o in options:
+        words = _option_words(o)
+        if len(words) < 2 or not words <= v | set(initials):
+            continue
+        covered = set().union(*(initials.get(w, {w}) for w in words)) & v
+        if len(covered) / len(v) >= 0.75:
+            scored.append((len(covered) / len(v), o))
+    scored.sort()
+    return scored[-1][1] if scored and (len(scored) == 1 or scored[-1][0] > scored[-2][0]) else None
 
 
 _AMOUNT = re.compile(r"(\d+(?:,\d{3})*(?:\.\d+)?)\s*(k\b|thousand\b)?", re.I)

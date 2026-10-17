@@ -130,47 +130,11 @@ def _words(text: str) -> set[str]:
 
 
 def best_option(value: str, options: list[str]) -> str | None:
-    """The one option `value` names, or None when none or several could be it. Beyond answers.pick_option
-    (exact, yes/no, prefix), an option holding every word of the value ('Black African' → 'Black (including
-    African …)'), or a value holding every word of one option (a full university name → its listed name)."""
+    """The one option `value` names, or None when none or several could be it (answers.pick_option)."""
     if not options or not str(value or "").strip():
         return None
     from .answers import pick_option   # answers imports agent, which imports browser_agent: not at load time
-    hit = pick_option(value, options)
-    if hit:
-        return hit
-    v = _words(value)
-    holding = sorted(((len(_words(o) - v), o) for o in options if v and v <= _words(o)))
-    if holding and (len(holding) == 1 or holding[0][0] < holding[1][0]):
-        return holding[0][1]     # "Bristol, United Kingdom": "Bristol, England, …", not "Little Bristol, England, …"
-    if holding:
-        return None
-    # An option inside the value must cover most of it: "University of Bristol" is in "The University of the
-    # West of England, Bristol" word for word, and is a different university. Initials count for the words
-    # they stand for, so "Bristol, UWE" covers that name.
-    initials = _initials(value)
-    scored = []
-    for o in options:
-        words = _words(o)
-        if len(words) < 2 or not words <= v | set(initials):
-            continue
-        covered = set().union(*(initials.get(w, {w}) for w in words)) & v
-        scored.append((len(covered) / len(v), o))
-    scored = sorted((c, o) for c, o in scored if c >= 0.75)
-    if scored and (len(scored) == 1 or scored[-1][0] > scored[-2][0]):
-        return scored[-1][1]
-    return None
-
-
-def _initials(value: str) -> dict[str, set[str]]:
-    """{initials: the words they stand for} for each comma-separated part of `value` of two or more words:
-    'University of the West of England' → {'uwe': {'university', 'west', 'england'}}."""
-    out = {}
-    for part in str(value).split(","):
-        words = [w for w in re.findall(r"[a-z0-9]+", part.lower()) if w not in _STOP]
-        if len(words) >= 2:
-            out["".join(w[0] for w in words)] = set(words)
-    return out
+    return pick_option(value, options)
 
 
 def _queries(value: str) -> list[str]:
@@ -189,13 +153,16 @@ _KEYS = {"ArrowDown": ("ArrowDown", 40), "Enter": ("Enter", 13), "Escape": ("Esc
 
 
 class Field:
-    """One element of the page, reached through the CDP session of the frame it lives in."""
+    """One element of the page, reached through the CDP session of the frame it lives in: from a browser-use
+    node (`open()`), or from a JS object id already resolved in a session (find_by_label)."""
 
-    def __init__(self, browser_session, node):
+    def __init__(self, browser_session=None, node=None, *, send=None, session_id=None, object_id=None):
         self.browser_session, self.node = browser_session, node
-        self.send = self.session_id = self.object_id = None
+        self.send, self.session_id, self.object_id = send, session_id, object_id
 
     async def open(self) -> "Field":
+        if self.object_id:
+            return self
         cdp = await self.browser_session.cdp_client_for_node(self.node)
         self.send, self.session_id = cdp.cdp_client.send, cdp.session_id
         resolved = await self.send.DOM.resolveNode(params={"backendNodeId": self.node.backend_node_id},
@@ -311,6 +278,14 @@ async def fill(browser_session, node, value: str) -> tuple[bool, str]:
     """Put `value` into the field `node`, checked. Returns (True, what it now holds) or (False, why not)."""
     try:
         field = await Field(browser_session, node).open()
+    except Exception as exc:
+        return False, f"{type(exc).__name__}: {exc}"[:200]
+    return await fill_field(field, value)
+
+
+async def fill_field(field: Field, value: str) -> tuple[bool, str]:
+    """fill() for a Field already opened."""
+    try:
         info = await field.describe()
         kind = info["kind"]
         if not info.get("connected", True):
@@ -367,3 +342,113 @@ def same_question(label: str, question: str) -> bool:
         return True
     wa, wb = _words(a), _words(b)
     return bool(wa and wb) and len(wa & wb) / min(len(wa), len(wb)) >= 0.7
+
+
+# ── Finding a field by its label, and reading back what the form holds ──────────────────────────
+# The fill agent names a field by an index from its last view of the page, which can be out of date (the page
+# scrolled, or re-rendered) or made up. A question's label is what it reliably knows, so a field is also found
+# by that: in the page and in any same-origin frame (a cross-origin frame's document can't be read from here).
+
+_CONTROLS_JS = r"""
+  const text = n => (n && n.textContent || '').replace(/\s+/g, ' ').trim();
+  const docs = [document];
+  for (const f of document.querySelectorAll('iframe')) { try { if (f.contentDocument) docs.push(f.contentDocument); } catch (e) {} }
+  const labelOf = (e, doc) => {
+    if (e.labels && e.labels.length) return text(e.labels[0]);
+    const ids = (e.getAttribute('aria-labelledby') || '').split(/\s+/).filter(Boolean);
+    if (ids.length) return ids.map(i => text(doc.getElementById(i))).join(' ');
+    return e.getAttribute('aria-label') || '';
+  };
+  const groupOf = (e, doc) => {
+    const type = e.type;
+    const members = e.name ? [...doc.querySelectorAll('input[type=' + type + ']')].filter(m => m.name === e.name) : [e];
+    if (members.length < 2) return null;
+    const set = e.closest('fieldset');
+    if (set && set.querySelector('legend')) return {label: text(set.querySelector('legend')), members};
+    let box = e.parentElement;
+    while (box && box.querySelectorAll('input[type=' + type + ']').length < members.length) box = box.parentElement;
+    const head = box && box.querySelector('label:not(:has(input)), legend, [class*=label]');
+    return {label: head ? text(head) : '', members};
+  };
+  const shown = el => { const s = el.ownerDocument.defaultView.getComputedStyle(el); const b = el.getBoundingClientRect();
+                        return s.display !== 'none' && s.visibility !== 'hidden' && (b.width > 0 || b.height > 0); };
+  // Never a password box: what's typed there must not leave the browser.
+  const controls = 'input:not([type=hidden]):not([type=file]):not([type=submit]):not([type=button]):not([type=password]), select, textarea, [contenteditable=true]';
+"""
+
+_FIND_JS = "(wanted) => {" + _CONTROLS_JS + r"""
+  const key = s => s.toLowerCase().replace(/\((required|optional)\)|\*/g, ' ').replace(/[^a-z0-9]+/g, ' ').trim();
+  const w = key(wanted);
+  if (!w) return null;
+  const exact = [], close = [];
+  for (const doc of docs) for (const el of doc.querySelectorAll(controls)) {
+    if (el.closest('[aria-hidden=true]')) continue;
+    const isBox = el.type === 'checkbox' || el.type === 'radio';
+    const group = isBox ? groupOf(el, doc) : null;
+    if (group && group.members[0] !== el) continue;
+    const k = key(group ? group.label : labelOf(el, doc));
+    if (!k) continue;
+    if (k === w) exact.push(el);
+    else if (Math.min(k.length, w.length) >= 12 && (k.includes(w) || w.includes(k))) close.push(el);
+  }
+  return exact.length === 1 ? exact[0] : (!exact.length && close.length === 1 ? close[0] : null);
+}"""
+
+# Every field that holds something, as {label, value}: what the user would read on the form.
+_FILLED_JS = "() => {" + _CONTROLS_JS + r"""
+  const out = [], seen = new Set();
+  for (const doc of docs) for (const el of doc.querySelectorAll(controls)) {
+    if (el.closest('[aria-hidden=true]') || el.disabled) continue;
+    const box = el.closest('[class*=select__container]');
+    if (box) {
+      const picked = [...box.querySelectorAll('[class*=single-value], [class*=multi-value__label]')].map(text).filter(Boolean);
+      if (picked.length) out.push({label: labelOf(el, doc), value: picked.join(', ')});
+      continue;
+    }
+    if (!shown(el)) continue;
+    if (el.type === 'checkbox' || el.type === 'radio') {
+      const group = groupOf(el, doc);
+      if (group) {
+        if (seen.has(group.members[0])) continue;
+        seen.add(group.members[0]);
+        const on = group.members.filter(m => m.checked).map(m => labelOf(m, doc));
+        if (on.length) out.push({label: group.label, value: on.join(', ')});
+      } else if (el.checked) out.push({label: labelOf(el, doc), value: 'checked'});
+      continue;
+    }
+    const value = el.tagName === 'SELECT' ? [...el.selectedOptions].map(text).join(', ')
+                : el.isContentEditable ? el.innerText.trim() : String(el.value || '').trim();
+    if (value && !(el.tagName === 'SELECT' && el.selectedIndex === 0 && !el.value)) out.push({label: labelOf(el, doc), value});
+  }
+  return JSON.stringify(out);
+}"""
+
+
+async def _tab(browser_session):
+    cdp = await browser_session.get_or_create_cdp_session(focus=False)
+    return cdp.cdp_client.send, cdp.session_id
+
+
+async def find_by_label(browser_session, label: str) -> Field | None:
+    """The one field on the page whose label is `label` (a checkbox group's first box), or None."""
+    send, session_id = await _tab(browser_session)
+    result = await send.Runtime.evaluate(
+        params={"expression": f"({_FIND_JS})({json.dumps(str(label))})", "returnByValue": False},
+        session_id=session_id)
+    found = result.get("result") or {}
+    if found.get("subtype") != "node" or not found.get("objectId"):
+        return None
+    return Field(send=send, session_id=session_id, object_id=found["objectId"])
+
+
+async def filled_fields(browser_session) -> list[dict]:
+    """[{label, value}] for every field on the page that holds something; [] if the page can't be read."""
+    try:
+        send, session_id = await _tab(browser_session)
+        result = await send.Runtime.evaluate(params={"expression": f"({_FILLED_JS})()", "returnByValue": True},
+                                             session_id=session_id)
+        found = json.loads((result.get("result") or {}).get("value") or "[]")
+    except Exception:
+        return []
+    return [{"label": str(f.get("label") or "")[:200], "value": str(f.get("value") or "")[:300]}
+            for f in found if isinstance(f, dict)]

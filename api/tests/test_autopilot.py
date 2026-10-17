@@ -37,6 +37,8 @@ def test_a_clean_fill_can_go():
     ({"ready": False, "questions": []}, "The agent couldn't finish the form"),
     ({"ready": True, "error": "page crashed", "questions": []}, "The agent hit a problem: page crashed"),
     ({"ready": True, "questions": [{**CLEAN, "flags": ["odd"]}]}, "didn't come from your saved answers or profile"),
+    ({"ready": True, "questions": [CLEAN], "self_answered": ["What is your age bracket?: 18 to under 25"]},
+     "1 answer the agent chose itself"),
 ])
 def test_anything_new_or_missing_holds_the_form(filled, expected):
     reasons = autopilot.hold_reasons({"error": "", "empty": [], **filled}, [])

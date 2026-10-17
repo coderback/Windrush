@@ -523,3 +523,17 @@ def test_the_apply_stream_stores_the_questions_again_after_a_fill(client, user, 
 
     client.post("/apply", data={"job_id": "j", "job_title": "T", "company": "C", "job_url": "https://jobs.example.com/1"})
     assert tracker.list_applications(user)[0]["questions"] == after
+
+
+def test_pick_option_takes_the_option_that_covers_the_value_and_refuses_lookalikes():
+    ethnicity = ["Australian Aboriginal", "Black (including African American, African, Carribean, Black-British, etc.)",
+                 "White / Caucasian", "Prefer not to say"]
+    assert answers.pick_option("Black African", ethnicity) == ethnicity[1]
+    uni = "The University of the West of England, Bristol"
+    assert answers.pick_option(uni, ["City of Bristol College", "University of Bristol", "Bristol, UWE"]) == "Bristol, UWE"
+    assert answers.pick_option(uni, ["University of Bristol", "Arizona State University - West"]) is None
+    cities = ["Little Bristol, England, United Kingdom", "Bristol, England, United Kingdom"]
+    assert answers.pick_option("Bristol, United Kingdom", cities) == "Bristol, England, United Kingdom"
+    assert answers.pick_option("Bristol", cities + ["Bristol, Connecticut, United States"]) is None
+    assert answers.pick_option("White", ["White - British", "White - Irish"]) is None
+    assert answers.pick_option("Online job search", ["Indeed", "LinkedIn", "Other"]) is None
