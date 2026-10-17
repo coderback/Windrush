@@ -84,10 +84,10 @@ def test_shared_description_refresh_uses_the_stored_url_not_the_clients(db, monk
         return ("ATTACKER " if "evil" in url else "REAL ") * 100
     monkeypatch.setattr(job_searcher, "fetch_full_description", fake_fetch)
 
-    out = asyncio.run(main._ensure_full_description({"id": "victim", "description": "", "url": "https://evil.example/x"}))
+    out = asyncio.run(jobs_db.ensure_full_description({"id": "victim", "description": "", "url": "https://evil.example/x"}))
     assert fetched == ["https://jobs.example.com/real"]
     assert out["description"].startswith("REAL") and jobs_db.get_job("victim")["description"].startswith("REAL")
 
-    out = asyncio.run(main._ensure_full_description({"id": "unknown", "description": "", "url": "https://evil.example/x"}))
+    out = asyncio.run(jobs_db.ensure_full_description({"id": "unknown", "description": "", "url": "https://evil.example/x"}))
     assert out["description"].startswith("ATTACKER")   # used for this request only…
     assert jobs_db.get_job("unknown") is None            # …never persisted

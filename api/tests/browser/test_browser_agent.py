@@ -415,3 +415,34 @@ def test_an_answer_given_in_the_review_is_put_on_the_form(ba, site, monkeypatch)
     # The dropdown is filled now, so the page no longer lists it as empty.
     assert "Do you have any unspent criminal convictions?" not in reviews[1]["notes"]
     assert_no_chromium_left()
+
+
+def test_unattended_run_sends_only_when_decide_says_so(ba, site, monkeypatch):
+    def run(send: bool):
+        llm = ScriptedLLM()
+        monkeypatch.setattr(ba, "_make_browser_llm", lambda: llm)
+        shown = []
+
+        async def decide(filled):
+            shown.append(filled)
+            return send
+
+        async def flow():
+            return [event async for event in ba.apply_with_browser(
+                f"{site}/form.html", {"core_info": {"first_name": "Ada"}}, "", asyncio.Queue(), decide=decide)]
+        return llm, shown, asyncio.run(flow())
+
+    llm, shown, events = run(send=True)
+    final = events[-1]
+    assert not any(e.get("interactive") for e in events)                 # nobody is asked anything
+    assert shown == [{"ready": True, "error": "", "notes": "Filled every field", "questions": [], "empty": []}]
+    assert llm.tasks == ["fill", "submit"]
+    assert final["done"] and final["submitted"] and final["submit_attempted"]
+    assert _is_jpeg(final["form_screenshot"]) and _is_jpeg(final["confirm_screenshot"])
+
+    llm, shown, events = run(send=False)
+    final = events[-1]
+    assert llm.tasks == ["fill"]                                          # the submit agent never ran
+    assert final["done"] and not final["submitted"] and not final["submit_attempted"]
+    assert _is_jpeg(final["form_screenshot"]) and "confirm_screenshot" not in final
+    assert_no_chromium_left()

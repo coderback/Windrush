@@ -20,6 +20,7 @@ from .company_names import normalise_company_name as _normalise_company_name
 from .guardrails import check_cv_for_injection, GuardrailViolation
 from . import tracker
 from . import answers
+from . import autopilot
 from . import auth
 from . import pdf_generator
 from . import doc_render
@@ -50,7 +51,8 @@ async def lifespan(app: FastAPI):
     jobs_db.init_db()
     pdf_generator.init_pdf_dir(data_dir)
     background = [asyncio.create_task(sponsor_register.keep_fresh()),
-                  asyncio.create_task(job_attributes.keep_extracting())]
+                  asyncio.create_task(job_attributes.keep_extracting()),
+                  asyncio.create_task(autopilot.keep_running())]
     yield
     for task in background:
         task.cancel()
@@ -813,43 +815,6 @@ def _sse_json(event_type: str, data: dict) -> str:
     return f"data: {json.dumps(payload)}\n\n"
 
 
-async def _ensure_full_description(job: dict) -> dict:
-    """
-    Make sure a job has its real, full description before we analyse it.
-
-    Stored descriptions are capped at 500 chars at sync time (and Brave results
-    are only a web snippet), so anything that short is re-fetched from the live
-    listing page. The result is persisted back to the DB so re-runs and revisits
-    are instant.
-
-    The jobs table is shared by all users, so the client-supplied job is never
-    trusted for the write: we only persist when the id matches a stored row, and
-    then we fetch that row's *stored* URL — never the URL from the request body.
-    """
-    desc = (job.get("description") or "").strip()
-    if len(desc) > 600:          # already a full description (e.g. previously fetched)
-        return job
-
-    from .job_searcher import fetch_full_description
-    db_id = str(job.get("id") or "")
-    stored = jobs_db.get_job(db_id) if db_id else None
-    if stored:
-        stored_desc = (stored.get("description") or "").strip()
-        if len(stored_desc) > 600:   # another request already fetched it
-            return {**job, "description": stored_desc}
-        full = await fetch_full_description(stored.get("url") or "")
-        if full and len(full) > len(stored_desc):
-            jobs_db.update_description(db_id, full)
-            return {**job, "description": full}
-        return job
-
-    # Not a stored job (e.g. pasted via /jobs/from-url): enrich this request only.
-    full = await fetch_full_description(job.get("url", ""))
-    if full and len(full) > len(desc):
-        job = {**job, "description": full}
-    return job
-
-
 @app.post("/jobs/from-url")
 async def job_from_url(
     body: dict,
@@ -884,7 +849,7 @@ async def analyze_job(
     current_user: Annotated[auth.User, Depends(auth.get_current_user)],
 ):
     """SSE: score fit + AI risk for a single job against the user's persona."""
-    job = await _ensure_full_description(body.get("job", {}))
+    job = await jobs_db.ensure_full_description(body.get("job", {}))
     persona = tracker.get_user_persona(current_user.id)
 
     async def gen():
@@ -917,7 +882,7 @@ async def generate_cover_letter_endpoint(
     current_user: Annotated[auth.User, Depends(auth.get_current_user)],
 ):
     """SSE: generate a tailored cover letter for a job."""
-    job = await _ensure_full_description(body.get("job", {}))
+    job = await jobs_db.ensure_full_description(body.get("job", {}))
     tone = body.get("tone", "professional")
     persona = tracker.get_user_persona(current_user.id)
 
@@ -937,7 +902,7 @@ async def generate_tailored_cv_endpoint(
     current_user: Annotated[auth.User, Depends(auth.get_current_user)],
 ):
     """SSE: generate a tailored CV (Markdown) for a specific job."""
-    job = await _ensure_full_description(body.get("job", {}))
+    job = await jobs_db.ensure_full_description(body.get("job", {}))
     persona = tracker.get_user_persona(current_user.id)
 
     async def gen():
@@ -1122,6 +1087,86 @@ async def draft_answers(body: dict, current_user: Annotated[auth.User, Depends(a
 
 
 from fastapi.responses import FileResponse  # noqa: E402
+
+
+# ── Autopilot ─────────────────────────────────────────────────────────────────
+
+# What the user can still do with a run: retry it (autopilot tries the job again) or clear it from the queue.
+_RETRYABLE = {"needs_you", "failed", "skipped", "ready", "dismissed"}
+_DISMISSABLE = {"needs_you", "failed", "skipped", "ready", "unconfirmed"}
+
+
+@app.get("/autopilot")
+async def autopilot_status(current_user: Annotated[auth.User, Depends(auth.get_current_user)]):
+    """Autopilot's settings, whether a run is going (and what it's doing), and how many went out today."""
+    return autopilot.status(current_user.id)
+
+
+@app.put("/autopilot/settings")
+async def autopilot_settings(body: dict, current_user: Annotated[auth.User, Depends(auth.get_current_user)]):
+    """Change any of {enabled, live, min_fit, daily_cap}; returns them all."""
+    try:
+        return autopilot.save_settings(current_user.id, body)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.post("/autopilot/run", status_code=202)
+async def autopilot_run(current_user: Annotated[auth.User, Depends(auth.get_current_user)]):
+    """Start a run now, in the background (GET /autopilot follows it)."""
+    if not autopilot.start(current_user.id):
+        raise HTTPException(status_code=409, detail="Autopilot is already running")
+    return {"started": True}
+
+
+@app.get("/autopilot/runs")
+async def autopilot_runs(current_user: Annotated[auth.User, Depends(auth.get_current_user)]):
+    """Every job autopilot has dealt with, latest first, with which screenshots it kept."""
+    runs = tracker.list_autopilot_runs(current_user.id)
+    for run in runs:
+        run["screenshots"] = [w for w in autopilot.SCREENSHOTS if os.path.exists(autopilot.screenshot_path(run, w))]
+        run.pop("user_id", None)
+    return runs
+
+
+def _own_run(user_id: str, run_id: str) -> dict:
+    run = tracker.get_autopilot_run(user_id, run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="No such autopilot run")
+    return run
+
+
+@app.post("/autopilot/runs/{run_id}/retry", status_code=202)
+async def autopilot_retry(run_id: str, current_user: Annotated[auth.User, Depends(auth.get_current_user)]):
+    """Have autopilot try this job again now: after you've answered its questions, say."""
+    run = _own_run(current_user.id, run_id)
+    if run["outcome"] not in _RETRYABLE:
+        raise HTTPException(status_code=400, detail=f"A run that is {run['outcome']} can't be retried")
+    if not autopilot.start(current_user.id, run["job_id"]):
+        raise HTTPException(status_code=409, detail="Autopilot is already running")
+    return {"started": True}
+
+
+@app.post("/autopilot/runs/{run_id}/dismiss")
+async def autopilot_dismiss(run_id: str, current_user: Annotated[auth.User, Depends(auth.get_current_user)]):
+    """Clear a run from the queue. Autopilot won't try the job again unless you retry it."""
+    run = _own_run(current_user.id, run_id)
+    if run["outcome"] not in _DISMISSABLE:
+        raise HTTPException(status_code=400, detail=f"A run that is {run['outcome']} can't be dismissed")
+    tracker.update_autopilot_run(run_id, user_id=current_user.id, outcome="dismissed")
+    return {"dismissed": run_id}
+
+
+@app.get("/autopilot/runs/{run_id}/screenshots/{which}")
+async def autopilot_screenshot(run_id: str, which: str,
+                               current_user: Annotated[auth.User, Depends(auth.get_current_user)]):
+    """A run's screenshot: 'form' (the filled form) or 'confirm' (the page after it was sent)."""
+    if which not in autopilot.SCREENSHOTS:
+        raise HTTPException(status_code=404, detail="No such screenshot")
+    path = autopilot.screenshot_path(_own_run(current_user.id, run_id), which)
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="No such screenshot")
+    return FileResponse(path, media_type="image/jpeg")
 
 
 @app.get("/documents/{doc_id}/download")

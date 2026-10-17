@@ -1319,6 +1319,8 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
             "letter": letter,
             "archetype": archetype,
             "review": review,
+            # What the letter may say about the company beyond the ad: its fact check needs it.
+            "research": company_research,
         }
 
     elif name == "generate_skill_roadmap":

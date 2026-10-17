@@ -91,6 +91,48 @@ CREATE TABLE IF NOT EXISTS answer_bank (
 """
 ANSWER_KINDS = ("fact", "written")
 
+# Autopilot (see autopilot.py): each user's settings, and one row per job it has tried. job_id is the
+# jobs.db row id; a job is tried once, so a retry replaces its row. practice is 1 when the run filled the
+# form without being allowed to send it. reasons (a JSON list of sentences) says why it wasn't sent.
+_CREATE_AUTOPILOT_SETTINGS_TABLE = """
+CREATE TABLE IF NOT EXISTS autopilot_settings (
+    user_id     TEXT PRIMARY KEY,
+    settings    TEXT NOT NULL DEFAULT '{}',
+    last_run_at TEXT
+);
+"""
+_CREATE_AUTOPILOT_RUNS_TABLE = """
+CREATE TABLE IF NOT EXISTS autopilot_runs (
+    id             TEXT PRIMARY KEY,
+    user_id        TEXT NOT NULL,
+    job_id         TEXT NOT NULL,
+    job_title      TEXT NOT NULL,
+    company        TEXT NOT NULL,
+    location       TEXT,
+    job_url        TEXT,
+    outcome        TEXT NOT NULL,
+    practice       INTEGER NOT NULL DEFAULT 0,
+    fit_score      REAL,
+    reasons        TEXT NOT NULL DEFAULT '[]',
+    questions      TEXT NOT NULL DEFAULT '[]',
+    notes          TEXT,
+    cv_doc_id      TEXT,
+    letter_doc_id  TEXT,
+    application_id TEXT,
+    created_at     TEXT NOT NULL,
+    updated_at     TEXT NOT NULL
+);
+"""
+# running   - being worked on now
+# submitted - sent, and the page confirmed it
+# unconfirmed - the submit button was clicked but the page didn't confirm it: the user checks
+# ready     - practice mode: everything checked out, and it would have been sent
+# needs_you - filled in but held back (see reasons)
+# skipped   - not tried: the fit was too low, say
+# failed    - something broke before the form was filled
+# dismissed - the user cleared it from the queue
+AUTOPILOT_OUTCOMES = ("running", "submitted", "unconfirmed", "ready", "needs_you", "skipped", "failed", "dismissed")
+
 
 def init_db(db_path: str = "") -> None:
     global _DB_PATH
@@ -106,6 +148,9 @@ def init_db(db_path: str = "") -> None:
         con.execute(_CREATE_JOB_MARKS_TABLE)
         con.execute(_CREATE_ANSWER_BANK_TABLE)
         con.execute("CREATE INDEX IF NOT EXISTS idx_answer_bank_user ON answer_bank(user_id)")
+        con.execute(_CREATE_AUTOPILOT_SETTINGS_TABLE)
+        con.execute(_CREATE_AUTOPILOT_RUNS_TABLE)
+        con.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_autopilot_job ON autopilot_runs(user_id, job_id)")
         # Migrations — safe to run on existing DBs
         for stmt in [
             "ALTER TABLE users ADD COLUMN persona TEXT DEFAULT '{}'",
@@ -534,3 +579,148 @@ def delete_answer(user_id: str, answer_id: str) -> bool:
         cur = con.execute("DELETE FROM answer_bank WHERE id=? AND user_id=?", (answer_id, user_id))
     con.close()
     return cur.rowcount == 1
+
+
+# ── Autopilot ─────────────────────────────────────────────────────────────────
+
+def get_autopilot_settings(user_id: str) -> dict:
+    """The user's autopilot settings as saved ({} if never saved); autopilot.py fills in the defaults."""
+    con = sqlite3.connect(_DB_PATH)
+    row = con.execute("SELECT settings FROM autopilot_settings WHERE user_id=?", (user_id,)).fetchone()
+    con.close()
+    try:
+        settings = json.loads(row[0]) if row else {}
+    except json.JSONDecodeError:
+        settings = {}
+    return settings if isinstance(settings, dict) else {}
+
+
+def save_autopilot_settings(user_id: str, settings: dict) -> None:
+    con = sqlite3.connect(_DB_PATH)
+    with con:
+        con.execute("INSERT INTO autopilot_settings (user_id, settings) VALUES (?, ?) "
+                    "ON CONFLICT(user_id) DO UPDATE SET settings=excluded.settings", (user_id, json.dumps(settings)))
+    con.close()
+
+
+def mark_autopilot_run(user_id: str) -> None:
+    """Record that an autopilot run started now (the scheduler spaces runs by it)."""
+    con = sqlite3.connect(_DB_PATH)
+    with con:
+        con.execute("INSERT INTO autopilot_settings (user_id, last_run_at) VALUES (?, ?) "
+                    "ON CONFLICT(user_id) DO UPDATE SET last_run_at=excluded.last_run_at", (user_id, _now()))
+    con.close()
+
+
+def autopilot_schedules() -> list[tuple[str, dict, str | None]]:
+    """(user id, saved settings, last run started at) for every user who has saved autopilot settings."""
+    con = sqlite3.connect(_DB_PATH)
+    rows = con.execute("SELECT user_id, settings, last_run_at FROM autopilot_settings").fetchall()
+    con.close()
+    out = []
+    for user_id, raw, last_run_at in rows:
+        try:
+            settings = json.loads(raw or "{}")
+        except json.JSONDecodeError:
+            settings = {}
+        out.append((user_id, settings if isinstance(settings, dict) else {}, last_run_at))
+    return out
+
+
+def _autopilot_run(row: sqlite3.Row) -> dict:
+    run = dict(row)
+    run["practice"] = bool(run["practice"])
+    run["reasons"] = json.loads(run["reasons"] or "[]")
+    run["questions"] = json.loads(run["questions"] or "[]")
+    return run
+
+
+def start_autopilot_run(user_id: str, job: dict, outcome: str = "running", *, practice: bool = False,
+                        fit_score: float | None = None, reasons: list[str] = ()) -> str:
+    """Record that autopilot is trying (or skipped) a job; replaces an earlier row for the same job."""
+    if outcome not in AUTOPILOT_OUTCOMES:
+        raise ValueError(f"outcome must be one of {AUTOPILOT_OUTCOMES}")
+    run_id, now = uuid.uuid4().hex, _now()
+    con = sqlite3.connect(_DB_PATH)
+    with con:
+        con.execute("DELETE FROM autopilot_runs WHERE user_id=? AND job_id=?", (user_id, str(job.get("id", ""))))
+        con.execute(
+            "INSERT INTO autopilot_runs (id, user_id, job_id, job_title, company, location, job_url, outcome, "
+            "practice, fit_score, reasons, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (run_id, user_id, str(job.get("id", "")), job.get("title") or "", job.get("company") or "",
+             job.get("location") or "", job.get("url") or "", outcome, int(practice), fit_score,
+             json.dumps(list(reasons), ensure_ascii=False), now, now))
+    con.close()
+    return run_id
+
+
+_RUN_FIELDS = {"outcome", "practice", "fit_score", "reasons", "questions", "notes", "cv_doc_id", "letter_doc_id",
+               "application_id"}
+
+
+def update_autopilot_run(run_id: str, *, user_id: str, **fields) -> bool:
+    unknown = set(fields) - _RUN_FIELDS
+    if unknown:
+        raise ValueError(f"unknown autopilot run fields: {sorted(unknown)}")
+    if "outcome" in fields and fields["outcome"] not in AUTOPILOT_OUTCOMES:
+        raise ValueError(f"outcome must be one of {AUTOPILOT_OUTCOMES}")
+    for name in ("reasons", "questions"):
+        if name in fields:
+            fields[name] = json.dumps(list(fields[name]), ensure_ascii=False)
+    if "practice" in fields:
+        fields["practice"] = int(bool(fields["practice"]))
+    fields["updated_at"] = _now()
+    con = sqlite3.connect(_DB_PATH)
+    with con:
+        cur = con.execute(f"UPDATE autopilot_runs SET {', '.join(f'{k}=?' for k in fields)} WHERE id=? AND user_id=?",
+                          [*fields.values(), run_id, user_id])
+    con.close()
+    return cur.rowcount == 1
+
+
+def get_autopilot_run(user_id: str, run_id: str) -> dict | None:
+    con = sqlite3.connect(_DB_PATH)
+    con.row_factory = sqlite3.Row
+    row = con.execute("SELECT * FROM autopilot_runs WHERE id=? AND user_id=?", (run_id, user_id)).fetchone()
+    con.close()
+    return _autopilot_run(row) if row else None
+
+
+def list_autopilot_runs(user_id: str, limit: int = 200) -> list[dict]:
+    """The user's autopilot runs, latest first."""
+    con = sqlite3.connect(_DB_PATH)
+    con.row_factory = sqlite3.Row
+    rows = con.execute("SELECT * FROM autopilot_runs WHERE user_id=? ORDER BY updated_at DESC LIMIT ?",
+                       (user_id, limit)).fetchall()
+    con.close()
+    return [_autopilot_run(r) for r in rows]
+
+
+def autopilot_tried(user_id: str, *, count_practice: bool = True) -> set[str]:
+    """Job ids autopilot has already dealt with. With count_practice=False, jobs it only filled in practice
+    mode don't count, so a live run tries them for real."""
+    sql = "SELECT job_id FROM autopilot_runs WHERE user_id=?"
+    if not count_practice:
+        sql += " AND NOT (practice=1 AND outcome IN ('ready', 'needs_you'))"
+    con = sqlite3.connect(_DB_PATH)
+    rows = con.execute(sql, (user_id,)).fetchall()
+    con.close()
+    return {r[0] for r in rows}
+
+
+def autopilot_sent_since(user_id: str, since: str) -> int:
+    """Applications autopilot sent (or clicked submit on) since `since`, an ISO timestamp."""
+    con = sqlite3.connect(_DB_PATH)
+    row = con.execute("SELECT count(*) FROM autopilot_runs WHERE user_id=? AND outcome IN ('submitted', 'unconfirmed') "
+                      "AND updated_at >= ?", (user_id, since)).fetchone()
+    con.close()
+    return row[0]
+
+
+def finish_stale_autopilot_runs() -> None:
+    """Runs left 'running' by a restart are over: nothing is working on them now."""
+    con = sqlite3.connect(_DB_PATH)
+    with con:
+        con.execute("UPDATE autopilot_runs SET outcome='failed', reasons=?, updated_at=? WHERE outcome='running'",
+                    (json.dumps(["Windrush restarted while this was in progress."]), _now()))
+    con.close()
