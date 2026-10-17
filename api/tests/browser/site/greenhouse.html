@@ -1,0 +1,102 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Apply: Graduate Engineer</title>
+<style>
+  body { font-family: sans-serif; margin: 20px; }
+  .row { margin: 14px 0; }
+  .select__container { position: relative; width: 420px; }
+  .select__control { border: 1px solid #999; min-height: 30px; display: flex; }
+  .select__value-container { flex: 1; display: flex; flex-wrap: wrap; gap: 4px; padding: 2px 6px; }
+  .select__input { border: 0; outline: 0; width: 100%; }
+  .select__menu { position: absolute; z-index: 5; left: 0; right: 0; background: #fff; border: 1px solid #999; }
+  .select__option { padding: 4px 6px; }
+  .select__option--is-focused { background: #def; }
+  .select__multi-value { background: #eee; padding: 0 4px; }
+  #iti-list { display: none; }
+</style></head>
+<body>
+<!-- The phone's country box shows only the dial code once picked. What Greenhouse's job boards render: react-select comboboxes that open on ArrowDown (not on a click into the
+     input), filter as you type, move with ArrowDown and pick with Enter. A type-ahead box lists nothing until
+     two characters are typed, then loads its matches after a delay. The phone widget keeps a hidden list of 244
+     role=option items on the page at all times. -->
+<form id="application" onsubmit="event.preventDefault()">
+  <div class="row"><label for="first_name">First Name*</label> <input id="first_name" required></div>
+  <div class="row"><label for="last_name">Last Name*</label> <input id="last_name" required></div>
+  <div class="row"><label for="email">Email*</label> <input id="email" type="email" required></div>
+  <div class="row"><label for="country">Country*</label>
+    <div class="combo" data-for="country" data-short="1" data-options="United States +1|United Kingdom +44|Nigeria +234|Ireland +353"></div></div>
+  <div class="row"><label for="phone">Phone*</label> <input id="phone" type="tel" required></div>
+  <div class="row"><label for="candidate-location">Location (City)*</label>
+    <div class="combo" data-for="candidate-location" data-async="Bristol, England, United Kingdom|Bristol, Connecticut, United States|Bristol, Tennessee, United States|London, England, United Kingdom|Leeds, England, United Kingdom"></div></div>
+  <div class="row"><label for="school">School*</label>
+    <div class="combo" data-for="school" data-async="University of Bristol|University of the West of England|University of East London|Bath Spa University"></div></div>
+  <div class="row"><label for="visa">Do you now or in the future require visa sponsorship to work in the UK?*</label>
+    <div class="combo" data-for="visa" data-options="Yes|No"></div></div>
+  <div class="row"><label for="ethnicity">How would you describe your race / ethnicity? Please select more than one if applicable.</label>
+    <div class="combo" data-for="ethnicity" data-multi="1" data-options="Australian Aboriginal|Black (including African American, African, Carribean, Black-British, etc.)|East Asian (including Chinese, Japanese, Korean, and Mongolian)|White / Caucasian|Prefer not to say"></div></div>
+  <div class="row"><label for="notice">Notice period*</label>
+    <select id="notice" required><option value="">Select...</option><option value="0">Immediately</option><option value="1">1 month</option><option value="3">3 months</option></select></div>
+  <div class="row" id="disciplines"><label>Undergrad Discipline(s)*</label>
+    <div><input type="checkbox" name="disc" id="d1" required><label for="d1">Mathematics</label></div>
+    <div><input type="checkbox" name="disc" id="d2" required><label for="d2">Computer Science</label></div>
+    <div><input type="checkbox" name="disc" id="d3" required><label for="d3">Physics</label></div>
+  </div>
+  <div class="row"><input type="checkbox" id="consent"><label for="consent">I consent to the processing of my data</label></div>
+  <div class="row"><label for="why">Why are you applying to this role?*</label><br><textarea id="why" rows="4" cols="60" required></textarea></div>
+  <div class="row"><label for="other">If other, please specify</label> <input id="other" maxlength="40"></div>
+  <button id="submit" type="submit">Submit application</button>
+</form>
+<ul id="iti-list"></ul>
+<script>
+const iti = document.getElementById('iti-list');
+for (let i = 0; i < 244; i++) iti.insertAdjacentHTML('beforeend', `<li role="option" class="iti__country">Country ${i} +${i}</li>`);
+
+for (const host of document.querySelectorAll('.combo')) {
+  const id = host.dataset.for, multi = !!host.dataset.multi, short = !!host.dataset.short;
+  const fixed = host.dataset.options ? host.dataset.options.split('|') : null;
+  const remote = host.dataset.async ? host.dataset.async.split('|') : null;
+  host.innerHTML = `<div class="select__container"><div class="select__control">
+      <div class="select__value-container${multi ? ' select__value-container--is-multi' : ''}">
+        <div class="select__placeholder">Select...</div>
+        <div class="select__input-container"><input class="select__input" id="${id}" role="combobox"
+             aria-autocomplete="list" aria-expanded="false" autocomplete="off"></div>
+      </div></div><input type="hidden" name="${id}"></div>`;
+  const box = host.querySelector('.select__container');
+  const input = box.querySelector('input.select__input');
+  const values = box.querySelector('.select__value-container');
+  const hidden = box.querySelector('input[type=hidden]');
+  let menu = null, shown = [], focus = 0, picked = [], timer = null;
+  const close = () => { if (menu) menu.remove(); menu = null; input.setAttribute('aria-expanded', 'false'); };
+  const render = () => {
+    if (!menu) { menu = document.createElement('div'); menu.className = 'select__menu'; box.appendChild(menu); }
+    input.setAttribute('aria-expanded', 'true');
+    menu.innerHTML = '<div class="select__menu-list">' + (shown.length ? shown.map((o, i) =>
+      `<div role="option" class="select__option${i === focus ? ' select__option--is-focused' : ''}">${o}</div>`).join('')
+      : '<div class="select__menu-notice">No options</div>') + '</div>';
+  };
+  const filter = () => {
+    const q = input.value.toLowerCase();
+    if (fixed) { shown = fixed.filter(o => o.toLowerCase().includes(q) && !picked.includes(o)); focus = 0; render(); return; }
+    clearTimeout(timer); shown = []; focus = 0; render();
+    if (q.length < 2) return;
+    timer = setTimeout(() => { shown = remote.filter(o => o.toLowerCase().includes(q)); focus = 0; render(); }, 400);
+  };
+  const choose = (o) => {
+    picked = multi ? [...picked, o] : [o];
+    values.querySelectorAll('.select__placeholder, .select__single-value, .select__multi-value').forEach(n => n.remove());
+    for (const p of picked) values.insertAdjacentHTML('afterbegin', multi
+      ? `<div class="select__multi-value"><div class="select__multi-value__label">${p}</div></div>`
+      : `<div class="select__single-value">${short ? p.split(' ').pop() : p}</div>`);
+    hidden.value = picked.join(',');
+    input.value = '';
+    if (multi) filter(); else close();
+  };
+  input.addEventListener('input', filter);
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowDown') { e.preventDefault(); if (!menu) filter(); else { focus = Math.min(focus + 1, shown.length - 1); render(); } }
+    else if (e.key === 'Enter') { e.preventDefault(); if (menu && shown[focus]) choose(shown[focus]); }
+    else if (e.key === 'Escape') close();
+  });
+  input.addEventListener('blur', () => { input.value = ''; close(); });
+}
+</script>
+</body></html>

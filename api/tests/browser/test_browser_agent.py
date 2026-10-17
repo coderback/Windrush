@@ -343,9 +343,10 @@ def test_questions_go_through_answer_questions_and_written_answers_are_filled_wh
     events = asyncio.run(flow())
     seen = "\n".join(llm.seen)
 
-    # browser-use took the nested questions, and the agent was told what to fill and what to leave.
-    assert '1. "Will you require visa sponsorship?": choose "No"' in seen
-    assert f"a written answer ({len(WHY)} characters)" in seen and WHY not in seen.split("Answers:")[1][:400]
+    # browser-use took the nested questions; answer_questions found each field by its label and filled the answers
+    # in itself (the model sees only the start of a written one), leaving the one only the candidate can answer.
+    assert '1. "Will you require visa sponsorship?": filled in with "No". Done; leave it.' in seen
+    assert '2. "Why do you want to join us?": filled in with "' in seen and WHY not in seen.split("Answers:")[1][:400]
     assert '3. "Do you have any unspent criminal convictions?": LEAVE BLANK' in seen
     # The draft went in exactly, in one paste.
     assert f"Filled answer 2 ({len(WHY)} characters)" in seen
@@ -355,8 +356,8 @@ def test_questions_go_through_answer_questions_and_written_answers_are_filled_wh
     review = next(e for e in events if e.get("interactive"))
     assert [q["source"] for q in review["questions"]] == ["profile", "drafted", "needs_you"]
     assert review["notes"].startswith("Questions only you can answer (left blank):\n"
-                                      "- Do you have any unspent criminal convictions?\n\n"
-                                      "Required fields still empty on the form:\n- Will you require visa sponsorship?")
+                                      "- Do you have any unspent criminal convictions?\n\n")
+    assert "Will you require visa sponsorship?" not in review["notes"]     # filled: not empty, not self-answered
     assert_no_chromium_left()
 
 
@@ -435,7 +436,8 @@ def test_unattended_run_sends_only_when_decide_says_so(ba, site, monkeypatch):
     llm, shown, events = run(send=True)
     final = events[-1]
     assert not any(e.get("interactive") for e in events)                 # nobody is asked anything
-    assert shown == [{"ready": True, "error": "", "notes": "Filled every field", "questions": [], "empty": []}]
+    assert shown == [{"ready": True, "error": "", "notes": "Filled every field", "questions": [], "empty": [],
+                      "self_answered": []}]
     assert llm.tasks == ["fill", "submit"]
     assert final["done"] and final["submitted"] and final["submit_attempted"]
     assert _is_jpeg(final["form_screenshot"]) and _is_jpeg(final["confirm_screenshot"])
@@ -445,4 +447,169 @@ def test_unattended_run_sends_only_when_decide_says_so(ba, site, monkeypatch):
     assert llm.tasks == ["fill"]                                          # the submit agent never ran
     assert final["done"] and not final["submitted"] and not final["submit_attempted"]
     assert _is_jpeg(final["form_screenshot"]) and "confirm_screenshot" not in final
+    assert_no_chromium_left()
+
+
+class GreenhouseLLM(ScriptedLLM):
+    """Fills greenhouse.html the way the task asks: applicant details with fill_fields, questions through
+    answer_questions with their indexes, then tries to fill a question that was left for the candidate."""
+
+    def __init__(self):
+        super().__init__()
+        self.step = 0
+
+    @staticmethod
+    def _index(text: str, element_id: str) -> int:
+        return int(re.search(rf"\[(\d+)\]<(?:input|select|textarea)[^\n]*?id={re.escape(element_id)}\b", text).group(1))
+
+    def next_action(self, text: str) -> list[dict]:
+        self.step += 1
+        at = lambda element_id: self._index(text, element_id)  # noqa: E731
+        if self.step == 1:
+            return [{"fill_fields": {"fields": [
+                {"index": at("first_name"), "label": "First Name", "value": "Ada"},
+                {"index": at("last_name"), "label": "First Name", "value": "Ada"},     # the wrong field for that label
+                {"index": at("country"), "label": "Country", "value": "United Kingdom"},
+                {"index": at("candidate-location"), "label": "Location (City)", "value": "Bristol, United Kingdom"},
+            ]}}]
+        if self.step == 2:
+            return [{"answer_questions": {"questions": [
+                {"question": "Do you now or in the future require visa sponsorship to work in the UK?", "index": at("visa")},
+                {"question": "How would you describe your race / ethnicity? Please select more than one if applicable.",
+                 "index": at("ethnicity")},
+                {"question": "Why are you applying to this role?", "index": at("why")},
+                {"question": "Notice period", "index": at("notice")},
+            ]}}]
+        if self.step == 3:
+            return [{"fill_fields": {"fields": [{"index": at("notice"), "label": "Notice period", "value": "1 month"}]}}]
+        if self.step == 4:
+            return [{"evaluate": {"code": "(function(){var g=function(i){var b=document.getElementById(i).closest('.select__container');"
+                                          "return b?[].map.call(b.querySelectorAll('[class*=single-value],[class*=multi-value__label]'),"
+                                          "function(n){return n.textContent}).join('+'):document.getElementById(i).value};"
+                                          "return 'FORM:'+JSON.stringify({first:g('first_name'),last:g('last_name'),country:g('country'),"
+                                          "city:g('candidate-location'),visa:g('visa'),eth:g('ethnicity'),why:g('why'),notice:g('notice')})})()"}}]
+        return [{"done": {"text": "Filled what I could.", "success": True}}]
+
+
+def test_fields_and_questions_are_filled_in_bulk_on_a_greenhouse_style_form(ba, site, monkeypatch):
+    llm = GreenhouseLLM()
+    monkeypatch.setattr(ba, "_make_browser_llm", lambda: llm)
+    asked = []
+
+    async def answerer(questions):
+        asked.extend(questions)
+
+        def answer(q):
+            black = next((o for o in q["options"] if o.startswith("Black")), "")
+            return {"Do you now or in the future require visa sponsorship to work in the UK?": ("fact", "profile", "No"),
+                    "How would you describe your race / ethnicity? Please select more than one if applicable.":
+                        ("fact", "profile", black),
+                    "Why are you applying to this role?": ("written", "drafted", WHY),
+                    "Notice period": ("fact", "needs_you", "")}[q["question"]]
+        return [{"question": q["question"], "options": q["options"], "kind": answer(q)[0], "source": answer(q)[1],
+                 "answer": answer(q)[2], "because": "", "bank_id": "", "flags": []} for q in questions]
+
+    async def flow():
+        return [event async for event in ba.apply_with_browser(
+            f"{site}/greenhouse.html", {"core_info": {"first_name": "Ada"}}, "", asyncio.Queue(), answerer=answerer,
+            decide=lambda filled: asyncio.sleep(0, result=False))]
+    asyncio.run(flow())
+    seen = "\n".join(llm.seen)
+
+    # The dropdowns' real options went to the answerer: searchable ones are read by opening them.
+    options = lambda start: next(q["options"] for q in asked if q["question"].startswith(start))  # noqa: E731
+    assert options("Do you now") == ["Yes", "No"]
+    assert options("How would you")[1].startswith("Black (including")
+    assert options("Notice period") == ["Select...", "Immediately", "1 month", "3 months"]
+    assert options("Why are you") == []
+
+    assert '- “First Name”: filled with “Ada”. Done; leave it.' in seen
+    # The second item's index was Last Name's: the field labelled "First Name" is what got filled, not Last Name.
+    assert seen.count("- “First Name”: filled with “Ada”. Done; leave it.") >= 2
+    assert '- “Country”: filled with “United Kingdom +44”' in seen
+    assert '"Do you now or in the future require visa sponsorship to work in the UK?": filled in with "No"' in seen
+    assert '"Notice period": LEAVE BLANK' in seen
+    assert "- “Notice period”: NOT filled. Only the candidate can answer it: leave it blank." in seen
+
+    form = json.loads(re.search(r"FORM:(\{.*?\})(?:\n|$)", seen).group(1))
+    assert form == {"first": "Ada", "last": "", "country": "+44",
+                    "city": "Bristol, England, United Kingdom", "visa": "No",
+                    "eth": options("How would you")[1], "why": WHY, "notice": ""}
+    assert_no_chromium_left()
+
+
+class VisaOnlyLLM(GreenhouseLLM):
+    def next_action(self, text: str) -> list[dict]:
+        self.step += 1
+        if self.step == 1:
+            return [{"answer_questions": {"questions": [
+                {"question": "Do you now or in the future require visa sponsorship to work in the UK?",
+                 "index": self._index(text, "visa")}]}}]
+        return [{"done": {"text": "Done.", "success": True}}]
+
+
+def test_an_answer_no_option_takes_is_asked_again_with_the_options(ba, site, monkeypatch):
+    """When a dropdown's options didn't show the first time, the free-text answer it gets ('Nope') isn't left for
+    the agent to type: the options are read again and the question asked again with them."""
+    llm = VisaOnlyLLM()
+    monkeypatch.setattr(ba, "_make_browser_llm", lambda: llm)
+    real_read, reads, asked = ba.form_widgets.read_options, [], []
+
+    async def read_options(field):
+        reads.append(1)
+        return [] if len(reads) == 1 else await real_read(field)
+    monkeypatch.setattr(ba.form_widgets, "read_options", read_options)
+
+    async def answerer(questions):
+        asked.append([q["options"] for q in questions])
+        return [{"question": q["question"], "options": q["options"], "kind": "fact", "source": "profile",
+                 "answer": "No" if q["options"] else "Nope", "because": "", "bank_id": "", "flags": []}
+                for q in questions]
+
+    async def flow():
+        return [event async for event in ba.apply_with_browser(
+            f"{site}/greenhouse.html", {"core_info": {"first_name": "Ada"}}, "", asyncio.Queue(), answerer=answerer,
+            decide=lambda filled: asyncio.sleep(0, result=False))]
+    final = asyncio.run(flow())[-1]
+    assert asked == [[[]], [["Yes", "No"]]]
+    assert '"Do you now or in the future require visa sponsorship to work in the UK?": filled in with "No"' in \
+        "\n".join(llm.seen)
+    assert final["questions"][0]["answer"] == "No"
+    assert_no_chromium_left()
+
+
+class SelfAnsweringLLM(GreenhouseLLM):
+    """Asks answer_questions with no index at all (it must find the field by label), then types a name from the
+    persona and an answer to a question itself, the way a live run did."""
+
+    def next_action(self, text: str) -> list[dict]:
+        self.step += 1
+        if self.step == 1:
+            return [{"answer_questions": {"questions": [
+                {"question": "Do you now or in the future require visa sponsorship to work in the UK?"}]}}]
+        if self.step == 2:
+            return [{"input": {"index": self._index(text, "first_name"), "text": "Ada"}},
+                    {"input": {"index": self._index(text, "why"), "text": "Because I like it."}}]
+        return [{"done": {"text": "Done.", "success": True}}]
+
+
+def test_answers_the_agent_types_itself_are_caught_and_fields_are_found_by_label(ba, site, monkeypatch):
+    llm = SelfAnsweringLLM()
+    monkeypatch.setattr(ba, "_make_browser_llm", lambda: llm)
+
+    async def answerer(questions):
+        return [{"question": q["question"], "options": q["options"], "kind": "fact", "source": "profile",
+                 "answer": "No", "because": "", "bank_id": "", "flags": []} for q in questions]
+
+    async def flow():
+        return [event async for event in ba.apply_with_browser(
+            f"{site}/greenhouse.html", {"core_info": {"first_name": "Ada"}}, "", asyncio.Queue(), answerer=answerer,
+            decide=lambda filled: asyncio.sleep(0, result=False))]
+    final = asyncio.run(flow())[-1]
+    # no index given: found by its label
+    assert '"Do you now or in the future require visa sponsorship to work in the UK?": filled in with "No"' in \
+        "\n".join(llm.seen)
+    assert final["self_answered"] == ["Why are you applying to this role?*: Because I like it."]  # not "First Name"
+    assert ("Answers the agent chose itself, not from your saved answers or persona (check them):\n"
+            "- Why are you applying to this role?*: Because I like it.") in final["notes"]
     assert_no_chromium_left()

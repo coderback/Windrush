@@ -22,7 +22,7 @@ from typing import AsyncGenerator, Awaitable, Callable
 
 from pydantic import BaseModel, Field
 
-from . import azure_config
+from . import azure_config, form_widgets
 
 # browser-use's product telemetry (PostHog) and cloud sync are ON unless these say otherwise: every
 # run would send the task prompt (the applicant's personal data), action history, visited URLs and
@@ -542,9 +542,17 @@ def _build_task(job_url: str, persona: dict, cover_letter: str,
         "every other question (right to work, visas and sponsorship, nationality, notice period, salary, "
         "availability, preferences, equality monitoring, consent and declarations, and any question that asks "
         "for a written answer) call answer_questions first, with all of the page's questions in one call: each "
-        "label exactly as the form shows it, with its options for a dropdown, radio or checkbox question. Then "
-        "fill in exactly what it returns. Never answer one of these questions yourself, and leave blank every "
+        "label exactly as the form shows it, with its field's index, and its options if you can see them. It "
+        "fills in what it can itself and says which are done: leave those alone, and fill in only the ones it "
+        "says it couldn't, exactly as it says. Never answer one of these questions yourself, and leave blank every "
         "question it says to leave blank: those are facts only the candidate can give. Do NOT guess."
+        "\n\nFill the applicant details with fill_fields, as many fields as you can in one call: it handles "
+        "dropdowns, searchable dropdowns (give a city as 'City, Country') and checkboxes, and checks each field "
+        "took. A field it reports as filled is done: don't type it again. When it can't fill a field, carry on "
+        "with the rest of the form and list that field under 'Needs your input'. For a phone number with its own "
+        "country / dial-code dropdown, choose the country there and give the number without the country code. "
+        "Once the application form is showing, don't click 'Apply' again: it can reset the form. Never pick an "
+        "answer to a question by clicking its option or typing it yourself: questions go through answer_questions."
     )
 
     if persona.get("custom_directives"):
@@ -840,6 +848,8 @@ Answerer = Callable[[list[dict]], Awaitable[list[dict]]]
 
 class FormQuestion(BaseModel):
     question: str = Field(description="The question's label exactly as the form shows it")
+    index: int | None = Field(default=None, description="The index of the question's field: its text box, dropdown "
+                                                       "or first checkbox/radio button")
     options: list[str] = Field(default_factory=list,
                                description="Its choices, for a dropdown, radio or checkbox question")
     max_length: int | None = Field(
@@ -849,6 +859,16 @@ class FormQuestion(BaseModel):
 
 class AnswerQuestionsParams(BaseModel):
     questions: list[FormQuestion]
+
+
+class FieldValue(BaseModel):
+    index: int = Field(description="The field's index")
+    label: str = Field(description="The field's label as the form shows it")
+    value: str = Field(description="What to put in it: the text, or the dropdown option / checkbox label to choose")
+
+
+class FillFieldsParams(BaseModel):
+    fields: list[FieldValue]
 
 
 class FillAnswerParams(BaseModel):
@@ -878,7 +898,76 @@ def _answer_line(n: int, result: dict) -> str:
     return f'{n}. "{question}": {verb} "{result["answer"]}"'
 
 
-def _add_fill_answer(tools, browser_session, numbered: dict[int, dict]) -> None:
+async def _field_at(browser_session, index: int | None, label: str):
+    """((field, description), "") for the field labelled `label`: the element at `index` when that is it, else
+    the one field on the page with that label. (None, why) when there's neither."""
+    why = "no index given"
+    if index is not None:
+        node = await browser_session.get_element_by_index(index)
+        if node is None:
+            why = f"element {index} isn't available (the page may have changed)"
+        else:
+            try:
+                field = await form_widgets.Field(browser_session, node).open()
+                info = await field.describe()
+                shown = info.get("group") or info.get("label") or ""
+                if form_widgets.same_question(shown, label):
+                    return (field, info), ""
+                why = f"element {index} is labelled “{shown[:80]}”, not “{label[:80]}”"
+            except Exception as exc:
+                why = f"couldn't read element {index}: {type(exc).__name__}"
+    # The agent's index is often from an earlier view of the page, or made up: find the field by its label.
+    try:
+        field = await form_widgets.find_by_label(browser_session, label)
+        if field:
+            info = await field.describe()
+            if form_widgets.same_question(info.get("group") or info.get("label") or "", label):
+                return (field, info), ""
+    except Exception as exc:
+        logger.debug("finding %r by its label failed: %s", label[:60], exc)
+    return None, why
+
+
+def _add_fill_fields(tools, browser_session, asked: dict[str, dict], filled: set[str]) -> None:
+    """Register fill_fields, which fills several fields at once and checks each took (form_widgets.fill)."""
+    @tools.action(
+        "Fill several of the form's fields in one step and check each one took: text boxes, dropdowns (searchable "
+        "ones too: it opens them, searches and picks the option), checkboxes and radio buttons. Give each field's "
+        "index, its label as shown, and the value. Use it for the applicant's details (name, email, phone, country, "
+        "city, education, links); answer_questions fills the form's questions.",
+        param_model=FillFieldsParams)
+    async def fill_fields(params: FillFieldsParams) -> ActionResult:
+        blank = [q["question"] for q in asked.values() if q.get("source") == "needs_you"]
+        lines = []
+        for item in params.fields[:25]:
+            if any(form_widgets.same_question(item.label, q) for q in blank):
+                lines.append(f"- “{item.label}”: NOT filled. Only the candidate can answer it: leave it blank.")
+                continue
+            if item.label.replace("*", "").strip().endswith("?"):
+                lines.append(f"- “{item.label}”: NOT filled. That's a question: get its answer with answer_questions.")
+                continue
+            found, why = await _field_at(browser_session, item.index, item.label)
+            if not found:
+                lines.append(f"- “{item.label}”: NOT filled: {why}. Check the index.")
+                continue
+            ok, detail = await form_widgets.fill_field(found[0], item.value)
+            if ok:
+                filled.update({item.label, found[1].get("group") or found[1].get("label") or ""})
+            lines.append(f"- “{item.label}”: filled with “{detail}”. Done; leave it." if ok
+                         else f"- “{item.label}”: NOT filled: {detail}.")
+        text = "Fields:\n" + "\n".join(lines)
+        return ActionResult(extracted_content=text, long_term_memory=text)
+
+
+async def _label_of(browser_session, node) -> str:
+    try:
+        info = await (await form_widgets.Field(browser_session, node).open()).describe()
+        return info.get("group") or info.get("label") or ""
+    except Exception:
+        return ""
+
+
+def _add_fill_answer(tools, browser_session, numbered: dict[int, dict], filled: set[str] | None = None) -> None:
     """Register fill_answer, which pastes answer `numbered[n]` whole into a text box."""
     @tools.action(
         "Put a written answer into its text box in one step: give the box's index and the answer's number. It "
@@ -893,23 +982,35 @@ def _add_fill_answer(tools, browser_session, numbered: dict[int, dict]) -> None:
             return ActionResult(error=f"Element index {params.index} isn't available - the page may have changed.")
         text = result["answer"]
         try:
+            limit = (await (await form_widgets.Field(browser_session, node).open()).describe()).get("maxLength")
+        except Exception:
+            limit = None
+        if limit and len(text) > limit:
+            return ActionResult(error=f"Element {params.index} takes at most {limit} characters and answer {params.answer} "
+                                      f"has {len(text)}. Nothing was filled: call answer_questions again for "
+                                      f"“{result['question']}” with max_length={limit}.")
+        try:
             held = await _paste_text(browser_session, node, text)
         except Exception as exc:
             return ActionResult(error=f"Couldn't fill element {params.index}: {type(exc).__name__}: {exc}"[:300])
         if " ".join(held.split()) != " ".join(text.split()):
             return ActionResult(error=f"Filled, but element {params.index} now holds {len(held)} characters, not "
                                       f"the answer's {len(text)}: check it is the box for that question.")
+        if filled is not None:
+            filled.update({result["question"], await _label_of(browser_session, node)})
         done = f"Filled answer {params.answer} ({len(text)} characters) into element {params.index}."
         return ActionResult(extracted_content=done, long_term_memory=done)
 
 
 def _apply_tools(cover_letter: str, browser_session, answerer: Answerer | None = None,
-                 asked: dict[str, dict] | None = None) -> "Tools":
+                 asked: dict[str, dict] | None = None, filled: set[str] | None = None) -> "Tools":
     """The fill agent's tools: the password-scoped set, answer_questions and fill_answer (recording what
-    was answered in `asked`, by question), and paste_cover_letter when there's a letter."""
+    was answered in `asked`, by question), fill_fields, and paste_cover_letter when there's a letter. The
+    labels of the fields these tools filled go into `filled`; anything else on the form the agent did itself."""
     tools = _secret_scoped_tools()
     answerer = answerer or _no_answers
     asked = asked if asked is not None else {}
+    filled = filled if filled is not None else set()
     numbered: dict[int, dict] = {}
 
     @tools.action(
@@ -919,7 +1020,24 @@ def _apply_tools(cover_letter: str, browser_session, answerer: Answerer | None =
         "dropdown, radio or checkbox question. Then fill in exactly what it returns.",
         param_model=AnswerQuestionsParams)
     async def answer_questions(params: AnswerQuestionsParams) -> ActionResult:
-        questions = [q.model_dump() for q in params.questions if q.question.strip()]
+        questions, fields = [], {}
+        for q in params.questions:
+            if not q.question.strip():
+                continue
+            question = q.model_dump(exclude={"index"})
+            # With the field's index, its real options are read off the page (a searchable dropdown shows none
+            # until it's opened), so the answer is one of them; the answer is then put on the form here.
+            found = (await _field_at(browser_session, q.index, q.question))[0]
+            if found:
+                fields[_question_key(q.question)] = found
+                if not question.get("max_length") and found[1].get("maxLength"):
+                    question["max_length"] = found[1]["maxLength"]
+                if not question["options"] and found[1]["kind"] != form_widgets.TEXT:
+                    try:
+                        question["options"] = await form_widgets.read_options(found[0])
+                    except Exception as exc:
+                        logger.debug("reading options failed: %s", exc)
+            questions.append(question)
         if not questions:
             return ActionResult(error="Give at least one question.")
         try:
@@ -932,11 +1050,34 @@ def _apply_tools(cover_letter: str, browser_session, answerer: Answerer | None =
             n = len(numbered) + 1
             numbered[n] = result
             asked[_question_key(result["question"])] = result
-            lines.append(_answer_line(n, result))
+            line = _answer_line(n, result)
+            found = fields.get(_question_key(result["question"]))
+            if found and result["source"] != "needs_you" and result["answer"] and not result["options"] \
+                    and found[1]["kind"] != form_widgets.TEXT:
+                # Answered without the dropdown's options (they didn't show when read): read them now and ask again,
+                # so the answer is one of them, or left for the candidate, never free text the form won't take.
+                try:
+                    options = await form_widgets.read_options(found[0])
+                    if options:
+                        again = await answerer([{"question": result["question"], "options": options,
+                                                 "max_length": None}])
+                        if again:
+                            result = numbered[n] = asked[_question_key(result["question"])] = again[0]
+                            line = _answer_line(n, result)
+                except Exception as exc:
+                    logger.debug("asking again with the options failed: %s", exc)
+            if found and result["source"] != "needs_you" and result["answer"]:
+                ok, detail = await form_widgets.fill_field(found[0], result["answer"])
+                if ok:
+                    filled.update({result["question"], found[1].get("group") or found[1].get("label") or ""})
+                line = (f'{n}. "{result["question"]}": filled in with "{detail[:120]}". Done; leave it.' if ok
+                        else f"{line} (It couldn't be filled in automatically: {detail}.)")
+            lines.append(line)
         text = "Answers:\n" + "\n".join(lines)
         return ActionResult(extracted_content=text, long_term_memory=text)
 
-    _add_fill_answer(tools, browser_session, numbered)
+    _add_fill_answer(tools, browser_session, numbered, filled)
+    _add_fill_fields(tools, browser_session, asked, filled)
     if not cover_letter.strip():
         return tools
 
@@ -955,6 +1096,7 @@ def _apply_tools(cover_letter: str, browser_session, answerer: Answerer | None =
         if " ".join(held.split()) != " ".join(cover_letter.split()):
             return ActionResult(error=f"Pasted, but element {index} now holds {len(held)} characters, not the "
                                       f"letter's {len(cover_letter)}: check it is the cover-letter box.")
+        filled.add(await _label_of(browser_session, node))
         done = f"Pasted the whole cover letter ({len(cover_letter)} characters) into element {index}."
         return ActionResult(extracted_content=done, long_term_memory=done)
 
@@ -1028,6 +1170,7 @@ _EMPTY_REQUIRED_JS = r"""() => {
       if (!markedRequired(el) && !starred(label)) continue;
       let empty;
       if (el.getAttribute('contenteditable') === 'true') empty = !el.textContent.trim();
+      else if (el.closest('[class*=select__control]')) empty = !pickedInBox(el);
       else if (combobox && el.tagName === 'INPUT') empty = !el.value.trim() && !pickedInBox(el);
       else empty = !String(el.value || '').trim();
       if (empty) found.push(clean(label) || 'A required field with no label');
@@ -1048,7 +1191,46 @@ async def _empty_required_fields(browser_session) -> list[str]:
     return [str(label)[:150] for label in labels if str(label).strip()][:25] if isinstance(labels, list) else []
 
 
-def _with_empty_fields(notes: str, empty: list[str], left_blank: list[str] = ()) -> str:
+def _persona_words(persona) -> set[str]:
+    """Every word and number in the persona's values, with each value's digits run together too (a phone
+    number typed without spaces)."""
+    words: set[str] = set()
+
+    def walk(value):
+        if isinstance(value, dict):
+            for v in value.values():
+                walk(v)
+        elif isinstance(value, (list, tuple)):
+            for v in value:
+                walk(v)
+        elif value is not None and not isinstance(value, bool):
+            text = str(value).lower()
+            words.update(re.findall(r"[a-z0-9]+", text))
+            digits = re.sub(r"\D", "", text)
+            if len(digits) >= 6:
+                words.update({digits, digits[-10:]})
+    walk(persona)
+    return words
+
+
+async def _answered_outside_tools(browser_session, tool_filled: set[str], persona: dict) -> list[str]:
+    """'label: value' for each field holding an answer that didn't come through answer_questions or fill_fields:
+    one the agent picked or typed itself. An applicant detail typed straight from the persona (a name, an email)
+    isn't counted; a question (its label ends in '?') always is."""
+    known = _persona_words(persona)
+    out = []
+    for field in await form_widgets.filled_fields(browser_session):
+        label, value = field["label"], field["value"]
+        if any(t and form_widgets.same_question(label, t) for t in tool_filled):
+            continue
+        question = label.replace("*", "").strip().endswith("?")
+        if not question and set(re.findall(r"[a-z0-9]+", value.lower())) <= known:
+            continue
+        out.append(f"{label[:120] or 'A field with no label'}: {value[:80]}")
+    return out[:25]
+
+
+def _with_empty_fields(notes: str, empty: list[str], left_blank: list[str] = (), self_answered: list[str] = ()) -> str:
     """The agent's notes, headed by the questions left blank for the candidate (answer_questions had no
     answer) and the required fields the page shows as still empty (one of those questions isn't repeated)."""
     blank_keys = [_question_key(q) for q in left_blank]
@@ -1059,6 +1241,9 @@ def _with_empty_fields(notes: str, empty: list[str], left_blank: list[str] = ())
         blocks.append("Questions only you can answer (left blank):\n" + "\n".join(f"- {q}" for q in left_blank))
     if empty:
         blocks.append("Required fields still empty on the form:\n" + "\n".join(f"- {label}" for label in empty))
+    if self_answered:
+        blocks.append("Answers the agent chose itself, not from your saved answers or persona (check them):\n"
+                      + "\n".join(f"- {item}" for item in self_answered))
     return "\n\n".join(blocks + [notes]).strip()
 
 
@@ -1157,6 +1342,7 @@ async def apply_with_browser(
     screencast_task: asyncio.Task | None = None
     upload_dir = ""
     asked: dict[str, dict] = {}   # question key → its latest answer, filled in by answer_questions
+    tool_filled: set[str] = set()  # labels of the fields our tools filled
     _register_secret(job_password)  # masked in logs until the finally below
     try:
         # Named copies for the upload, removed in the finally below.
@@ -1171,7 +1357,7 @@ async def apply_with_browser(
             register_new_step_callback=on_step,
             use_vision=False,
             available_file_paths=[path for path in (cv_upload, letter_upload) if path],
-            tools=_apply_tools(cover_letter, browser_session, answerer, asked),
+            tools=_apply_tools(cover_letter, browser_session, answerer, asked, tool_filled),
             sensitive_data=sensitive_data,
             # The judge LLM call grades the run from the RAW step history, which browser-use does not
             # redact — e.g. an evaluate() that reads the form back carries the typed password. We
@@ -1218,10 +1404,14 @@ async def apply_with_browser(
         empty = await _empty_required_fields(browser_session)
         questions = list(asked.values())
         left_blank = [q["question"] for q in questions if q["source"] == "needs_you"]
-        notes = _with_empty_fields(summary, empty, left_blank)[:_MAX_NOTES_CHARS]
+        # Masked like all agent text: the password can be mirrored into the DOM, or typed where it doesn't belong.
+        self_answered = [_redact(item, job_password)
+                         for item in await _answered_outside_tools(browser_session, tool_filled, cv_profile)]
+        notes = _with_empty_fields(summary, empty, left_blank, self_answered)[:_MAX_NOTES_CHARS]
 
         if decide is not None:
-            filled = {"ready": ready, "error": agent_error, "notes": notes, "questions": questions, "empty": empty}
+            filled = {"ready": ready, "error": agent_error, "notes": notes, "questions": questions, "empty": empty,
+                      "self_answered": self_answered}
             async for step in _finish_unattended(decide, filled, browser_session, llm, sensitive_data, job_password):
                 yield step
             return

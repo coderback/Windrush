@@ -124,6 +124,10 @@ def hold_reasons(filled: dict, document_problems: list[str]) -> list[str]:
     empty = filled.get("empty") or []
     if empty:
         reasons.append(f"{_plural(len(empty), 'required field')} still empty: {_listed(empty)}")
+    self_answered = filled.get("self_answered") or []
+    if self_answered:
+        reasons.append(f"{_plural(len(self_answered), 'answer')} the agent chose itself, not from your saved "
+                       f"answers or persona: {_listed(self_answered)}")
     return reasons + list(document_problems)
 
 
