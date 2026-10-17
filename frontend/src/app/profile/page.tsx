@@ -281,7 +281,7 @@ export default function ProfilePage() {
     switch (section) {
       case "identity":
         return (
-          <SectionCard title="Identity & contact" intro="Used to fill application forms. Contact details never go into AI prompts.">
+          <SectionCard title="Identity & contact" intro="Used to fill application forms. Contact details go only to the agent that fills them in, never into writing your CVs or letters.">
             <div className={grid2}>
               <TextField label="First name" value={c.first_name} onChange={(v) => set("core_info", "first_name", v)} autoComplete="given-name" />
               <TextField label="Preferred name" value={c.preferred_name} onChange={(v) => set("core_info", "preferred_name", v)} />
@@ -521,7 +521,7 @@ export default function ProfilePage() {
             <AreaField label="A conflict you resolved" rows={3} value={scr.conflict_resolution} onChange={(v) => set("screening", "conflict_resolution", v)} />
             <div className={grid2}>
               <TextField label="Salary expectation" value={scr.salary_canonical} placeholder="e.g. £35,000" onChange={(v) => set("screening", "salary_canonical", v)}
-                hint="Typed into salary fields. It never goes into AI prompts." />
+                hint="Given only to the agent filling in a salary question, never used for writing." />
               <TextField label="Notice period" value={scr.notice_period_canonical} placeholder="e.g. 2 weeks" onChange={(v) => set("screening", "notice_period_canonical", v)} />
             </div>
           </SectionCard>
@@ -559,7 +559,7 @@ export default function ProfilePage() {
         );
       case "equality":
         return (
-          <SectionCard title="Equality monitoring" intro="Optional. Only typed into the equality questions some forms ask. It never goes into AI prompts.">
+          <SectionCard title="Equality monitoring" intro="Optional. Given only to the agent filling in the equality questions some forms ask, never used for writing.">
             <div className={grid2}>
               <TextField label="Gender" value={div.gender} onChange={(v) => set("diversity", "gender", v)} />
               <TextField label="Ethnicity" value={div.ethnicity} onChange={(v) => set("diversity", "ethnicity", v)} />
@@ -647,10 +647,12 @@ export default function ProfilePage() {
                 <Icon name="shield" size={18} />
               </span>
               <span className="flex-[1_1_300px] flex flex-col gap-1">
-                <h2 id="priv" className="m-0 text-[14px] font-semibold">What the AI never sees</h2>
+                <h2 id="priv" className="m-0 text-[14px] font-semibold">Where your private details go</h2>
                 <span className="text-[13px] leading-[1.55] text-ink-2">
-                  Contact details, date of birth, salary and equality data stay out of every prompt. Your job-board password is
-                  encrypted and only ever typed into the job site itself.
+                  The AI that writes your CVs, cover letters and answers never sees your contact details, date of birth, salary or
+                  equality data. The agent that fills in forms is an AI too: it&apos;s given your name, contact details and date of
+                  birth to type in, and your salary or equality answers when a form asks for them. Your job-board password reaches
+                  no AI: it&apos;s encrypted, and only ever typed into the job site itself.
                 </span>
               </span>
             </section>
