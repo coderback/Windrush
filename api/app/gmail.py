@@ -544,6 +544,48 @@ def track(user_id: str, event_id: str, company: str, role: str) -> dict:
     return tracker.get_email_event(user_id, event_id)
 
 
+def _key(text: str) -> str:
+    return " ".join(re.findall(r"[a-z0-9]+", str(text or "").lower()))
+
+
+def track_all(user_id: str) -> dict:
+    """Add every application the unmatched emails are about: one per company and role, at the status of its
+    newest email that points to one, with all its emails linked. An email naming no role takes the company's
+    one role from its other emails; when there's none (or several), it is left for the user."""
+    unmatched = [e for e in tracker.list_email_events(user_id) if e["decision"] == "unmatched"]
+    roles: dict[str, set[str]] = {}
+    for e in unmatched:
+        if e["role"].strip():
+            roles.setdefault(_key(normalise_company_name(e["company"])), set()).add(e["role"].strip())
+    groups: dict[tuple[str, str], list[dict]] = {}
+    skipped = 0
+    for e in unmatched:
+        company = " ".join(e["company"].split())
+        company_key = _key(normalise_company_name(company))
+        role = e["role"].strip() or (next(iter(roles[company_key])) if len(roles.get(company_key, ())) == 1 else "")
+        if not company_key or not role:
+            skipped += 1
+            continue
+        groups.setdefault((company_key, _key(role)), []).append({**e, "company": company, "role": role})
+    added = linked = 0
+    for events in groups.values():
+        events.sort(key=lambda e: e["received_at"])
+        newest = events[-1]
+        status = next((KIND_STATUS[e["kind"]] for e in reversed(events) if e["kind"] in KIND_STATUS), "Applied")
+        job = {"job_id": f"email:{newest['gmail_id']}", "title": newest["role"], "company": newest["company"]}
+        app_id = tracker.add_application(user_id, job, {}, "", {}, status="Applied")
+        if app_id:
+            added += 1
+            tracker.update_status(app_id, status, f"Added from your inbox: {newest['subject']}"[:300], user_id=user_id)
+        else:   # already tracked under that company and role: link to it, and leave its status to the usual rules
+            app_id = tracker.find_application_id(user_id, newest["company"], newest["role"])
+            linked += 1
+        for e in events:
+            tracker.update_email_event(user_id, e["id"], decision="confirmed", application_id=app_id,
+                                       proposed=KIND_STATUS.get(e["kind"]), status_before=None)
+    return {"added": added, "linked": linked, "emails": sum(len(g) for g in groups.values()), "left": skipped}
+
+
 def dismiss(user_id: str, event_id: str) -> None:
     event = tracker.get_email_event(user_id, event_id)
     if not event:

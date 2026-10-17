@@ -12,7 +12,8 @@ import {
 import { load, useResource } from "@/lib/store";
 import { longAgo, shortDate } from "@/lib/format";
 import {
-  confirmEmail, connectGmail, disconnectGmail, dismissEmail, EVENTS_URL, GMAIL_URL, syncGmail, trackEmail, undoEmail,
+  confirmEmail, connectGmail, disconnectGmail, dismissEmail, EVENTS_URL, GMAIL_URL, syncGmail, trackAllEmails, trackEmail,
+  undoEmail, type TrackAllResult,
 } from "@/lib/gmail";
 import type { Application, EmailEvent, EmailKind, GmailStatus } from "@/lib/types";
 
@@ -221,6 +222,60 @@ function EventRow({ event, apps }: { event: EmailEvent; apps: Application[] }) {
   );
 }
 
+function AddAll({ count }: { count: number }) {
+  const [asking, setAsking] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<TrackAllResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const go = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      setResult(await trackAllEmails());
+      setAsking(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "That didn't work.");
+    } finally {
+      setBusy(false);
+    }
+  };
+  if (result) {
+    return (
+      <Callout tone="info">
+        Added {result.added} application{result.added === 1 ? "" : "s"}
+        {result.linked ? `, linked ${result.linked} to ones you already had` : ""} from {result.emails} emails.
+        {result.left ? ` ${result.left} email${result.left === 1 ? " doesn't" : "s don't"} say the role: add ${result.left === 1 ? "it" : "them"} below.` : ""}{" "}
+        <Link href="/applications" className="underline">See your applications</Link>
+      </Callout>
+    );
+  }
+  if (count === 0) return null;
+  return (
+    <div className="flex flex-col gap-2 px-[14px] py-3 rounded-inner bg-subtle border border-border">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <span className="text-[13px] text-ink-2">
+          {count} email{count === 1 ? " is" : "s are"} about applications Windrush doesn&apos;t track.
+        </span>
+        {!asking && (
+          <button type="button" onClick={() => setAsking(true)} className={buttonClass("secondary", "xs")}>
+            <Icon name="plus" size={12} />Add them all
+          </button>
+        )}
+      </div>
+      {asking && (
+        <div className="flex flex-wrap items-center gap-2 text-[12.5px] text-ink-2">
+          <span>One application per company and role, at the status of its newest email. You can edit them afterwards.</span>
+          <button type="button" onClick={go} disabled={busy} className={buttonClass("commit", "xs")}>
+            {busy ? <Spinner /> : null}Add them
+          </button>
+          <button type="button" onClick={() => setAsking(false)} className={buttonClass("quiet", "xs")}>Cancel</button>
+        </div>
+      )}
+      {error && <p role="alert" className="m-0 text-[12.5px] text-red">{error}</p>}
+    </div>
+  );
+}
+
 function Inbox() {
   const params = useSearchParams();
   const status = useResource<GmailStatus>(GMAIL_URL, { staleMs: 0 });
@@ -304,7 +359,8 @@ function Inbox() {
               { key: "other", label: "Other" },
             ]} />
             {(["needs", "updated", "other"] as Tab[]).map((k) => (
-              <TabPanel key={k} idPrefix="inbox" k={k} active={tab === k}>
+              <TabPanel key={k} idPrefix="inbox" k={k} active={tab === k} className="flex flex-col gap-4">
+                {k === "needs" && <AddAll count={byTab.needs.filter((e) => e.decision === "unmatched").length} />}
                 {events.loading ? <Skeleton className="h-[100px] rounded-inner" />
                   : byTab[k].length === 0 ? <EmptyState>{empty[k]}</EmptyState>
                   : (

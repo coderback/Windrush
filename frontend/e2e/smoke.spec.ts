@@ -521,6 +521,8 @@ test("inbox: setup steps when not configured, then email updates you can confirm
     "POST /api/gmail/events/2/confirm": record("confirm 2"),
     "POST /api/gmail/events/3/undo": record("undo 3"),
     "POST /api/gmail/events/2/track": record("track 2"),
+    "POST /api/gmail/events/track-all": () => { posts.push({ path: "track all", body: null });
+                                                return { added: 1, linked: 0, emails: 1, left: 0 }; },
   });
   await page.goto("/inbox");
   await expect(page.getByText("Gmail tracking isn't set up yet")).toBeVisible();
@@ -544,6 +546,12 @@ test("inbox: setup steps when not configured, then email updates you can confirm
   await panel.getByLabel("Role").fill("Graduate Data Engineer");
   await panel.getByRole("button", { name: "Add as Rejected" }).click();
   await expect.poll(() => posts.at(-1)).toEqual({ path: "track 2", body: { company: "Globex", role: "Graduate Data Engineer" } });
+
+  // Or all of them at once, after a confirmation.
+  await panel.getByRole("button", { name: "Add them all" }).click();
+  await panel.getByRole("button", { name: "Add them", exact: true }).click();
+  await expect.poll(() => posts.at(-1)?.path).toBe("track all");
+  await expect(panel.getByText("Added 1 application from 1 emails.")).toBeVisible();
 
   await page.getByRole("tab", { name: /Updated/ }).click();
   await page.getByRole("tabpanel").getByRole("button", { name: "Undo" }).click();

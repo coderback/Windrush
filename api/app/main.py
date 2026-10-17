@@ -1277,6 +1277,12 @@ async def gmail_confirm(event_id: str, body: dict, current_user: Annotated[auth.
     return _email_action(gmail.confirm, current_user.id, event_id, application_id)
 
 
+@app.post("/gmail/events/track-all")
+async def gmail_track_all(current_user: Annotated[auth.User, Depends(auth.get_current_user)]):
+    """Add every application the unmatched emails are about, one per company and role, at its latest status."""
+    return gmail.track_all(current_user.id)
+
+
 @app.post("/gmail/events/{event_id}/track")
 async def gmail_track(event_id: str, body: dict, current_user: Annotated[auth.User, Depends(auth.get_current_user)]):
     """Add the application an unmatched email is about: {company, role}, at the status the email points to."""

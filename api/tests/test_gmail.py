@@ -385,3 +385,29 @@ def test_gmails_quota_pauses_a_sync_and_the_next_one_carries_on(inbox, user, goo
     assert first["counts"] == {"unmatched": 1, "waiting": 2}
     asyncio.run(gmail.sync(user))
     assert {e["gmail_id"] for e in tracker.list_email_events(user)} == {"q0", "q1", "q2"}
+
+
+def test_add_all_makes_one_application_per_company_and_role_at_its_latest_status(inbox, user, client):
+    apps, mail = inbox
+    r = lambda kind, company, role: {**_reading(kind, None, company=company), "role": role}   # noqa: E731
+    mail("a1", "Globex <careers@globex.com>", "Thanks for applying to Globex", "Received.",
+         r("received", "Globex", "Data Engineer"), minutes_ago=300)
+    mail("a2", "Globex <careers@globex.com>", "Your Globex application", "Unfortunately not.",
+         r("rejected", "Globex", "Data Engineer"), minutes_ago=100)
+    mail("a3", "Initech <jobs@initech.com>", "Initech assessment", "Please do the test.",
+         r("assessment", "Initech Ltd", "Graduate Developer"), minutes_ago=200)
+    mail("a4", "Initech <jobs@initech.com>", "An update on your application to Initech", "Still reviewing.",
+         r("other", "Initech", ""), minutes_ago=50)                 # no role: Initech's only role is used
+    mail("a5", "Hooli <hr@hooli.com>", "Your application to Hooli", "Thanks.", r("received", "Hooli", ""))   # no role at all
+    mail("a6", "Catapult <jobs@catapult.com>", "Your application to Catapult", "Received, thanks.",
+         r("received", "Catapult", "Graduate Software Engineer"))  # already tracked: linked, not added again
+    asyncio.run(gmail.sync(user))
+
+    result = client.post("/gmail/events/track-all").json()
+    assert result == {"added": 2, "linked": 1, "emails": 5, "left": 1}
+    tracked = {(a["company"], a["job_title"]): a["status"] for a in tracker.list_applications(user)}
+    assert tracked[("Globex", "Data Engineer")] == "Rejected"
+    assert tracked[("Initech", "Graduate Developer")] == "Responded"      # named as its newest email names it
+    assert ("Hooli", "") not in tracked and _status(user, apps["catapult"]) == "Applied"
+    left = [e for e in client.get("/gmail/events").json() if e["decision"] == "unmatched"]
+    assert [e["gmail_id"] for e in left] == ["a5"]

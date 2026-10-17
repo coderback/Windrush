@@ -36,3 +36,12 @@ export const dismissEmail = (id: string) => act(id, "dismiss");
 export const undoEmail = (id: string) => act(id, "undo");
 /** Add the application an unmatched email is about, as `company` / `role`, at the status the email points to. */
 export const trackEmail = (id: string, company: string, role: string) => act(id, "track", { company, role });
+
+export interface TrackAllResult { added: number; linked: number; emails: number; left: number }
+
+/** Add every application the unmatched emails are about: one per company and role, at its latest status. */
+export async function trackAllEmails(): Promise<TrackAllResult> {
+  const result = await requestJson<TrackAllResult>(`${EVENTS_URL}/track-all`, post());
+  await Promise.all([load(EVENTS_URL, { force: true }), load("/api/applications", { force: true })]);
+  return result;
+}
