@@ -11,7 +11,7 @@ from typing import Optional, Annotated
 
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Query, Depends, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import RedirectResponse, StreamingResponse
 from fastapi.security import OAuth2PasswordRequestForm
 
 from .cv_parser import extract_text, extract_links, profile_links
@@ -21,6 +21,7 @@ from .guardrails import check_cv_for_injection, GuardrailViolation
 from . import tracker
 from . import answers
 from . import autopilot
+from . import gmail
 from . import auth
 from . import pdf_generator
 from . import doc_render
@@ -52,7 +53,8 @@ async def lifespan(app: FastAPI):
     pdf_generator.init_pdf_dir(data_dir)
     background = [asyncio.create_task(sponsor_register.keep_fresh()),
                   asyncio.create_task(job_attributes.keep_extracting()),
-                  asyncio.create_task(autopilot.keep_running())]
+                  asyncio.create_task(autopilot.keep_running()),
+                  asyncio.create_task(gmail.keep_syncing())]
     yield
     for task in background:
         task.cancel()
@@ -1183,3 +1185,91 @@ async def download_pdf(
         raise HTTPException(status_code=404, detail="Document not found")
     return FileResponse(path, media_type="application/pdf",
                         headers={"Content-Disposition": f'attachment; filename="windrush_{doc_id[:8]}.pdf"'})
+
+
+# ── Gmail tracking ────────────────────────────────────────────────────────────
+
+@app.get("/gmail")
+async def gmail_status(current_user: Annotated[auth.User, Depends(auth.get_current_user)]):
+    """Whether Gmail tracking is set up and connected, and how the last sync went."""
+    return gmail.status(current_user.id)
+
+
+@app.get("/gmail/connect")
+async def gmail_connect(current_user: Annotated[auth.User, Depends(auth.get_current_user)]):
+    """The Google consent page to send the user to (read-only Gmail access)."""
+    if not gmail.configured():
+        raise HTTPException(status_code=400, detail="Gmail tracking isn't set up: GOOGLE_CLIENT_ID and "
+                                                    "GOOGLE_CLIENT_SECRET aren't in .env")
+    return {"url": gmail.auth_url(current_user.id)}
+
+
+@app.get("/gmail/callback")
+async def gmail_callback(state: str = "", code: str = "", error: str = ""):
+    """Where Google sends the browser back. A plain redirect, so the user is known by the OAuth state."""
+    from urllib.parse import quote
+    if error or not code:
+        reason = "You didn't allow access." if error == "access_denied" else (error or "Google sent no code.")
+        return RedirectResponse(f"/inbox?gmail=error&reason={quote(reason)}", status_code=303)
+    try:
+        user_id = await gmail.finish(state, code)
+    except gmail.GmailError as exc:
+        return RedirectResponse(f"/inbox?gmail=error&reason={quote(str(exc))}", status_code=303)
+    except Exception:
+        logger.exception("gmail connect failed")
+        return RedirectResponse(f"/inbox?gmail=error&reason={quote('Connecting failed. Try again.')}", status_code=303)
+    gmail.start_sync(user_id)
+    return RedirectResponse("/inbox?gmail=connected", status_code=303)
+
+
+@app.post("/gmail/sync", status_code=202)
+async def gmail_sync(current_user: Annotated[auth.User, Depends(auth.get_current_user)]):
+    account = tracker.get_gmail_account(current_user.id)
+    if not account:
+        raise HTTPException(status_code=400, detail="Gmail isn't connected")
+    if account.get("problem"):
+        raise HTTPException(status_code=400, detail=account["problem"])
+    if not gmail.start_sync(current_user.id):
+        raise HTTPException(status_code=409, detail="A sync is already running")
+    return {"started": True}
+
+
+@app.delete("/gmail")
+async def gmail_disconnect(current_user: Annotated[auth.User, Depends(auth.get_current_user)]):
+    """Revoke Windrush's Gmail access and forget the account."""
+    await gmail.disconnect(current_user.id)
+    return {"connected": False}
+
+
+@app.get("/gmail/events")
+async def gmail_events(current_user: Annotated[auth.User, Depends(auth.get_current_user)]):
+    """Emails read as being about an application, latest first, with what Windrush did about each."""
+    return tracker.list_email_events(current_user.id)
+
+
+def _email_action(fn, *args):
+    try:
+        return fn(*args)
+    except LookupError:
+        raise HTTPException(status_code=404, detail="No such email")
+    except gmail.GmailError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.post("/gmail/events/{event_id}/confirm")
+async def gmail_confirm(event_id: str, body: dict, current_user: Annotated[auth.User, Depends(auth.get_current_user)]):
+    """Make the change an email points to; {application_id} links an email Windrush couldn't match."""
+    application_id = body.get("application_id") if isinstance(body.get("application_id"), str) else None
+    return _email_action(gmail.confirm, current_user.id, event_id, application_id)
+
+
+@app.post("/gmail/events/{event_id}/dismiss")
+async def gmail_dismiss(event_id: str, current_user: Annotated[auth.User, Depends(auth.get_current_user)]):
+    _email_action(gmail.dismiss, current_user.id, event_id)
+    return {"dismissed": event_id}
+
+
+@app.post("/gmail/events/{event_id}/undo")
+async def gmail_undo(event_id: str, current_user: Annotated[auth.User, Depends(auth.get_current_user)]):
+    """Put the application back to where it was before this email changed it."""
+    return _email_action(gmail.undo, current_user.id, event_id)

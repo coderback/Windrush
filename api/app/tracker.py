@@ -150,6 +150,7 @@ def init_db(db_path: str = "") -> None:
         con.execute("CREATE INDEX IF NOT EXISTS idx_answer_bank_user ON answer_bank(user_id)")
         con.execute(_CREATE_AUTOPILOT_SETTINGS_TABLE)
         con.execute(_CREATE_AUTOPILOT_RUNS_TABLE)
+        _gmail_tables(con)
         con.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_autopilot_job ON autopilot_runs(user_id, job_id)")
         # Migrations — safe to run on existing DBs
         for stmt in [
@@ -724,3 +725,169 @@ def finish_stale_autopilot_runs() -> None:
         con.execute("UPDATE autopilot_runs SET outcome='failed', reasons=?, updated_at=? WHERE outcome='running'",
                     (json.dumps(["Windrush restarted while this was in progress."]), _now()))
     con.close()
+
+
+# ── Gmail tracking (see gmail.py) ─────────────────────────────────────────────
+# One connected Gmail account per user (its refresh token encrypted), and one row per email that was read
+# as being about an application, with what it meant and what Windrush did about it.
+
+def _gmail_tables(con: sqlite3.Connection) -> None:
+    con.execute("""CREATE TABLE IF NOT EXISTS gmail_accounts (
+        user_id           TEXT PRIMARY KEY,
+        email             TEXT NOT NULL,
+        refresh_token_enc TEXT NOT NULL,
+        connected_at      TEXT NOT NULL,
+        synced_until      INTEGER,
+        last_sync_at      TEXT,
+        problem           TEXT
+    )""")
+    con.execute("""CREATE TABLE IF NOT EXISTS email_events (
+        id             TEXT PRIMARY KEY,
+        user_id        TEXT NOT NULL,
+        gmail_id       TEXT NOT NULL,
+        thread_id      TEXT,
+        received_at    TEXT NOT NULL,
+        sender         TEXT NOT NULL,
+        subject        TEXT NOT NULL,
+        snippet        TEXT NOT NULL DEFAULT '',
+        kind           TEXT NOT NULL,
+        company        TEXT NOT NULL DEFAULT '',
+        role           TEXT NOT NULL DEFAULT '',
+        summary        TEXT NOT NULL DEFAULT '',
+        application_id TEXT,
+        proposed       TEXT,
+        decision       TEXT NOT NULL,
+        status_before  TEXT,
+        created_at     TEXT NOT NULL
+    )""")
+    con.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_email_events_msg ON email_events(user_id, gmail_id)")
+
+
+# What an email says happened. 'other' is about an application but changes nothing (we're reviewing it…).
+EMAIL_KINDS = ("received", "assessment", "interview", "offer", "rejected", "other")
+# applied: Windrush changed the application's status · suggested: a change that waits for the user ·
+# unmatched: about an application Windrush couldn't pin down · noted: matched, nothing to change ·
+# confirmed / dismissed / undone: what the user did with it.
+EMAIL_DECISIONS = ("applied", "suggested", "unmatched", "noted", "confirmed", "dismissed", "undone")
+
+
+def _gmail_con() -> sqlite3.Connection:
+    con = sqlite3.connect(_DB_PATH)
+    _gmail_tables(con)
+    return con
+
+
+def save_gmail_account(user_id: str, email: str, refresh_token: str) -> None:
+    con = _gmail_con()
+    with con:
+        con.execute("INSERT INTO gmail_accounts (user_id, email, refresh_token_enc, connected_at) VALUES (?,?,?,?) "
+                    "ON CONFLICT(user_id) DO UPDATE SET email=excluded.email, refresh_token_enc=excluded.refresh_token_enc, "
+                    "connected_at=excluded.connected_at, problem=NULL",
+                    (user_id, email, crypto.encrypt(refresh_token), _now()))
+    con.close()
+
+
+def get_gmail_account(user_id: str) -> dict | None:
+    """{email, refresh_token, connected_at, synced_until, last_sync_at, problem}, or None if not connected."""
+    con = _gmail_con()
+    con.row_factory = sqlite3.Row
+    row = con.execute("SELECT * FROM gmail_accounts WHERE user_id=?", (user_id,)).fetchone()
+    con.close()
+    if not row:
+        return None
+    account = dict(row)
+    account["refresh_token"] = crypto.decrypt(account.pop("refresh_token_enc") or "")
+    return account
+
+
+def gmail_users() -> list[str]:
+    con = _gmail_con()
+    rows = con.execute("SELECT user_id FROM gmail_accounts WHERE problem IS NULL").fetchall()
+    con.close()
+    return [r[0] for r in rows]
+
+
+def update_gmail_account(user_id: str, **fields) -> None:
+    allowed = {"synced_until", "last_sync_at", "problem"}
+    if set(fields) - allowed:
+        raise ValueError(f"unknown gmail account fields: {sorted(set(fields) - allowed)}")
+    con = _gmail_con()
+    with con:
+        con.execute(f"UPDATE gmail_accounts SET {', '.join(f'{k}=?' for k in fields)} WHERE user_id=?",
+                    [*fields.values(), user_id])
+    con.close()
+
+
+def delete_gmail_account(user_id: str) -> None:
+    con = _gmail_con()
+    with con:
+        con.execute("DELETE FROM gmail_accounts WHERE user_id=?", (user_id,))
+    con.close()
+
+
+def email_seen(user_id: str, gmail_id: str) -> bool:
+    con = _gmail_con()
+    row = con.execute("SELECT 1 FROM email_events WHERE user_id=? AND gmail_id=?", (user_id, gmail_id)).fetchone()
+    con.close()
+    return row is not None
+
+
+def add_email_event(user_id: str, event: dict) -> str:
+    if event["kind"] not in EMAIL_KINDS + ("unrelated",):
+        raise ValueError(f"kind must be one of {EMAIL_KINDS}")
+    if event["decision"] not in EMAIL_DECISIONS + ("ignored",):
+        raise ValueError(f"decision must be one of {EMAIL_DECISIONS}")
+    event_id = uuid.uuid4().hex
+    con = _gmail_con()
+    with con:
+        con.execute(
+            "INSERT OR IGNORE INTO email_events (id, user_id, gmail_id, thread_id, received_at, sender, subject, snippet, "
+            "kind, company, role, summary, application_id, proposed, decision, status_before, created_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (event_id, user_id, event["gmail_id"], event.get("thread_id"), event["received_at"], event["sender"][:300],
+             event["subject"][:300], event.get("snippet", "")[:300], event["kind"], event.get("company", "")[:200],
+             event.get("role", "")[:200], event.get("summary", "")[:300], event.get("application_id"),
+             event.get("proposed"), event["decision"], event.get("status_before"), _now()))
+    con.close()
+    return event_id
+
+
+def list_email_events(user_id: str, limit: int = 200) -> list[dict]:
+    """The user's email events about applications (not the ones read as unrelated), latest email first."""
+    con = _gmail_con()
+    con.row_factory = sqlite3.Row
+    rows = con.execute("SELECT e.*, a.job_title AS app_title, a.company AS app_company, a.status AS app_status "
+                       "FROM email_events e LEFT JOIN applications a ON a.id = e.application_id AND a.user_id = e.user_id "
+                       "WHERE e.user_id=? AND e.decision != 'ignored' ORDER BY e.received_at DESC LIMIT ?",
+                       (user_id, limit)).fetchall()
+    con.close()
+    return [dict(r) for r in rows]
+
+
+def get_email_event(user_id: str, event_id: str) -> dict | None:
+    con = _gmail_con()
+    con.row_factory = sqlite3.Row
+    row = con.execute("SELECT * FROM email_events WHERE id=? AND user_id=?", (event_id, user_id)).fetchone()
+    con.close()
+    return dict(row) if row else None
+
+
+def update_email_event(user_id: str, event_id: str, **fields) -> bool:
+    allowed = {"decision", "application_id", "proposed", "status_before"}
+    if set(fields) - allowed:
+        raise ValueError(f"unknown email event fields: {sorted(set(fields) - allowed)}")
+    con = _gmail_con()
+    with con:
+        cur = con.execute(f"UPDATE email_events SET {', '.join(f'{k}=?' for k in fields)} WHERE id=? AND user_id=?",
+                          [*fields.values(), event_id, user_id])
+    con.close()
+    return cur.rowcount == 1
+
+
+def get_application(user_id: str, app_id: str) -> dict | None:
+    con = sqlite3.connect(_DB_PATH)
+    con.row_factory = sqlite3.Row
+    row = con.execute("SELECT id, job_title, company, status, date_applied, created_at FROM applications "
+                      "WHERE id=? AND user_id=?", (app_id, user_id)).fetchone()
+    con.close()
+    return dict(row) if row else None

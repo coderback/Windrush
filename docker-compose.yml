@@ -37,6 +37,10 @@ services:
       - BRAVE_SEARCH_API_KEY=${BRAVE_SEARCH_API_KEY:-}
       - SPONSOR_REGISTER_REFRESH=${SPONSOR_REGISTER_REFRESH:-1}
       - JOB_ATTRIBUTES_LLM=${JOB_ATTRIBUTES_LLM:-}
+      # Gmail tracking (read-only): an OAuth client from Google Cloud. Leave unset to keep it off.
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-}
+      - GOOGLE_REDIRECT_URI=${GOOGLE_REDIRECT_URI:-http://localhost/api/gmail/callback}
       # Quoted: an unquoted ": " inside the message would make YAML read the item as a mapping.
       - "JWT_SECRET=${JWT_SECRET:?JWT_SECRET must be set in .env (generate with: openssl rand -hex 32)}"
       - "CREDENTIALS_KEY=${CREDENTIALS_KEY:?CREDENTIALS_KEY must be set in .env (see .env.example)}"
