@@ -8,7 +8,7 @@ import { cx } from "@/components/ui/kit";
 import { clearStore, useResource } from "@/lib/store";
 import { displayName, personaStrength } from "@/lib/persona";
 import { applyTheme, readTheme, saveTheme, type ThemeChoice } from "@/lib/theme";
-import type { Application, AutopilotRun, Persona } from "@/lib/types";
+import type { Application, AutopilotRun, EmailEvent, Persona } from "@/lib/types";
 
 interface NavItem {
   href: string;
@@ -114,12 +114,15 @@ export default function Sidebar() {
   const waiting = (apps.data ?? []).filter((a) => a.status === "Pending Review").length;
   const autopilot = useResource<AutopilotRun[]>("/api/autopilot/runs");
   const held = (autopilot.data ?? []).filter((r) => r.outcome === "needs_you" || r.outcome === "unconfirmed").length;
+  const emails = useResource<EmailEvent[]>("/api/gmail/events");
+  const emailsWaiting = (emails.data ?? []).filter((e) => e.decision === "suggested" || e.decision === "unmatched").length;
   const workspace: NavItem[] = [
     { href: "/dashboard", label: "Home", icon: "home" },
     { href: "/jobs", label: "Job feed", icon: "feed" },
     { href: "/autopilot", label: "Autopilot", icon: "play", badge: held, badgeTone: "amber" },
     { href: "/review", label: "Agent review", icon: "eye", badge: waiting, badgeTone: "amber" },
     { href: "/applications", label: "Applications", icon: "board" },
+    { href: "/inbox", label: "Inbox", icon: "mail", badge: emailsWaiting, badgeTone: "amber" },
   ];
   const grow: NavItem[] = [
     { href: "/careers", label: "AI exposure & roadmap", icon: "trend" },

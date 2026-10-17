@@ -28,8 +28,9 @@ const app = (id: string, status: string, extra: object = {}) => ({
   fit_score: 80, skill_gaps: [], level_match: "strong", notes: "", created_at: new Date().toISOString(), ...extra,
 });
 
-/** What every signed-in page asks for: the sidebar reads the persona, the applications and autopilot's runs. */
-const SHELL = { "GET /api/persona": PERSONA, "GET /api/applications": [], "GET /api/autopilot/runs": [] };
+/** What every signed-in page asks for: the sidebar reads the persona, the applications, autopilot's runs and the inbox. */
+const SHELL = { "GET /api/persona": PERSONA, "GET /api/applications": [], "GET /api/autopilot/runs": [],
+                "GET /api/gmail/events": [] };
 
 test("a signed-out visitor is sent to the login page", async ({ page }) => {
   const api = await mockApi(page, {});
@@ -116,7 +117,7 @@ test("an expired session sends you back to the login page", async ({ page }) => 
   const expired = { status: 401, json: { detail: "Could not validate credentials" } };
   const api = await mockApi(page, {
     "GET /api/jobs": expired, "GET /api/persona": expired, "GET /api/applications": expired,
-    "GET /api/autopilot/runs": expired,
+    "GET /api/autopilot/runs": expired, "GET /api/gmail/events": expired,
   });
   await page.goto("/login");
   await page.evaluate(() => localStorage.setItem("windrush_token", "expired-token"));
@@ -487,5 +488,58 @@ test("autopilot: practice runs, the queue, answering a held question and turning
 
   await page.getByRole("button", { name: "Run now" }).click();
   await expect.poll(() => posts).toEqual(["retry 1", "run"]);
+  api.expectAllMocked();
+});
+
+test("inbox: setup steps when not configured, then email updates you can confirm, link and undo", async ({ page }) => {
+  await signIn(page);
+  const status = { configured: false, connected: false, email: null, problem: null, last_sync_at: null, syncing: false,
+                   last: null, redirect_uri: "http://localhost/api/gmail/callback" };
+  const event = (id: string, decision: string, extra: object = {}) => ({
+    id, gmail_id: `g${id}`, received_at: new Date().toISOString(), sender: "Talent <jobs@acme.com>", subject: `Subject ${id}`,
+    snippet: "Hi Sam", kind: "interview", company: "Company a1", role: "", summary: `Summary ${id}`, application_id: "a1",
+    proposed: "Interview", decision, status_before: "Applied", app_title: "Role a1", app_company: "Company a1",
+    app_status: "Applied", ...extra,
+  });
+  let current: object = status;
+  const posts: { path: string; body: unknown }[] = [];
+  const record = (path: string) => (request: { postDataJSON: () => unknown }) => {
+    posts.push({ path, body: request.postDataJSON() });
+    return { id: path };
+  };
+  const api = await mockApi(page, {
+    ...SHELL,
+    "GET /api/applications": [app("a1", "Applied"), app("a2", "Applied")],
+    "GET /api/gmail": () => current,
+    "GET /api/gmail/events": [
+      event("1", "suggested"),
+      event("2", "unmatched", { application_id: null, app_title: null, app_company: null, app_status: null,
+                                kind: "rejected", proposed: "Rejected", company: "Globex" }),
+      event("3", "applied", { proposed: "Interview" }),
+    ],
+    "POST /api/gmail/events/1/confirm": record("confirm 1"),
+    "POST /api/gmail/events/2/confirm": record("confirm 2"),
+    "POST /api/gmail/events/3/undo": record("undo 3"),
+  });
+  await page.goto("/inbox");
+  await expect(page.getByText("Gmail tracking isn't set up yet")).toBeVisible();
+  await expect(page.getByText("http://localhost/api/gmail/callback")).toBeVisible();
+
+  current = { ...status, configured: true, connected: true, email: "sam@gmail.com", last_sync_at: new Date().toISOString() };
+  await page.goto("/inbox?gmail=connected");
+  await expect(page.getByText("Connected as")).toContainText("sam@gmail.com");
+  await expect(page.getByText("Gmail is connected.")).toBeVisible();
+  await expect(page.getByRole("link", { name: /Inbox/ })).toContainText("2");       // two wait for you
+
+  const panel = page.getByRole("tabpanel");
+  await panel.getByRole("button", { name: "Mark Role a1 as Interview" }).click();
+  await expect.poll(() => posts.map((p) => p.path)).toEqual(["confirm 1"]);
+  await panel.getByLabel("Which application is this about?").selectOption({ label: "Company a2: Role a2" });
+  await panel.getByRole("button", { name: "Link and mark as Rejected" }).click();
+  await expect.poll(() => posts.at(-1)).toEqual({ path: "confirm 2", body: { application_id: "a2" } });
+
+  await page.getByRole("tab", { name: /Updated/ }).click();
+  await page.getByRole("tabpanel").getByRole("button", { name: "Undo" }).click();
+  await expect.poll(() => posts.at(-1)?.path).toBe("undo 3");
   api.expectAllMocked();
 });
