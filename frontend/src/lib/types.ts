@@ -234,3 +234,53 @@ export interface Persona {
   skills: SkillCategory[];
   summary: string;
 }
+
+/* ── Autopilot (mirrors api/app/autopilot.py) ───────────────────────── */
+
+export interface AutopilotSettings {
+  /** Runs on its own every few hours. */
+  enabled: boolean;
+  /** Sends forms that pass every check; off = practice (fills, never sends). */
+  live: boolean;
+  min_fit: number;
+  daily_cap: number;
+}
+
+export interface AutopilotStatus {
+  settings: AutopilotSettings;
+  running: boolean;
+  step: string;
+  job: string;
+  started_at: string | null;
+  sent_last_day: number;
+  last_run_at: string | null;
+  next_run_at: string | null;
+  last: { finished_at: string; live: boolean; counts: Partial<Record<AutopilotOutcome, number>>; note: string } | null;
+}
+
+export type AutopilotOutcome =
+  | "running" | "submitted" | "unconfirmed" | "ready" | "needs_you" | "skipped" | "failed" | "dismissed";
+
+export interface AutopilotRun {
+  id: string;
+  job_id: string;
+  job_title: string;
+  company: string;
+  location: string;
+  job_url: string;
+  outcome: AutopilotOutcome;
+  /** Filled in practice mode, where nothing is sent. */
+  practice: boolean;
+  fit_score: number | null;
+  /** Why it wasn't sent. */
+  reasons: string[];
+  questions: FormAnswer[];
+  notes: string | null;
+  cv_doc_id: string | null;
+  letter_doc_id: string | null;
+  application_id: string | null;
+  /** Kept screenshots: "form" (filled, before sending) and "confirm" (after). */
+  screenshots: ("form" | "confirm")[];
+  created_at: string;
+  updated_at: string;
+}
