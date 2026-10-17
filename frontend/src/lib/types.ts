@@ -284,3 +284,42 @@ export interface AutopilotRun {
   created_at: string;
   updated_at: string;
 }
+
+/* ── Gmail tracking (mirrors api/app/gmail.py) ──────────────────────── */
+
+export interface GmailStatus {
+  /** GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET are set. */
+  configured: boolean;
+  connected: boolean;
+  email: string | null;
+  /** Why it stopped (Google ended the access): connect again. */
+  problem: string | null;
+  last_sync_at: string | null;
+  syncing: boolean;
+  last: { finished_at: string; counts: Record<string, number>; error?: string } | null;
+  redirect_uri: string;
+}
+
+export type EmailKind = "received" | "assessment" | "interview" | "offer" | "rejected" | "other";
+export type EmailDecision = "applied" | "suggested" | "unmatched" | "noted" | "confirmed" | "dismissed" | "undone";
+
+export interface EmailEvent {
+  id: string;
+  gmail_id: string;
+  received_at: string;
+  sender: string;
+  subject: string;
+  snippet: string;
+  kind: EmailKind;
+  company: string;
+  role: string;
+  summary: string;
+  application_id: string | null;
+  /** The status the email points to. */
+  proposed: string | null;
+  decision: EmailDecision;
+  status_before: string | null;
+  app_title: string | null;
+  app_company: string | null;
+  app_status: string | null;
+}
