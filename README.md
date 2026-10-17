@@ -211,7 +211,8 @@ Labels: **High ≥ 65 %**, **Medium 35–65 %**, **Low < 35 %**. **Job fit** (`s
 | Required `JWT_SECRET` (no default) | `auth.py` |
 | Job-site password encrypted at rest, never returned to the browser | `crypto.py`, `tracker.py`, `main.py` |
 | Job-site password only typed into the job site's own fields, masked in prompts and logs; browser-use telemetry off | `browser_agent.py` |
-| Persona sent to LLMs is an allowlist — no credentials, DOB, contact details, diversity data or salary | `agent._llm_persona` |
+| Persona sent to the writing, scoring and question-reading LLM calls is an allowlist — no credentials, DOB, contact details, diversity data or salary | `agent._llm_persona`, `answers.py` |
+| The form-filling agent (also an LLM) is given what forms ask for: name, contact details and DOB in its task, salary and equality answers only when a question asks; never the job-site password | `browser_agent.py` |
 | Server-side fetches of user-influenced URLs only reach public IPs, re-checked on every redirect | `net_guard.py` |
 | Shared job descriptions can only be refreshed from the stored job's own URL | `main._ensure_full_description` |
 | Application updates scoped to the owning user | `tracker.update_status` |
