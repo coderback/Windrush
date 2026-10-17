@@ -1062,6 +1062,37 @@ def _with_empty_fields(notes: str, empty: list[str], left_blank: list[str] = ())
     return "\n\n".join(blocks + [notes]).strip()
 
 
+# Unattended runs (autopilot.py): once the form is filled, `decide` is shown what the fill left behind —
+# {ready, error, notes, questions, empty} — and says whether to send it. Nobody reviews it in between.
+Decider = Callable[[dict], Awaitable[bool]]
+
+
+async def _finish_unattended(decide: Decider, filled: dict, browser_session, llm, sensitive_data: dict | None,
+                             secret: str) -> AsyncGenerator[dict, None]:
+    """
+    Send the filled form if `decide` says to, else leave it. The last event is done=True and carries the
+    fill's results plus `form_screenshot` (the filled form, before anything is sent); when the submit agent
+    ran, also `submit_attempted`, `submitted` (only if the page confirmed it), `submit_detail` and
+    `confirm_screenshot` (the page after the click).
+    """
+    final = {"action": "Filled in; not sent", "screenshot": None, "blocked": False, "reason": None, "done": True,
+             "submitted": False, "submit_attempted": False, **filled,
+             "form_screenshot": await _screenshot_b64(browser_session)}
+    try:
+        send = await decide(filled)
+    except Exception as exc:
+        logger.warning("autopilot decision failed: %s", exc)
+        send = False
+    if send:
+        yield {"action": "Submitting the application…", "screenshot": None, "blocked": False, "reason": None,
+               "done": False}
+        ok, detail = await _submit_with_agent(llm, browser_session, sensitive_data, secret)
+        final.update(submit_attempted=True, submitted=ok, submit_detail=detail,
+                     confirm_screenshot=await _screenshot_b64(browser_session),
+                     action="Application submitted" if ok else "Couldn't confirm the submission")
+    yield final
+
+
 async def apply_with_browser(
     job_url: str,
     cv_profile: dict,
@@ -1073,12 +1104,15 @@ async def apply_with_browser(
     cv_path: str = "",
     cover_letter_path: str = "",
     answerer: Answerer | None = None,
+    decide: Decider | None = None,
 ) -> AsyncGenerator[dict, None]:
     """
     Async generator: the browser-use agent fills the application, then the user reviews it and
     decides whether to submit (see module docstring). The CV and cover-letter PDFs are uploaded
     under the candidate's name ("Ada_Lovelace_CV.pdf"), not their stored ids. `answerer` answers the
     form's questions (answers.answer_questions); without one, every question is left for the user.
+    With `decide` the run is unattended: there is no review, and `decide` says whether the filled form is
+    sent (see _finish_unattended for what the last event then carries).
     Yields dicts:
       { action, screenshot (base64|None), blocked (bool), reason (str|None), done (bool),
         interactive (bool, optional), submitted (bool, only on the final done event),
@@ -1185,6 +1219,12 @@ async def apply_with_browser(
         questions = list(asked.values())
         left_blank = [q["question"] for q in questions if q["source"] == "needs_you"]
         notes = _with_empty_fields(summary, empty, left_blank)[:_MAX_NOTES_CHARS]
+
+        if decide is not None:
+            filled = {"ready": ready, "error": agent_error, "notes": notes, "questions": questions, "empty": empty}
+            async for step in _finish_unattended(decide, filled, browser_session, llm, sensitive_data, job_password):
+                yield step
+            return
 
         async def put_answers_on_form(answers: list[dict]) -> dict:
             ok, detail = await _fill_with_agent(llm, browser_session, sensitive_data, answers, job_password)

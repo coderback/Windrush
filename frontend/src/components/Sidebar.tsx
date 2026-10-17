@@ -8,7 +8,7 @@ import { cx } from "@/components/ui/kit";
 import { clearStore, useResource } from "@/lib/store";
 import { displayName, personaStrength } from "@/lib/persona";
 import { applyTheme, readTheme, saveTheme, type ThemeChoice } from "@/lib/theme";
-import type { Application, Persona } from "@/lib/types";
+import type { Application, AutopilotRun, Persona } from "@/lib/types";
 
 interface NavItem {
   href: string;
@@ -112,9 +112,12 @@ export default function Sidebar() {
   useEffect(() => setOpen(false), [pathname]);
 
   const waiting = (apps.data ?? []).filter((a) => a.status === "Pending Review").length;
+  const autopilot = useResource<AutopilotRun[]>("/api/autopilot/runs");
+  const held = (autopilot.data ?? []).filter((r) => r.outcome === "needs_you" || r.outcome === "unconfirmed").length;
   const workspace: NavItem[] = [
     { href: "/dashboard", label: "Home", icon: "home" },
     { href: "/jobs", label: "Job feed", icon: "feed" },
+    { href: "/autopilot", label: "Autopilot", icon: "play", badge: held, badgeTone: "amber" },
     { href: "/review", label: "Agent review", icon: "eye", badge: waiting, badgeTone: "amber" },
     { href: "/applications", label: "Applications", icon: "board" },
   ];

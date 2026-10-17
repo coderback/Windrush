@@ -28,8 +28,8 @@ const app = (id: string, status: string, extra: object = {}) => ({
   fit_score: 80, skill_gaps: [], level_match: "strong", notes: "", created_at: new Date().toISOString(), ...extra,
 });
 
-/** What every signed-in page asks for: the sidebar reads the persona and the applications. */
-const SHELL = { "GET /api/persona": PERSONA, "GET /api/applications": [] };
+/** What every signed-in page asks for: the sidebar reads the persona, the applications and autopilot's runs. */
+const SHELL = { "GET /api/persona": PERSONA, "GET /api/applications": [], "GET /api/autopilot/runs": [] };
 
 test("a signed-out visitor is sent to the login page", async ({ page }) => {
   const api = await mockApi(page, {});
@@ -116,6 +116,7 @@ test("an expired session sends you back to the login page", async ({ page }) => 
   const expired = { status: 401, json: { detail: "Could not validate credentials" } };
   const api = await mockApi(page, {
     "GET /api/jobs": expired, "GET /api/persona": expired, "GET /api/applications": expired,
+    "GET /api/autopilot/runs": expired,
   });
   await page.goto("/login");
   await page.evaluate(() => localStorage.setItem("windrush_token", "expired-token"));
@@ -155,7 +156,7 @@ test("changing a status in the application panel saves it, and Esc closes the pa
   await signIn(page);
   const patches: unknown[] = [];
   const api = await mockApi(page, {
-    "GET /api/persona": PERSONA,
+    ...SHELL,
     "GET /api/applications": [app("a1", "Applied"), app("a2", "Saved")],
     "PATCH /api/applications/a1/status": (request) => {
       patches.push(request.postDataJSON());
@@ -180,7 +181,7 @@ test("the review queue lists paused applications and records one you sent yourse
   await signIn(page);
   const patches: unknown[] = [];
   const api = await mockApi(page, {
-    "GET /api/persona": PERSONA,
+    ...SHELL,
     "GET /api/applications": [app("a1", "Pending Review"), app("a2", "Pending Review"), app("a3", "Applied")],
     "PATCH /api/applications/a1/status": (request) => {
       patches.push(request.postDataJSON());
@@ -277,7 +278,7 @@ test("the review shows where each answer came from and saves the one only you ca
     answered("Have you ever been convicted of a criminal offence?", "needs_you", "", { options: ["Yes", "No"] }),
   ];
   const api = await mockApi(page, {
-    "GET /api/persona": PERSONA,
+    ...SHELL,
     "GET /api/applications": [app("a1", "Pending Review", { questions })],
     "POST /api/answers": (request) => {
       posted.push(request.postDataJSON());
@@ -418,5 +419,73 @@ test("an answer given in the live review is put on the form by the agent", async
   }, blank);
   await expect(panel).toContainText("Your answer in this review");
   await expect(panel.getByRole("button", { name: /Fill it in on the form/ })).toHaveCount(0);
+  api.expectAllMocked();
+});
+
+test("autopilot: practice runs, the queue, answering a held question and turning on sending", async ({ page }) => {
+  await signIn(page);
+  const blank = { question: "Do you hold SC clearance?", options: ["Yes", "No"], kind: "fact", source: "needs_you",
+                  answer: "", because: "", bank_id: "", flags: [] };
+  const run = (id: string, outcome: string, extra: object = {}) => ({
+    id, job_id: `job-${id}`, job_title: `Graduate Engineer ${id}`, company: `Company ${id}`, location: "London",
+    job_url: `https://boards.greenhouse.io/co/jobs/${id}`, outcome, practice: false, fit_score: 82, reasons: [],
+    questions: [], notes: "", cv_doc_id: null, letter_doc_id: null, application_id: null, screenshots: [],
+    created_at: new Date().toISOString(), updated_at: new Date().toISOString(), ...extra,
+  });
+  const runs = [
+    run("1", "needs_you", { reasons: ["1 question only you can answer: “Do you hold SC clearance?”"], questions: [blank] }),
+    run("2", "ready", { practice: true }),
+    run("3", "skipped", { reasons: ["Fit 60 is under your threshold of 75."] }),
+  ];
+  let settings = { enabled: false, live: false, min_fit: 75, daily_cap: 3 };
+  const puts: object[] = [];
+  const posts: string[] = [];
+  const api = await mockApi(page, {
+    ...SHELL,
+    "GET /api/autopilot/runs": runs,
+    "GET /api/autopilot": () => ({ settings, running: false, step: "", job: "", started_at: null, sent_last_day: 0,
+                                   last_run_at: null, next_run_at: null, last: null }),
+    "PUT /api/autopilot/settings": (request) => {
+      puts.push(request.postDataJSON());
+      settings = { ...settings, ...request.postDataJSON() };
+      return settings;
+    },
+    "POST /api/autopilot/run": () => { posts.push("run"); return { status: 202, json: { started: true } }; },
+    "POST /api/autopilot/runs/1/retry": () => { posts.push("retry 1"); return { status: 202, json: { started: true } }; },
+    "POST /api/answers": { id: "b1", question: blank.question, answer: "No", kind: "fact", company: "", created_at: "",
+                           updated_at: "" },
+  });
+  await page.goto("/autopilot");
+
+  await expect(page.getByText("Practice mode", { exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: /Autopilot/ })).toContainText("1");          // the sidebar badge
+  const queue = page.getByRole("tabpanel");
+  await expect(queue).toContainText("Graduate Engineer 1");
+  await expect(queue).toContainText("only you can answer");
+
+  await queue.getByLabel(blank.question).selectOption("No");
+  await queue.getByRole("button", { name: "Save answer" }).click();
+  await expect(queue).toContainText("Press Try again");
+  await queue.getByRole("button", { name: "Try again with my answers" }).click();
+  await expect.poll(() => posts).toEqual(["retry 1"]);
+
+  await page.getByRole("tab", { name: /Practice/ }).click();
+  await expect(page.getByRole("tabpanel")).toContainText("Would have sent");
+  await page.getByRole("tab", { name: /Skipped/ }).click();
+  await expect(page.getByRole("tabpanel")).toContainText("under your threshold");
+
+  // Sending asks first.
+  await page.getByRole("button", { name: "Send applications" }).click();
+  await expect(page.getByText("Send applications without asking you?")).toBeVisible();
+  expect(puts).toEqual([]);
+  await page.getByRole("button", { name: "Turn on sending" }).click();
+  await expect.poll(() => puts).toEqual([{ live: true }]);
+  await expect(page.getByText("Sending applications", { exact: true })).toBeVisible();
+
+  await page.getByLabel("Most applications sent a day").selectOption("5");
+  await expect.poll(() => puts.at(-1)).toEqual({ daily_cap: 5 });
+
+  await page.getByRole("button", { name: "Run now" }).click();
+  await expect.poll(() => posts).toEqual(["retry 1", "run"]);
   api.expectAllMocked();
 });
