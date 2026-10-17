@@ -29,6 +29,7 @@ class FakeGoogle:
         self.revoked: list[str] = []
         self.refresh_error = ""
         self.scope = gmail.SCOPE
+        self.slow_down: set[str] = set()     # paths that get Gmail's quota error once
 
     async def post_form(self, url, data):
         if url == gmail._REVOKE_URL:
@@ -42,6 +43,9 @@ class FakeGoogle:
         return {"access_token": "at-2", "expires_in": 3600}
 
     async def get(self, token, path, params=None):
+        if path in self.slow_down:
+            self.slow_down.discard(path)
+            raise gmail._SlowDown()
         if path == "/profile":
             return {"emailAddress": "ada@gmail.com"}
         if path == "/messages":
@@ -53,6 +57,7 @@ class FakeGoogle:
 @pytest.fixture
 def google(db, monkeypatch):
     fake = FakeGoogle()
+    monkeypatch.setattr(gmail, "_FETCH_GAP_S", 0)
     monkeypatch.setenv("GOOGLE_CLIENT_ID", "client-id")
     monkeypatch.setenv("GOOGLE_CLIENT_SECRET", "client-secret")
     monkeypatch.setattr(gmail, "_post_form", fake.post_form)
@@ -311,3 +316,72 @@ def test_a_company_is_named_by_words_or_by_the_sender_domain():
 ])
 def test_only_steps_forward_are_automatic(current, kind, expected):
     assert gmail.proposed_change(current, kind) == expected
+
+
+# ── Looking back, catching up, and adding what isn't tracked ──────────────────
+
+def test_the_first_sync_reads_back_sixty_days_whatever_is_tracked(inbox, user, google):
+    asyncio.run(gmail.sync(user))
+    after = int(google.queries[0].split("after:")[1].split()[0])
+    assert abs(after - (time.time() - 60 * 86400)) < 120
+
+
+def test_a_backlog_is_read_oldest_first_over_several_syncs(inbox, user, google, monkeypatch):
+    apps, mail = inbox
+    monkeypatch.setattr(gmail, "_MAX_MESSAGES", 2)
+    for i, minutes in enumerate((10, 20, 30, 40, 50)):       # newest first, as Gmail lists them
+        mail(f"b{i}", "Initech <jobs@initech.com>", f"Your application to Initech ({i})", "About your application.",
+             _reading("other", None), minutes_ago=minutes)
+    first = asyncio.run(gmail.sync(user))
+    assert first["counts"]["waiting"] == 3
+    read = {e["gmail_id"] for e in tracker.list_email_events(user)}
+    assert read == {"b4", "b3"}                               # the two oldest
+    start = tracker.get_gmail_account(user)["synced_until"]
+    asyncio.run(gmail.sync(user))
+    asyncio.run(gmail.sync(user))
+    assert {e["gmail_id"] for e in tracker.list_email_events(user)} == {f"b{i}" for i in range(5)}
+    assert google.queries[1].split()[0] == f"after:{start}" and tracker.get_gmail_account(user)["synced_until"] > start
+
+
+def test_an_email_about_an_untracked_application_can_be_added(inbox, user, client, make_user, client_for):
+    apps, mail = inbox
+    mail("u1", "Globex Careers <careers@globex.com>", "Interview invitation - Globex",
+         "We'd like to invite you to interview for Graduate Data Engineer at Globex.",
+         _reading("interview", None, company="Globex"))
+    asyncio.run(gmail.sync(user))
+    event = client.get("/gmail/events").json()[0]
+    assert event["decision"] == "unmatched"
+    assert client.post(f"/gmail/events/{event['id']}/track", json={"company": "Globex", "role": " "}).status_code == 400
+
+    added = client.post(f"/gmail/events/{event['id']}/track",
+                        json={"company": "Globex", "role": "Graduate Data Engineer"}).json()
+    assert added["decision"] == "confirmed" and added["proposed"] == "Interview"
+    app = tracker.get_application(user, added["application_id"])
+    assert (app["company"], app["job_title"], app["status"]) == ("Globex", "Graduate Data Engineer", "Interview")
+    assert client.post(f"/gmail/events/{event['id']}/track",
+                       json={"company": "Globex", "role": "Graduate Data Engineer"}).status_code == 400
+    other = client_for(make_user("eve@example.com"))           # (the shared test client is Eve's from here)
+    assert other.post(f"/gmail/events/{event['id']}/track", json={"company": "Globex", "role": "x"}).status_code == 404
+
+
+def test_googles_one_time_code_stays_out_of_the_access_log():
+    import logging
+    from app import main
+    record = logging.LogRecord("uvicorn.access", logging.INFO, "", 0, '%s - "%s %s HTTP/%s" %d',
+                               ("1.2.3.4:5", "GET", "/gmail/callback?state=abc&iss=x&code=4/0SECRET&scope=y", "1.1",
+                                303), None)
+    main._HideOAuthCode().filter(record)
+    line = record.getMessage()
+    assert "SECRET" not in line and "abc" not in line and "code=<hidden>" in line and "scope=y" in line
+
+
+def test_gmails_quota_pauses_a_sync_and_the_next_one_carries_on(inbox, user, google):
+    apps, mail = inbox
+    for i, minutes in enumerate((10, 20, 30)):
+        mail(f"q{i}", "Initech <jobs@initech.com>", f"Your application to Initech ({i})", "About your application.",
+             _reading("other", None), minutes_ago=minutes)
+    google.slow_down.add("/messages/q1")                    # the second oldest hits the quota
+    first = asyncio.run(gmail.sync(user))
+    assert first["counts"] == {"unmatched": 1, "waiting": 2}
+    asyncio.run(gmail.sync(user))
+    assert {e["gmail_id"] for e in tracker.list_email_events(user)} == {"q0", "q1", "q2"}

@@ -25,7 +25,7 @@ export async function syncGmail() {
   await load(GMAIL_URL, { force: true });
 }
 
-async function act(id: string, action: "confirm" | "dismiss" | "undo", body?: object) {
+async function act(id: string, action: "confirm" | "dismiss" | "undo" | "track", body?: object) {
   await requestJson<EmailEvent>(`${EVENTS_URL}/${encodeURIComponent(id)}/${action}`, post(body));
   await Promise.all([load(EVENTS_URL, { force: true }), load("/api/applications", { force: true })]);
 }
@@ -34,3 +34,5 @@ export const confirmEmail = (id: string, applicationId?: string) =>
   act(id, "confirm", applicationId ? { application_id: applicationId } : {});
 export const dismissEmail = (id: string) => act(id, "dismiss");
 export const undoEmail = (id: string) => act(id, "undo");
+/** Add the application an unmatched email is about, as `company` / `role`, at the status the email points to. */
+export const trackEmail = (id: string, company: string, role: string) => act(id, "track", { company, role });

@@ -12,7 +12,7 @@ import {
 import { load, useResource } from "@/lib/store";
 import { longAgo, shortDate } from "@/lib/format";
 import {
-  confirmEmail, connectGmail, disconnectGmail, dismissEmail, EVENTS_URL, GMAIL_URL, syncGmail, undoEmail,
+  confirmEmail, connectGmail, disconnectGmail, dismissEmail, EVENTS_URL, GMAIL_URL, syncGmail, trackEmail, undoEmail,
 } from "@/lib/gmail";
 import type { Application, EmailEvent, EmailKind, GmailStatus } from "@/lib/types";
 
@@ -98,6 +98,11 @@ function Connection({ status }: { status: GmailStatus }) {
       </div>
       {status.problem && <Callout tone="warn">{status.problem}</Callout>}
       {status.last?.error && !status.problem && <Callout>{status.last.error}</Callout>}
+      {!status.syncing && !!status.last?.counts?.waiting && (
+        <Callout tone="info">
+          {status.last.counts.waiting} older emails are still to be read: they&apos;re read on the next check (or press Check now).
+        </Callout>
+      )}
       {error && <Callout>{error}</Callout>}
       <span className="text-[12px] leading-[1.5] text-ink-3">
         It only looks at mail from applicant tracking systems, mail naming a company you&apos;ve applied to, and
@@ -113,6 +118,9 @@ function EventRow({ event, apps }: { event: EmailEvent; apps: Application[] }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [link, setLink] = useState("");
+  const [adding, setAdding] = useState(false);
+  const [newCompany, setNewCompany] = useState(event.company);
+  const [newRole, setNewRole] = useState(event.role);
   const kind = KIND[event.kind];
   const company = event.app_company || event.company || event.sender.replace(/<.*>/, "").trim();
 
@@ -184,9 +192,29 @@ function EventRow({ event, apps }: { event: EmailEvent; apps: Application[] }) {
             className={buttonClass("commit", "xs")}>
             {busy === "confirm" ? <Spinner /> : null}{event.proposed ? `Link and mark as ${event.proposed}` : "Link it"}
           </button>
+          <button type="button" onClick={() => setAdding((a) => !a)} aria-expanded={adding}
+            className={buttonClass("secondary", "xs")}>
+            <Icon name="plus" size={12} />Add to my applications
+          </button>
           <button type="button" onClick={() => act("dismiss", () => dismissEmail(event.id))} disabled={busy !== null}
             className={buttonClass("quiet", "xs")}>Not mine</button>
         </div>
+      )}
+      {event.decision === "unmatched" && adding && (
+        <form className="flex flex-wrap items-end gap-2" onSubmit={(e) => {
+          e.preventDefault();
+          act("track", () => trackEmail(event.id, newCompany, newRole));
+        }}>
+          <label className="flex flex-col gap-1 text-[12px] font-semibold text-ink-2">Company
+            <input className={`${inputClass} h-8 text-[13px] w-[200px]`} value={newCompany} onChange={(e) => setNewCompany(e.target.value)} />
+          </label>
+          <label className="flex flex-col gap-1 text-[12px] font-semibold text-ink-2">Role
+            <input className={`${inputClass} h-8 text-[13px] w-[260px]`} value={newRole} onChange={(e) => setNewRole(e.target.value)} />
+          </label>
+          <button type="submit" disabled={!newCompany.trim() || !newRole.trim() || busy !== null} className={buttonClass("commit", "xs")}>
+            {busy === "track" ? <Spinner /> : null}Add{event.proposed ? ` as ${event.proposed}` : ""}
+          </button>
+        </form>
       )}
       {error && <p role="alert" className="m-0 text-[12.5px] text-red">{error}</p>}
     </li>
@@ -239,7 +267,7 @@ function Inbox() {
   const flag = params.get("gmail");
   const live = s?.connected && !s.problem;
   const empty: Record<Tab, string> = {
-    needs: "Nothing waiting for you. Emails Windrush isn't sure about show up here.",
+    needs: "Nothing waiting for you. Emails Windrush isn't sure about, or about applications it doesn't track, show up here.",
     updated: "No applications updated from your inbox yet.",
     other: "Emails that changed nothing, and ones you left or undid.",
   };

@@ -37,6 +37,20 @@ from .models import (Persona, WorkExperience, Education, Project, Certification,
 logger = logging.getLogger("windrush.main")
 
 
+class _HideOAuthCode(logging.Filter):
+    """Google's redirect back to /gmail/callback carries a one-time code (and the state): keep them out of the
+    access log."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if isinstance(record.args, tuple) and any(isinstance(a, str) and "/gmail/callback" in a for a in record.args):
+            record.args = tuple(re.sub(r"\b(code|state)=[^&\s]+", r"\1=<hidden>", a) if isinstance(a, str) else a
+                                for a in record.args)
+        return True
+
+
+logging.getLogger("uvicorn.access").addFilter(_HideOAuthCode())
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     import os
@@ -1261,6 +1275,12 @@ async def gmail_confirm(event_id: str, body: dict, current_user: Annotated[auth.
     """Make the change an email points to; {application_id} links an email Windrush couldn't match."""
     application_id = body.get("application_id") if isinstance(body.get("application_id"), str) else None
     return _email_action(gmail.confirm, current_user.id, event_id, application_id)
+
+
+@app.post("/gmail/events/{event_id}/track")
+async def gmail_track(event_id: str, body: dict, current_user: Annotated[auth.User, Depends(auth.get_current_user)]):
+    """Add the application an unmatched email is about: {company, role}, at the status the email points to."""
+    return _email_action(gmail.track, current_user.id, event_id, body.get("company"), body.get("role"))
 
 
 @app.post("/gmail/events/{event_id}/dismiss")

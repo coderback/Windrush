@@ -40,7 +40,8 @@ _API = "https://gmail.googleapis.com/gmail/v1/users/me"
 _STATE_TTL_S = 600
 _FIRST_SYNC_DAYS = 60       # how far back the first sync reads
 _OVERLAP_S = 600            # each sync re-reads the last few minutes, for mail that arrived while one ran
-_MAX_MESSAGES = 80          # per sync
+_MAX_LISTED = 500           # message ids listed per sync (cheap)
+_MAX_MESSAGES = 150         # read per sync, oldest first; the rest wait for the next one
 _BODY_CHARS = 2500          # of each email, for the model
 _MAX_APPLICATIONS = 80      # most recent, offered to the model to match
 _EVERY_S = 30 * 60
@@ -63,6 +64,14 @@ _RANK = {"Saved": 0, "Evaluated": 0, "Pending Review": 1, "Applied": 2, "Respond
 
 class GmailError(Exception):
     """Something the user should be told, in their words."""
+
+
+class _SlowDown(Exception):
+    """Gmail's per-user quota: stop for now, and carry on at the next sync."""
+
+
+# Gmail charges 5 quota units a message; a new Google project's per-user minute allowance runs out fast.
+_FETCH_GAP_S = 0.3
 
 
 # ── Configuration and connecting ──────────────────────────────────────────────────────────────
@@ -169,6 +178,8 @@ async def _get(token: str, path: str, params: dict | None = None) -> dict:
         resp = await client.get(_API + path, params=params, headers={"Authorization": f"Bearer {token}"})
     if resp.status_code == 401:
         raise GmailError("Gmail refused the request. Connect again.")
+    if resp.status_code == 429 or (resp.status_code == 403 and ("quota" in resp.text.lower() or "rate" in resp.text.lower())):
+        raise _SlowDown()
     resp.raise_for_status()
     return resp.json()
 
@@ -364,20 +375,17 @@ def _query(after: int, companies: list[str]) -> str:
     return f"after:{after} -in:sent -in:chats -category:promotions -category:social ({' OR '.join(terms)})"
 
 
-def _first_sync_start(applications: list[dict]) -> int:
-    floor = int(time.time()) - _FIRST_SYNC_DAYS * 86400
-    dates = [a.get("created_at") for a in applications if a.get("created_at")]
-    try:
-        earliest = int(min(datetime.fromisoformat(d) for d in dates).timestamp()) - 86400 if dates else floor
-    except ValueError:
-        earliest = floor
-    return max(floor, earliest)
+def _first_sync_start() -> int:
+    """The first sync reads back this far, whatever is tracked: job mail about applications made elsewhere is
+    offered to the user to add to their tracker."""
+    return int(time.time()) - _FIRST_SYNC_DAYS * 86400
 
 
 async def _message_ids(token: str, query: str) -> list[str]:
+    """Ids of the messages matching `query`, newest first (Gmail's order)."""
     ids, page = [], None
-    while len(ids) < _MAX_MESSAGES:
-        params = {"q": query, "maxResults": min(100, _MAX_MESSAGES - len(ids))}
+    while len(ids) < _MAX_LISTED:
+        params = {"q": query, "maxResults": min(100, _MAX_LISTED - len(ids))}
         if page:
             params["pageToken"] = page
         listing = await _get(token, "/messages", params)
@@ -435,12 +443,24 @@ async def sync(user_id: str) -> dict:
         token = await _access_token(user_id)
         applications = tracker.list_applications(user_id)[:_MAX_APPLICATIONS]
         started = int(time.time())
-        after = account.get("synced_until") or _first_sync_start(applications)
+        after = account.get("synced_until") or _first_sync_start()
         companies = list(dict.fromkeys(a["company"] for a in applications if a.get("company")))
-        ids = [i for i in await _message_ids(token, _query(after, companies)) if not tracker.email_seen(user_id, i)]
-        emails = []
+        unseen = [i for i in await _message_ids(token, _query(after, companies)) if not tracker.email_seen(user_id, i)]
+        # The oldest first, so later news wins; what doesn't fit waits for the next sync, which starts from the
+        # same point (the period is marked as read only once nothing in it is left).
+        ids = list(reversed(unseen))[:_MAX_MESSAGES]
+        emails, fetched = [], 0
         for message_id in ids:
-            emails.append(parse(await _get(token, f"/messages/{message_id}", {"format": "full"})))
+            try:
+                emails.append(parse(await _get(token, f"/messages/{message_id}", {"format": "full"})))
+            except _SlowDown:
+                logger.info("gmail sync: hit the per-user quota after %d messages; the rest wait", fetched)
+                break
+            except Exception as exc:   # gone since it was listed, say: skip it rather than stop
+                logger.warning("gmail sync: couldn't read a message (%s)", type(exc).__name__)
+            fetched += 1
+            await asyncio.sleep(_FETCH_GAP_S)
+        more = len(unseen) > fetched
         for email in sorted(emails, key=lambda e: e["received_at"]):   # oldest first: later news wins
             if not relevant(email, applications):
                 decision = "ignored"
@@ -450,8 +470,10 @@ async def sync(user_id: str) -> dict:
                 decision = _apply(user_id, email, await read(email, applications))
                 applications = tracker.list_applications(user_id)[:_MAX_APPLICATIONS]   # statuses may have moved
             counts[decision] = counts.get(decision, 0) + 1
-        tracker.update_gmail_account(user_id, synced_until=started - _OVERLAP_S,
+        tracker.update_gmail_account(user_id, synced_until=after if more else started - _OVERLAP_S,
                                      last_sync_at=datetime.now(timezone.utc).isoformat())
+        if more:
+            counts["waiting"] = len(unseen) - fetched
         logger.info("gmail sync: %d messages read, %s", len(emails), counts)
         return {"counts": counts}
     finally:
@@ -498,6 +520,27 @@ def confirm(user_id: str, event_id: str, application_id: str | None = None) -> d
         tracker.update_status(app["id"], target, user_id=user_id)
     tracker.update_email_event(user_id, event_id, decision="confirmed", application_id=app["id"],
                                proposed=target, status_before=app["status"])
+    return tracker.get_email_event(user_id, event_id)
+
+
+def track(user_id: str, event_id: str, company: str, role: str) -> dict:
+    """Add the application an unmatched email is about to the tracker (as `company` / `role`, which the user can
+    correct), at the status the email points to, and link the email to it."""
+    event = tracker.get_email_event(user_id, event_id)
+    if not event:
+        raise LookupError("No such email")
+    if event["decision"] not in ("unmatched", "dismissed"):
+        raise GmailError("That email is already linked to an application.")
+    company, role = " ".join(str(company or "").split())[:200], " ".join(str(role or "").split())[:200]
+    if not company or not role:
+        raise GmailError("Give the company and the role.")
+    status = KIND_STATUS.get(event["kind"]) or "Applied"
+    job = {"job_id": f"email:{event['gmail_id']}", "title": role, "company": company}
+    app_id = (tracker.add_application(user_id, job, {}, "", {}, status="Applied")
+              or tracker.find_application_id(user_id, company, role))
+    tracker.update_status(app_id, status, f"Added from your inbox: {event['subject']}"[:300], user_id=user_id)
+    tracker.update_email_event(user_id, event_id, decision="confirmed", application_id=app_id, proposed=status,
+                               status_before=None)
     return tracker.get_email_event(user_id, event_id)
 
 
