@@ -1083,6 +1083,8 @@ def _apply_tools(cover_letter: str, browser_session, answerer: Answerer | None =
                 fields[_question_key(q.question)] = found
                 if not question.get("max_length") and found[1].get("maxLength"):
                     question["max_length"] = found[1]["maxLength"]
+                if found[1].get("details"):
+                    question["details"] = found[1]["details"]
                 # Read even when the agent gave options: it lists only what's on screen (DV Trading's 83 disciplines
                 # came as the last 17, without Computer Science). A type-ahead lists fewer until typed into: the
                 # agent's then stand.
@@ -1116,7 +1118,7 @@ def _apply_tools(cover_letter: str, browser_session, answerer: Answerer | None =
                     options = await form_widgets.read_options(found[0])
                     if options:
                         again = await answerer([{"question": result["question"], "options": options,
-                                                 "max_length": None}])
+                                                 "max_length": None, "details": found[1].get("details", "")}])
                         if again:
                             result = numbered[n] = asked[_question_key(result["question"])] = again[0]
                             line = _answer_line(n, result)

@@ -121,6 +121,32 @@ def test_options_are_read_from_the_dropdown_not_the_page(ba, site):
     _on_form(ba, site, check)
 
 
+def test_a_field_is_described_with_what_the_form_says_with_it(ba, site):
+    """Catapult's "GDPR Statement" says what it asks only in the statement under it. A field with nothing but its
+    label and options has no details: not the label again, not "Select...", not the checkboxes' labels."""
+    from browser_use import BrowserSession
+
+    async def run():
+        session = BrowserSession(browser_profile=ba._browser_profile())
+        await session.start()
+        try:
+            await session.navigate_to(f"{site}/greenhouse.html")
+            await asyncio.sleep(1.0)
+            await session.get_browser_state_summary(include_screenshot=False)
+            details = {}
+            for element_id in ("gdpr", "visa", "d1", "why"):
+                node = await session.get_element_by_index(await session.get_index_by_id(element_id))
+                details[element_id] = (await (await form_widgets.Field(session, node).open()).describe())["details"]
+            return details
+        finally:
+            await session.kill()
+
+    assert asyncio.run(run()) == {
+        "gdpr": "Your personal data will be processed for the purposes of managing our recruitment related activities.",
+        "visa": "", "d1": "", "why": ""}
+    assert_no_chromium_left()
+
+
 def test_a_value_no_option_matches_is_refused_and_says_what_there_is(ba, site):
     async def check(fill, read, held):
         ok, why = await fill("visa", "Maybe later")
