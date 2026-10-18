@@ -527,6 +527,11 @@ def test_fields_and_questions_are_filled_in_bulk_on_a_greenhouse_style_form(ba, 
     # The second item's index was Last Name's: the field labelled "First Name" is what got filled, not Last Name.
     assert seen.count("- “First Name”: filled with “Ada”. Done; leave it.") >= 2
     assert '- “Country”: filled with “United Kingdom +44”' in seen
+    # That was the phone's dial-code "Country"; the address's "Country" is still empty, and the agent is told.
+    assert "The page has 2 fields labelled “Country”: this was element " in seen
+    assert re.search(r"Required fields still empty on the page: [^\n]*“Country”", seen)
+    # Once a question is left for the candidate (Notice period, from step 2), it isn't listed as still to do.
+    assert "Notice period" not in re.findall(r"Required fields still empty on the page: [^\n]*", seen)[-1]
     assert '"Do you now or in the future require visa sponsorship to work in the UK?": filled in with "No"' in seen
     assert '"Notice period": LEAVE BLANK' in seen
     assert "- “Notice period”: NOT filled. Only the candidate can answer it: leave it blank." in seen
