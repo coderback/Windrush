@@ -38,8 +38,10 @@ _DRAFTS_AT_ONCE = 4
 # ── Questions, normalised ──────────────────────────────────────────────────────────────────────
 
 _KEY_NOISE = re.compile(r"\((?:required|optional)\)|\*", re.I)
-# A dropdown's prompt, not a choice: "Select...", "Please choose", "--".
-_PLACEHOLDER = re.compile(r"^\W*(?:please\s+)?(?:select|choose|pick)\b|^\W*$", re.I)
+# A dropdown's prompt or hint, not a choice: "Select...", "Please choose", "--", "You can choose more than one".
+_PLACEHOLDER = re.compile(
+    r"^\W*(?:please\s+)?(?:select|choose|pick)\b|^\W*$|^\W*you\s+(?:can|may)\s+(?:select|choose|pick)\b|"
+    r"^\W*(?:start typing|type to search|no options)\b", re.I)
 
 
 def question_key(question: str) -> str:
@@ -132,6 +134,9 @@ _CORE_TEXT_FACTS = (
     ("security_clearance", "Security clearance held", False),
     ("dob", "Date of birth", True),
 )
+
+# An address's facts, in the order a form writes them.
+_ADDRESS_PARTS = ("address_line_1", "city", "postcode", "country")
 
 _DISABILITY = {"yes": "Yes", "no": "No", "prefer_not_to_say": "Prefer not to say"}
 _DECLINE = "Prefer not to say"
@@ -473,6 +478,12 @@ def resolve_fact(question: dict, reading: dict, facts: dict[str, Fact], job_loca
         return None
     said = str(reading.get("answer") or "").strip()
     first = cited[0]
+
+    if not options and len(cited) > 1 and {f.id for f in cited} <= set(_ADDRESS_PARTS) and \
+            any(f.private for f in cited):
+        # "Address" read as the street, town and postcode together: put together here, as the model never saw them.
+        by_id = {f.id: f.value for f in cited}
+        return ", ".join(by_id[part] for part in _ADDRESS_PARTS if part in by_id), cited
 
     if len(cited) == 1 and first.private:
         # The model never saw the value, so it can only have said which fact applies. A salary goes in the band

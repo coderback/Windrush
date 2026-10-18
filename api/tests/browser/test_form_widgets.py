@@ -79,6 +79,11 @@ def test_an_option_far_down_a_long_list_is_found_by_typing_it(ba, site):
         assert await fill("university", "The University of the West of England, Bristol") == (True, "Bristol, UWE")
         assert time.monotonic() - started < 10
         assert await held("university") == ["Bristol, UWE"]
+        # Picked, a multi-select stops listing it; asked again (as on a live run), it's still an option and done.
+        options = await read("university")
+        assert len(options) == 350 and options[0] == "Bristol, UWE"
+        assert await fill("university", "Bristol, UWE") == (True, "Bristol, UWE")
+        assert await held("university") == ["Bristol, UWE"]
     _on_form(ba, site, check)
 
 

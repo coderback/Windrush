@@ -339,6 +339,24 @@ def test_a_dropdowns_placeholder_is_not_an_option(model):
     assert "Select..." not in fake.prompts()
 
 
+def test_a_dropdowns_hint_doesnt_stop_a_saved_answer(model):
+    # Seen on a live form: the only "option" read was the box's hint, so the saved "Python" wasn't used.
+    model()
+    question = "If you progress to interview stage, which of these languages would you prefer us to focus on?"
+    got = ask([{"question": question, "options": ["You can choose more than one"]}],
+              bank=[answers_entry(question, "Python")])
+    assert (got[0]["source"], got[0]["answer"], got[0]["options"]) == ("saved", "Python", [])
+
+
+def test_an_address_read_as_several_facts_is_put_together_without_the_model_seeing_it(model):
+    persona = {**PERSONA, "core_info": {**PERSONA["core_info"], "address_line_1": "1 High Street",
+                                        "postcode": "BS1 1AA"}}
+    fake = model(read={"Address": fact("postcode", "address_line_1", "city")})
+    got = ask(["Address"], persona=persona)
+    assert (got[0]["source"], got[0]["answer"]) == ("profile", "1 High Street, Bristol, BS1 1AA")
+    assert "1 High Street" not in fake.prompts() and "BS1 1AA" not in fake.prompts()
+
+
 # ── The answer bank ───────────────────────────────────────────────────────────
 
 def test_saving_replaces_the_answer_to_the_same_question(user):

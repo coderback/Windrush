@@ -538,8 +538,9 @@ def _build_task(job_url: str, persona: dict, cover_letter: str,
         task += f"\n\nApplicant details:\n{profile_block}"
 
     task += (
-        "\n\nQuestions: the details above are for the form's name, contact, education and employment fields. For "
-        "every other question (right to work, visas and sponsorship, nationality, notice period, salary, "
+        "\n\nQuestions: the details above are for the form's name, contact, education and employment fields that "
+        "have a plain label, like a School or Degree box. A field whose label is a question is one of the questions "
+        "below, even when it asks about education or work. For every question (right to work, visas and sponsorship, nationality, notice period, salary, "
         "availability, preferences, equality monitoring, consent and declarations, and any question that asks "
         "for a written answer) call answer_questions first, with all of the page's questions in one call: each "
         "label exactly as the form shows it, with its field's index, and its options if you can see them. It "
@@ -937,7 +938,7 @@ def _add_fill_fields(tools, browser_session, asked: dict[str, dict], filled: set
         "Fill several of the form's fields in one step and check each one took: text boxes, dropdowns (searchable "
         "ones too: it opens them, searches and picks the option), checkboxes and radio buttons. Give each field's "
         "index, its label as shown, and the value. Use it for the applicant's details (name, email, phone, country, "
-        "city, education, links); answer_questions fills the form's questions.",
+        "city, school, degree, links); answer_questions fills anything asked as a question.",
         param_model=FillFieldsParams)
     async def fill_fields(params: FillFieldsParams) -> ActionResult:
         blank = [q["question"] for q in asked.values() if q.get("source") == "needs_you"]
@@ -1017,8 +1018,9 @@ def _apply_tools(cover_letter: str, browser_session, answerer: Answerer | None =
     numbered: dict[int, dict] = {}
 
     @tools.action(
-        "Get the candidate's answers to the form's questions: every question except name, contact details, "
-        "education and employment history, and file uploads. Call it once per page with all of the page's "
+        "Get the candidate's answers to the form's questions: every field whose label is a question (education ones "
+        "too), but not plainly labelled name, contact, education or employment fields, or file uploads. Call it "
+        "once per page with all of the page's "
         "questions, before filling them in, and give each one's label exactly as shown, with its options for a "
         "dropdown, radio or checkbox question. Then fill in exactly what it returns.",
         param_model=AnswerQuestionsParams)
