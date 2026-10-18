@@ -49,7 +49,9 @@ def test_an_education_field_asked_as_a_question_goes_to_answer_questions():
     # fill_fields refuses a label ending in "?", so the task mustn't send "What university…?" to it: on a live form
     # the agent was refused, didn't try answer_questions, and left the university blank.
     task = ba._build_task("https://x.example/job", {}, "", "", "", "")
-    assert "A field asked as a question is one of the questions below even when it's about education" in task
+    assert "A field whose label is a question is one of the questions below, even when it asks about education" in task
+    # No example labels: the agent copied them onto a live form in place of the form's own.
+    assert "What university" not in task
 
 
 def test_given_answers_are_stated_including_no():
