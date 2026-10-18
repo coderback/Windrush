@@ -2,6 +2,7 @@
 import asyncio
 import json
 import re
+from datetime import date
 
 import pytest
 
@@ -230,6 +231,42 @@ def test_a_long_dropdown_keeps_every_option(model):
     got = ask([{"question": question, "options": unis}], persona=persona)
     assert (got[0]["source"], got[0]["answer"]) == ("profile", "Northfield, NU")
     assert "Academy 28" in fake.prompts()
+
+
+@pytest.mark.parametrize("end, month", [
+    ("11/2025", (2025, 11)), ("2025-06", (2025, 6)), ("Nov 2025", (2025, 11)), ("June 2025", (2025, 6)),
+    ("2025", (2025, 12)), ("Present", None), ("", None), ("Expected 2027 - ongoing", None),
+])
+def test_an_end_date_is_read_as_its_month(end, month):
+    assert answers._end_month(end) == month
+
+
+def graduated(education, today=date(2026, 10, 18)):
+    facts = {f.id: f for f in answers.profile_facts({**PERSONA, "education": education}, today=today)}
+    return facts["graduated"].value if "graduated" in facts else None
+
+
+def test_whether_they_have_graduated_is_stated_only_when_the_dates_say_so():
+    done = {"institution": "Northfield University", "degree": "BSc", "end_date": "06/2025"}
+    assert graduated([done]) == "Yes"
+    assert graduated([done, {"institution": "Southfield", "degree": "MSc", "is_currently_enrolled": True}]) == "No"
+    assert graduated([{**done, "end_date": "Present"}]) == "No"
+    # Not marked as enrolled, but not finished yet either; or no end date at all: left out.
+    assert graduated([{**done, "end_date": "06/2027"}]) is None
+    assert graduated([{**done, "end_date": ""}]) is None
+    assert graduated([{**done, "end_date": "10/2026"}]) is None                   # this month: not passed yet
+    assert graduated([]) is None
+
+
+def test_an_expected_graduation_question_is_answered_from_having_graduated(model):
+    # DV Trading's "Please re-confirm your expected graduation date" was answered "I've already graduated" on some
+    # runs and left for the user on others: the model had to read it off the degree's end date.
+    question = "Please re-confirm your expected graduation date"
+    options = ["I've already graduated", "August 2026 - December 2026", "January 2027 - July 2027"]
+    fake = model(read={question: fact("graduated", answer="I've already graduated")})
+    got = ask([{"question": question, "options": options}])
+    assert (got[0]["source"], got[0]["answer"]) == ("profile", "I've already graduated")
+    assert "graduated: Has already graduated (finished their studies, last in 06/2025): Yes" in fake.prompts()
 
 
 def test_how_they_heard_about_a_job_is_left_for_the_user():
