@@ -90,6 +90,9 @@ class Fact:
     uk: bool = False        # only says something about the UK (right to work, sponsorship)
     yes_no: bool = False
     bank_id: str = ""
+    # A line of several details (a degree with its dates and grade, every skill): an answer may take a part
+    # of it, but it never goes on the form whole in place of what the question asked.
+    summary: bool = False
 
 
 # (section, field, label, about the UK only). Unanswered (None) ones are left out entirely, so nothing
@@ -229,18 +232,17 @@ def profile_facts(persona: dict, today: date | None = None) -> list[Fact]:
         facts.append(Fact("currently_employed", "Are you currently employed", "No", yes_no=True))
     for i, job in enumerate(history):
         add(f"role_{i + 1}", "Work history", f"{job.get('title', '')} at {job.get('employer', '')}"
-            + _dates(job, "start_date", "end_date", "is_current"))
+            + _dates(job, "start_date", "end_date", "is_current"), summary=True)
     for i, edu in enumerate(e for e in persona.get("education") or [] if isinstance(e, dict)):
         grade = f", {edu['grade']}" if edu.get("grade") else ""
         add(f"education_{i + 1}", "Education", f"{edu.get('degree', '')} at {edu.get('institution', '')}"
-            + _dates(edu, "start_date", "end_date", "is_currently_enrolled") + grade)
+            + _dates(edu, "start_date", "end_date", "is_currently_enrolled") + grade, summary=True)
     skills = [s for group in persona.get("skills") or [] for s in group.get("skills") or []]
-    add("skills", "Skills", ", ".join(dict.fromkeys(skills)))
+    add("skills", "Skills", ", ".join(dict.fromkeys(skills)), summary=True)
     certs = [f"{c.get('name', '')} ({c.get('issuing_organization', '')})".replace(" ()", "")
              for c in persona.get("certifications") or [] if c.get("name")]
-    add("certifications", "Certifications held", "; ".join(certs))
-    facts.append(Fact("heard_about", "How you heard about this job",
-                      "Online job search (pick the closest option, e.g. 'Company website' or 'Internet search')"))
+    add("certifications", "Certifications held", "; ".join(certs), summary=True)
+    # How they heard about a job isn't in the persona: it's the user's to say, and the answer bank keeps it.
     return facts
 
 
@@ -425,9 +427,37 @@ _STOP = {"a", "an", "the", "of", "in", "at", "and", "or", "to", "for", "with", "
 
 
 def _supported(answer: str, facts: list[Fact]) -> bool:
-    """A free-text answer the model wrote from shown facts may only use their words."""
+    """A free-text answer the model wrote from shown facts may only use their words, and a yes or no."""
     source = set(re.findall(r"[a-z0-9]+", " ".join(f"{f.label} {f.value}" for f in facts).lower()))
-    return set(re.findall(r"[a-z0-9]+", answer.lower())) - _STOP <= source
+    return set(re.findall(r"[a-z0-9]+", answer.lower())) - _STOP - _YES - _NO <= source
+
+
+# A question that asks for something other than a yes or no: "What year did you graduate?", "Please provide
+# your ideal start date", "If yes, please give your visa type".
+_ASKS_FOR_CONTENT = re.compile(
+    r"^(?:if\b[^,?]*,\s*)?(?:please\s+)?(?:what|when|which|where|who|whose|why|how|provide|give|list|describe|"
+    r"enter|specify|explain|tell|name|add)\b|^(?:if\b[^,?]*,\s*)?(?:please\s+)?state\b(?!\s+whether)", re.I)
+# An option that says no option fits: no fact ever states one.
+_NONE_FITS = re.compile(r"^\W*(?:other\b|none of the above|not listed|n/?a\W*$)", re.I)
+
+
+def _parts(value: str) -> list[str]:
+    """The things a summary fact names: each skill, a role's title and employer, a degree and its university."""
+    return [p for p in re.split(r"[,;]|\sat\s", re.sub(r"\([^)]*\)", " ", value)) if _norm(p)]
+
+
+def _says_yes_or_no(answer: str, cited: list[Fact], question: str) -> bool:
+    """
+    Whether the cited facts can give this answer's yes or no. A yes/no fact or a saved answer can. A list of
+    skills, roles or degrees says yes only to a thing it names that the question names too ("experience in
+    Python?" from skills that list Python), and leaving something off a CV never says no.
+    """
+    polarity = _polarity(answer)
+    if polarity is None:
+        return True
+    if any(f.yes_no or f.source == "saved" or _polarity(f.value) is polarity for f in cited):
+        return True
+    return polarity and any(mentions(part, question) for f in cited if f.summary for part in _parts(f.value))
 
 
 def resolve_fact(question: dict, reading: dict, facts: dict[str, Fact], job_location: str = "") -> tuple[str, list[Fact]] | None:
@@ -457,18 +487,29 @@ def resolve_fact(question: dict, reading: dict, facts: dict[str, Fact], job_loca
         answer = _in_options(said, options)
         if answer is None and len(cited) == 1:
             answer = pick_option(first.value, options)
-        if answer is None:
+        # "Other" says no option states the fact; a saved answer may still have chosen it.
+        if answer is None or (_NONE_FITS.search(answer) and not any(f.source == "saved" for f in cited)):
             return None
     elif said:
         answer = said
-        if _polarity(said) is None and not _supported(said, cited):
-            if len(cited) != 1:
+        if not _supported(said, cited):
+            # Only the yes or no is backed, or else the fact's own value, when that is the whole answer.
+            if _polarity(said) is not None:
+                answer = "Yes" if _polarity(said) else "No"
+            elif len(cited) == 1 and not first.summary:
+                answer = first.value
+            else:
                 return None
-            answer = first.value
     else:
-        if len(cited) != 1:
+        if len(cited) != 1 or first.summary:
             return None
         answer = first.value
+
+    # A yes or no doesn't answer "Please provide your ideal start date".
+    if not options and _polarity(answer) is not None and _ASKS_FOR_CONTENT.search(text):
+        return None
+    if not _says_yes_or_no(answer, cited, text):
+        return None
 
     # A yes/no fact keeps its polarity unless the question turns it round ("…without sponsorship?").
     if len(cited) == 1 and first.yes_no and not _NEGATED.search(text):
@@ -488,8 +529,8 @@ _READ_SYSTEM = (
     "company, their interest, experience, skills or achievements, a time they did something, a project, "
     "strengths, goals, or anything else they'd like to add.\n"
     "- \"fact\": anything else: eligibility, right to work, visas, status, availability, notice, salary, "
-    "preferences, contact details, education, work history, a number, a choice between options about them, "
-    "equality monitoring, consent or a declaration.\n"
+    "preferences, contact details, education, work history, how they heard about the job (and its details), a "
+    "number, a choice between options about them, equality monitoring, consent or a declaration.\n"
     "For a \"fact\" give fact_ids, the ids of the facts that state the answer, and answer, the answer they give "
     "in the form's terms: when options are listed, exactly one option copied word for word. If no fact states "
     "it, fact_ids is [] and answer is \"\". Rules:\n"
@@ -502,6 +543,12 @@ _READ_SYSTEM = (
     "the salary expectations fact; cite it and Windrush picks the band that holds the figure.\n"
     "- Read the question's direction: 'Will you require sponsorship?' and 'Can you work without "
     "sponsorship?' take opposite answers from the same fact.\n"
+    "- Answer just what is asked, taken from the fact: the year from a degree's dates, not the whole degree "
+    "line; 'Immediately' for a start date when the candidate can start immediately, never 'Yes'.\n"
+    "- When the question asks for more than the facts state (a visa's type and its expiry date, when only the "
+    "type is known), or only applies in a case the facts don't show ('If you have multiple disciplines…'), "
+    "fact_ids is [].\n"
+    "- Never choose 'Other' or 'None of the above': no fact states one.\n"
     "- A declaration or consent (a privacy notice, that the information is accurate, background or reference "
     "checks, criminal convictions, conflicts of interest) is answered only by a saved answer to it.\n"
     'Return ONLY JSON: {"answers": [{"n": int, "kind": "fact" | "written", "fact_ids": [str], "answer": str}]} '
