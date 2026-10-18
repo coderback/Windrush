@@ -220,6 +220,27 @@ def test_required_fields_still_empty_are_read_from_the_page(ba, site):
     assert_no_chromium_left()
 
 
+def test_the_button_that_sends_the_application_is_seen_on_the_form_only(ba, site):
+    from browser_use import BrowserSession
+
+    async def run():
+        session = BrowserSession(browser_profile=ba._browser_profile())
+        await session.start()
+        try:
+            shown = []
+            for page in ("greenhouse.html", "other.html"):
+                await session.navigate_to(f"{site}/{page}")
+                await asyncio.sleep(1.0)
+                shown.append(await ba._submit_button_shown(session))
+            return shown
+        finally:
+            await session.kill()
+
+    # The form's "Submit application" is below the fold: still seen. A careers page has none.
+    assert asyncio.run(run()) == [True, False]
+    assert_no_chromium_left()
+
+
 class CoverLetterLLM(ScriptedLLM):
     """Pastes the cover letter into its box by index, reads the box back with JS, then finishes."""
 
