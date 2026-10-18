@@ -987,11 +987,24 @@ def _add_fill_fields(tools, browser_session, asked: dict[str, dict], filled: set
                 lines.append(f"- “{item.label}”: NOT filled: {why}. Check the index.")
                 continue
             ok, detail = await form_widgets.fill_field(found[0], item.value)
+            shown = found[1].get("group") or found[1].get("label") or ""
             if ok:
-                filled.update({item.label, found[1].get("group") or found[1].get("label") or ""})
-            lines.append(f"- “{item.label}”: filled with “{detail}”. Done; leave it." if ok
-                         else f"- “{item.label}”: NOT filled: {detail}.")
+                filled.update({item.label, shown})
+            line = (f"- “{item.label}”: filled with “{detail}”. Done; leave it." if ok
+                    else f"- “{item.label}”: NOT filled: {detail}.")
+            # Two fields can share a label: filling the phone's dial-code "Country" left the address's "Country"
+            # empty, and the agent took it as done.
+            same = await form_widgets.label_count(browser_session, shown or item.label)
+            if ok and same > 1:
+                line += (f" The page has {same} fields labelled “{item.label}”: this was element {item.index}. Fill "
+                         f"the other one too if it's empty.")
+            lines.append(line)
         text = "Fields:\n" + "\n".join(lines)
+        # What's still to do, as the final check will see it; questions left for the candidate aren't listed.
+        empty = [label for label in await _empty_required_fields(browser_session)
+                 if not any(form_widgets.same_question(label, q) for q in blank)]
+        if empty:
+            text += "\nRequired fields still empty on the page: " + "; ".join(f"“{label}”" for label in empty)
         return ActionResult(extracted_content=text, long_term_memory=text)
 
 

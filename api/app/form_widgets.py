@@ -401,22 +401,32 @@ _CONTROLS_JS = r"""
   const controls = 'input:not([type=hidden]):not([type=file]):not([type=submit]):not([type=button]):not([type=password]), select, textarea, [contenteditable=true]';
 """
 
-_FIND_JS = "(wanted) => {" + _CONTROLS_JS + r"""
+# labelled(wanted): the fields labelled `wanted` exactly, and those whose label holds it or is held by it.
+_LABELLED_JS = r"""
   const key = s => s.toLowerCase().replace(/\((required|optional)\)|\*/g, ' ').replace(/[^a-z0-9]+/g, ' ').trim();
-  const w = key(wanted);
-  if (!w) return null;
-  const exact = [], close = [];
-  for (const doc of docs) for (const el of doc.querySelectorAll(controls)) {
-    if (el.closest('[aria-hidden=true]')) continue;
-    const isBox = el.type === 'checkbox' || el.type === 'radio';
-    const group = isBox ? groupOf(el, doc) : null;
-    if (group && group.members[0] !== el) continue;
-    const k = key(group ? group.label : labelOf(el, doc));
-    if (!k) continue;
-    if (k === w) exact.push(el);
-    else if (Math.min(k.length, w.length) >= 12 && (k.includes(w) || w.includes(k))) close.push(el);
-  }
+  const labelled = wanted => {
+    const w = key(wanted), exact = [], close = [];
+    if (!w) return {exact, close};
+    for (const doc of docs) for (const el of doc.querySelectorAll(controls)) {
+      if (el.closest('[aria-hidden=true]')) continue;
+      const isBox = el.type === 'checkbox' || el.type === 'radio';
+      const group = isBox ? groupOf(el, doc) : null;
+      if (group && group.members[0] !== el) continue;
+      const k = key(group ? group.label : labelOf(el, doc));
+      if (!k) continue;
+      if (k === w) exact.push(el);
+      else if (Math.min(k.length, w.length) >= 12 && (k.includes(w) || w.includes(k))) close.push(el);
+    }
+    return {exact, close};
+  };"""
+
+_FIND_JS = "(wanted) => {" + _CONTROLS_JS + _LABELLED_JS + r"""
+  const {exact, close} = labelled(wanted);
   return exact.length === 1 ? exact[0] : (!exact.length && close.length === 1 ? close[0] : null);
+}"""
+
+_COUNT_JS = "(wanted) => {" + _CONTROLS_JS + _LABELLED_JS + r"""
+  return labelled(wanted).exact.length;
 }"""
 
 # Every field that holds something, as {label, value}: what the user would read on the form.
@@ -464,6 +474,19 @@ async def find_by_label(browser_session, label: str) -> Field | None:
     if found.get("subtype") != "node" or not found.get("objectId"):
         return None
     return Field(send=send, session_id=session_id, object_id=found["objectId"])
+
+
+async def label_count(browser_session, label: str) -> int:
+    """How many fields on the page are labelled `label`: a Greenhouse form can have two "Country" fields, the
+    phone's dial-code box and the address's country."""
+    try:
+        send, session_id = await _tab(browser_session)
+        result = await send.Runtime.evaluate(
+            params={"expression": f"({_COUNT_JS})({json.dumps(str(label))})", "returnByValue": True},
+            session_id=session_id)
+        return int((result.get("result") or {}).get("value") or 0)
+    except Exception:
+        return 0
 
 
 async def filled_fields(browser_session) -> list[dict]:
