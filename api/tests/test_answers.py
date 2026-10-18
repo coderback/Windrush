@@ -305,6 +305,11 @@ def test_a_question_is_read_with_what_the_form_says_with_it(model):
     shown = statement.strip()[:answers._MAX_DETAILS]
     assert f"1. GDPR Statement\n   the form says with it: {shown}\n   options: Yes | No" in fake.prompts()
     assert statement.strip()[:answers._MAX_DETAILS + 20] not in fake.prompts()       # capped
+    # With the statement shown, the real model still took the saved consent only on some runs: it read
+    # "a saved answer to it" as the very wording. The same consent in other words counts; one company's document
+    # doesn't stand for another's.
+    assert "or to the same consent in other words: a saved consent to their personal data being processed for "            "recruitment answers a privacy or GDPR statement" in answers._READ_SYSTEM
+    assert "A saved acknowledgement of one named document (a company's disclosure or policy) answers only that "            "document." in answers._READ_SYSTEM
 
 
 def test_when_the_questions_cant_be_read_nothing_is_stated(model):

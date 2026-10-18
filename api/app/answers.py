@@ -572,7 +572,10 @@ _READ_SYSTEM = (
     "fact_ids is [].\n"
     "- Never choose 'Other' or 'None of the above': no fact states one.\n"
     "- A declaration or consent (a privacy notice, that the information is accurate, background or reference "
-    "checks, criminal convictions, conflicts of interest) is answered only by a saved answer to it.\n"
+    "checks, criminal convictions, conflicts of interest) is answered only by a saved answer to it, or to the "
+    "same consent in other words: a saved consent to their personal data being processed for recruitment "
+    "answers a privacy or GDPR statement about processing their application data for recruitment. A saved "
+    "acknowledgement of one named document (a company's disclosure or policy) answers only that document.\n"
     'Return ONLY JSON: {"answers": [{"n": int, "kind": "fact" | "written", "fact_ids": [str], "answer": str}]} '
     "with one entry per question."
 )
