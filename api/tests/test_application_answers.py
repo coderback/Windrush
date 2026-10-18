@@ -41,6 +41,8 @@ def test_the_task_states_no_screening_facts_and_sends_every_question_to_answer_q
 def test_agent_is_told_to_open_its_summary_with_what_needs_input():
     task = ba._build_task("https://x.example/job", {}, "", "", "", "")
     assert "In the done text, start with 'Needs your input: ...'" in task
+    # Fields left for the candidate aren't a failed fill: autopilot would report "couldn't finish" for them.
+    assert "don't stop it being done: that is still success=true" in task
 
 
 def test_given_answers_are_stated_including_no():

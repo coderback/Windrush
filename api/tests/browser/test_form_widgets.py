@@ -4,6 +4,7 @@ Run with: pytest -m browser
 """
 import asyncio
 import json
+import time
 
 import pytest
 from browser_support import assert_no_chromium_left, ba, site  # noqa: F401
@@ -69,6 +70,18 @@ def test_every_kind_of_field_is_filled_and_checked(ba, site):
     _on_form(ba, site, check)
 
 
+def test_an_option_far_down_a_long_list_is_found_by_typing_it(ba, site):
+    # Cambridge Consultants lists the University of the West of England 320th of 350, as "Bristol, UWE": typed,
+    # not reached by 320 arrow presses (29.5s on the live form).
+    async def check(fill, read, held):
+        assert len(await read("university")) == 350
+        started = time.monotonic()
+        assert await fill("university", "The University of the West of England, Bristol") == (True, "Bristol, UWE")
+        assert time.monotonic() - started < 10
+        assert await held("university") == ["Bristol, UWE"]
+    _on_form(ba, site, check)
+
+
 def test_options_are_read_from_the_dropdown_not_the_page(ba, site):
     async def check(fill, read, held):
         assert await read("visa") == ["Yes", "No"]                      # not the phone widget's 244 options
@@ -110,6 +123,7 @@ def test_best_option_and_same_question():
     assert form_widgets.best_option(uni, listed) == "Bristol, UWE"            # initials count
     assert form_widgets.best_option(uni, ["University of Bristol", "Arizona State University - West"]) is None
     assert form_widgets.best_option(uni, ["University of the West of England", "University of Bristol"]) ==         "University of the West of England"
+    assert "UWE" in form_widgets._queries(uni)                                 # what a type-ahead box is sent
     assert not form_widgets.same_question("Last Name*", "First Name")
     assert not form_widgets.same_question("Do you hold SC clearance?", "Do you require visa sponsorship?")
 

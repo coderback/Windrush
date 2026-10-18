@@ -29,6 +29,8 @@
     <div class="combo" data-for="candidate-location" data-async="Bristol, England, United Kingdom|Bristol, Connecticut, United States|Bristol, Tennessee, United States|London, England, United Kingdom|Leeds, England, United Kingdom"></div></div>
   <div class="row"><label for="school">School*</label>
     <div class="combo" data-for="school" data-async="University of Bristol|University of the West of England|University of East London|Bath Spa University"></div></div>
+  <div class="row"><label for="university">What university are you currently studying at or have most recently graduated from?*</label>
+    <div class="combo" data-for="university" data-multi="1"></div></div>
   <div class="row"><label for="visa">Do you now or in the future require visa sponsorship to work in the UK?*</label>
     <div class="combo" data-for="visa" data-options="Yes|No"></div></div>
   <div class="row"><label for="ethnicity">How would you describe your race / ethnicity? Please select more than one if applicable.</label>
@@ -49,6 +51,9 @@
 <script>
 const iti = document.getElementById('iti-list');
 for (let i = 0; i < 244; i++) iti.insertAdjacentHTML('beforeend', `<li role="option" class="iti__country">Country ${i} +${i}</li>`);
+// Cambridge Consultants' list: 350 UK institutions, with the University of the West of England 320th, as "Bristol, UWE".
+document.querySelector('[data-for=university]').dataset.options = [...Array(319).keys()].map(i => `College ${i}`)
+  .concat(['University of Bristol', 'Bristol, UWE'], [...Array(29).keys()].map(i => `Academy ${i}`)).join('|');
 
 for (const host of document.querySelectorAll('.combo')) {
   const id = host.dataset.for, multi = !!host.dataset.multi, short = !!host.dataset.short;

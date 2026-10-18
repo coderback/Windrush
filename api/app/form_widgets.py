@@ -143,7 +143,9 @@ def _queries(value: str) -> list[str]:
     out = [value]
     plain = re.sub(r"^the\s+", "", value.split(",")[0], flags=re.I).strip()
     words = [w for w in plain.split() if w.lower() not in _STOP]
-    for q in (plain, " ".join(words[:3]), words[0] if words else ""):
+    # Lists often go by initials: "University of the West of England" is "Bristol, UWE".
+    initials = "".join(w[0] for w in words).upper() if len(words) >= 3 else ""
+    for q in (plain, " ".join(words[:3]), initials, words[0] if words else ""):
         if q and q not in out:
             out.append(q)
     return out
@@ -233,6 +235,9 @@ async def _wait_options(field: Field, seconds: float = 2.5) -> list[str]:
     return options
 
 
+_FAR_DOWN = 10
+
+
 async def _choose_in_combobox(field: Field, value: str) -> tuple[bool, str]:
     await field.call(_FOCUS_JS)
     await field.clear_typed()
@@ -249,6 +254,18 @@ async def _choose_in_combobox(field: Field, value: str) -> tuple[bool, str]:
             target = best_option(value, options)
             if target:
                 break
+    elif options.index(target) > _FAR_DOWN:
+        # Far down a long list ("Bristol, UWE" is 320th of 350): typing it narrows the list, instead of hundreds
+        # of arrow presses. Back to the whole list if typing it doesn't find it.
+        await field.clear_typed()
+        await field.type(target)
+        narrowed = await _wait_options(field)
+        if target in narrowed:
+            options = narrowed
+        else:
+            await field.clear_typed()
+            await field.key("ArrowDown")
+            options = await _wait_options(field, 1.0)
     if not target:
         await field.clear_typed()
         await field.key("Escape")
