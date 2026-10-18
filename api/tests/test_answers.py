@@ -175,6 +175,55 @@ def test_free_text_the_facts_dont_support_falls_back_to_the_facts_own_value():
         "BSc (Hons) Computer Science"
 
 
+def test_a_degree_line_or_the_skills_list_never_goes_on_the_form_whole():
+    # Seen on a live form: "What year did you graduate?" filled with the whole education line.
+    assert resolve("What year did you graduate or are expected to graduate?", fact("education_1")) is None
+    assert resolve("What year did you graduate or are expected to graduate?",
+                   fact("education_1", answer="Summer 2025")) is None
+    assert resolve("What year did you graduate or are expected to graduate?",
+                   fact("education_1", answer="2025"))[0] == "2025"
+    assert resolve("Do you have practical programming experience in at least one of: C, C++, Rust, or Python.",
+                   fact("skills", answer="Yes, with Python and Go"))[0] == "Yes"
+
+
+def test_a_yes_or_no_answers_only_a_yes_or_no_question():
+    facts = {**FACTS, "can_start_immediately": answers.Fact("can_start_immediately", "Can start immediately",
+                                                            "Yes", yes_no=True)}
+
+    def start(question, said):
+        return answers.resolve_fact({"question": question, "options": []}, fact("can_start_immediately", answer=said),
+                                    facts, "London, UK")
+    assert start("Please provide your ideal start date", "Yes") is None
+    assert start("If yes, please give your visa type", "Yes") is None
+    assert start("Please provide your ideal start date", "Immediately")[0] == "Immediately"
+    assert start("Can you start immediately?", "Yes")[0] == "Yes"
+    assert start("Please state whether you can start immediately", "Yes")[0] == "Yes"
+
+
+def test_a_list_of_skills_says_yes_only_to_what_it_names():
+    # Seen on a live form: "Is English your primary language?" answered yes from the skills list.
+    english = ["Yes, English is my primary language", "No, English is not my primary language"]
+    assert resolve("Is English your primary language?", fact("skills", answer=english[0]), english) is None
+    assert resolve("Do you have experience with Python?", fact("skills", answer="Yes"), ["Yes", "No"])[0] == "Yes"
+    # A CV leaving something out never says no.
+    assert resolve("Do you have experience with Rust?", fact("skills", answer="No"), ["Yes", "No"]) is None
+    assert resolve("Do you hold a degree from Oxford?", fact("education_1", answer="No"), ["Yes", "No"]) is None
+
+
+def test_other_is_never_an_answer_from_the_profile():
+    # Seen on a live form: "If you have multiple disciplines…" answered "Other" from the education line.
+    disciplines = ["Mathematics", "Physics", "Economics", "Other"]
+    assert resolve("If you have multiple disciplines, please select all that apply.",
+                   fact("education_1", answer="Other"), disciplines) is None
+    saved = {**FACTS, "saved_1": answers.Fact("saved_1", "Saved answer", "Other", source="saved")}
+    assert answers.resolve_fact({"question": "How did you hear about us?", "options": ["LinkedIn", "Other"]},
+                                fact("saved_1", answer="Other"), saved)[0] == "Other"
+
+
+def test_how_they_heard_about_a_job_is_left_for_the_user():
+    assert not [f for f in answers.profile_facts(PERSONA) if "heard" in f.label.lower()]
+
+
 def test_age_is_derived_without_the_date_of_birth_reaching_the_model():
     facts = {f.id: f for f in answers.profile_facts(PERSONA)}
     assert facts["over_18"].value == "Yes" and facts["dob"].private
