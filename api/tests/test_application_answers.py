@@ -43,6 +43,7 @@ def test_agent_is_told_to_open_its_summary_with_what_needs_input():
     assert "In the done text, start with 'Needs your input: ...'" in task
     # Fields left for the candidate aren't a failed fill: autopilot would report "couldn't finish" for them.
     assert "don't stop it being done: that is still success=true" in task
+    assert "a field you couldn't fill and listed, even a required one" in task
 
 
 def test_an_education_field_asked_as_a_question_goes_to_answer_questions():
@@ -430,3 +431,25 @@ def test_required_fields_the_page_shows_empty_head_the_notes(monkeypatch):
     assert review["action"].startswith("Form filled, but 2 required fields still empty")
     assert review["notes"] == ("Required fields still empty on the form:\n- Nationality\n"
                                "- How did you hear about this role?\n\n" + NOTES)
+
+
+@pytest.mark.parametrize("empty, submit_shown, action", [
+    # DV Trading: the agent said it couldn't finish because School had no option for the user's university,
+    # but it had reached the page that sends the application.
+    (["School"], True, "Form filled, but 1 required field still empty"),
+    # Stopped before the end of the form, or stopped with nothing left to fill: the agent's word stands.
+    (["School"], False, "The agent couldn't finish the form"),
+    ([], True, "The agent couldn't finish the form"),
+])
+def test_a_fill_that_reached_the_submit_button_with_fields_empty_is_not_a_failed_fill(monkeypatch, empty, submit_shown,
+                                                                                    action):
+    async def on_page(session):
+        return empty
+
+    async def shown(session):
+        return submit_shown
+    monkeypatch.setattr(ba, "_empty_required_fields", on_page)
+    monkeypatch.setattr(ba, "_submit_button_shown", shown)
+
+    review = next(e for e in _fill_events(monkeypatch, NOTES, ok=False) if e.get("interactive"))
+    assert review["action"].startswith(action)

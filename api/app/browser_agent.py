@@ -608,8 +608,9 @@ def _build_task(job_url: str, persona: dict, cover_letter: str,
         "call done with success=true. In the done text, start with 'Needs your input: ...' (one question per line) "
         "if you left any question unanswered, then summarise what you filled and anything you were unsure about. "
         "Fields left blank for the candidate (questions answer_questions said to leave blank, or a field you "
-        "couldn't fill and listed) don't stop it being done: that is still success=true. Only if you cannot get "
-        "through the form (blocked, a page error, a step you can't get past), call done with success=false and "
+        "couldn't fill and listed, even a required one) don't stop it being done: that is still success=true. "
+        "Only if you cannot get through the form (blocked, a page error, a page you can't move on from to the "
+        "next), call done with success=false and "
         "say why, again starting with 'Needs your input: ...' for anything the candidate must answer."
     )
     return task
@@ -1241,6 +1242,37 @@ async def _empty_required_fields(browser_session) -> list[str]:
     return [str(label)[:150] for label in labels if str(label).strip()][:25] if isinstance(labels, list) else []
 
 
+# A button that sends the application, shown on the page (disabled counts: some forms enable it only once
+# every required field is filled). Not a bare "Apply": a job ad has one of those before the form.
+_SUBMIT_SHOWN_JS = r"""() => {
+  const docs = [document];
+  for (const frame of document.querySelectorAll('iframe')) {
+    try { if (frame.contentDocument) docs.push(frame.contentDocument); } catch (e) {}
+  }
+  const sends = /\bsubmit\b|\bsend\b.*\bapplication\b/i;
+  for (const doc of docs) {
+    for (const el of doc.querySelectorAll('button, input[type=submit], [role=button]')) {
+      const words = (el.value || el.textContent || el.getAttribute('aria-label') || '').trim();
+      const style = doc.defaultView.getComputedStyle(el);
+      const box = el.getBoundingClientRect();
+      if (sends.test(words) && style.display !== 'none' && style.visibility !== 'hidden'
+          && (box.width > 0 || box.height > 0)) return JSON.stringify(true);
+    }
+  }
+  return JSON.stringify(false);
+}"""
+
+
+async def _submit_button_shown(browser_session) -> bool:
+    """Whether the focused page shows the button that sends the application; False if it can't be read."""
+    try:
+        page, _ = await _focused_page(browser_session)
+        return json.loads(await page.evaluate(_SUBMIT_SHOWN_JS)) is True
+    except Exception as exc:
+        logger.debug("submit-button check failed: %s", exc)
+        return False
+
+
 def _persona_words(persona) -> set[str]:
     """Every word and number in the persona's values, with each value's digits run together too (a phone
     number typed without spaces)."""
@@ -1454,6 +1486,11 @@ async def apply_with_browser(
         empty = await _empty_required_fields(browser_session)
         questions = list(asked.values())
         left_blank = [q["question"] for q in questions if q["source"] == "needs_you"]
+        # The agent can take a field it couldn't fill for a step it can't get past (DV Trading: a School list
+        # without the user's university). If it stopped on the page that sends the application, it got through
+        # the form, and what's missing is listed for the user: that's a filled form with gaps, not a failed fill.
+        if not ready and not agent_error and (empty or left_blank) and await _submit_button_shown(browser_session):
+            ready = True
         # Masked like all agent text: the password can be mirrored into the DOM, or typed where it doesn't belong.
         self_answered = [_redact(item, job_password)
                          for item in await _answered_outside_tools(browser_session, tool_filled, cv_profile)]
