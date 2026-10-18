@@ -87,6 +87,30 @@ def test_an_option_far_down_a_long_list_is_found_by_typing_it(ba, site):
     _on_form(ba, site, check)
 
 
+def test_the_agents_snapshot_shows_a_typed_phone_number(ba, site):
+    # The value attribute stays empty when text is typed; the snapshot must show it all the same, or the agent
+    # thinks the box is blank and types the number again (ten steps on a live Greenhouse form).
+    from browser_use import BrowserSession
+
+    async def run():
+        session = BrowserSession(browser_profile=ba._browser_profile())
+        await session.start()
+        try:
+            await session.navigate_to(f"{site}/greenhouse.html")
+            await asyncio.sleep(1.0)
+            await session.get_browser_state_summary(include_screenshot=False)
+            node = await session.get_element_by_index(await session.get_index_by_id("phone"))
+            assert await form_widgets.fill(session, node, "07700 900123") == (True, "07700 900123")
+            state = await session.get_browser_state_summary(include_screenshot=False)
+            line = next(l for l in state.dom_state.llm_representation().splitlines() if "id=phone" in l)
+            assert "value=07700 900123" in line
+        finally:
+            await session.kill()
+
+    asyncio.run(run())
+    assert_no_chromium_left()
+
+
 def test_options_are_read_from_the_dropdown_not_the_page(ba, site):
     async def check(fill, read, held):
         assert await read("visa") == ["Yes", "No"]                      # not the phone widget's 244 options

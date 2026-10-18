@@ -81,6 +81,38 @@ except ImportError:
     BROWSER_USE_AVAILABLE = False
 
 
+# Typed values the agent couldn't see. browser-use's page snapshot shows an input's value from its accessibility
+# node's properties, else its value attribute — never from the node's own `value`, which is where Chrome puts
+# what's typed. A box whose page doesn't mirror the attribute (Greenhouse's intl-tel-input phone box) showed blank
+# after fill_fields filled it, and the agent typed the number again for ten steps. Chrome reports a password
+# box's value as dots, so no password reaches the snapshot.
+_TYPED_ROLES = {"textbox", "searchbox", "spinbutton"}
+
+
+def _show_typed_values() -> None:
+    from browser_use.dom.service import DomService
+    from browser_use.dom.views import EnhancedAXProperty
+
+    original = DomService._build_enhanced_ax_node
+    if getattr(original, "_shows_typed_values", False):
+        return
+
+    def build(self, ax_node):
+        node = original(self, ax_node)
+        value = (ax_node.get("value") or {}).get("value")
+        if node.role in _TYPED_ROLES and isinstance(value, str) and value.strip(" •*") \
+                and not any(p.name in ("value", "valuetext") for p in node.properties or []):
+            node.properties = [*(node.properties or []), EnhancedAXProperty(name="value", value=value)]
+        return node
+
+    build._shows_typed_values = True
+    DomService._build_enhanced_ax_node = build
+
+
+if BROWSER_USE_AVAILABLE:
+    _show_typed_values()
+
+
 # ── Keeping the job-site password out of the logs ───────────────────────────
 # browser-use logs action params, results and errors AFTER putting the real value in (e.g. its
 # "Final Result:" line). Each run registers its password for as long as it runs; a filter masks every
