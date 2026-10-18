@@ -299,11 +299,14 @@ def test_cover_letter_is_pasted_whole_and_files_go_up_under_the_candidates_name(
     assert not os.path.exists(cv_upload) and not os.path.exists(letter_upload)
     assert cv.exists() and letter_pdf.exists()            # the stored originals are untouched
 
-    # The review lists what the page still needs, whatever the agent's own summary said.
+    # The review lists what the page still needs, whatever the agent's own summary said: the questions the agent
+    # never asked about are asked after it (with no answerer, they're the candidate's), then the plain fields.
     review = next(e for e in events if e.get("interactive"))
-    assert "4 required fields still empty" in review["action"]
-    assert review["notes"].startswith("Required fields still empty on the form:\n"
-                                      + "\n".join(f"- {label}" for label in EMPTY_REQUIRED))
+    assert "2 questions only you can answer" in review["action"]
+    assert review["notes"].startswith("Questions only you can answer (left blank):\n"
+                                      + "\n".join(f"- {label}" for label in EMPTY_REQUIRED[2:])
+                                      + "\n\nRequired fields still empty on the form:\n"
+                                      + "\n".join(f"- {label}" for label in EMPTY_REQUIRED[:2]))
     assert_no_chromium_left()
 
 
@@ -574,6 +577,38 @@ class VisaOnlyLLM(GreenhouseLLM):
         return [{"done": {"text": "Done.", "success": True}}]
 
 
+class AsksNothingLLM(GreenhouseLLM):
+    def next_action(self, text: str) -> list[dict]:
+        return [{"done": {"text": "Done.", "success": True}}]
+
+
+def test_required_questions_the_agent_never_asked_about_are_asked_after_it(ba, site, monkeypatch):
+    """On some runs the agent left Catapult's demographic-data consent without giving it to answer_questions: no saved
+    answer could fill it and the review didn't list it. Once the agent stops, each required question still empty
+    that it never asked about goes through the answerer; a plain field like School stays the agent's."""
+    monkeypatch.setattr(ba, "_make_browser_llm", lambda: AsksNothingLLM())
+    asked = []
+
+    async def answerer(questions):
+        asked.extend(q["question"] for q in questions)
+        return [{"question": q["question"], "options": q["options"], "kind": "fact",
+                 "source": "profile" if q["options"] == ["Yes", "No"] else "needs_you",
+                 "answer": "No" if q["options"] == ["Yes", "No"] else "", "because": "", "bank_id": "", "flags": []}
+                for q in questions]
+
+    async def flow():
+        return [event async for event in ba.apply_with_browser(
+            f"{site}/greenhouse.html", {"core_info": {"first_name": "Ada"}}, "", asyncio.Queue(), answerer=answerer,
+            decide=lambda filled: asyncio.sleep(0, result=False))]
+    final = asyncio.run(flow())[-1]
+    visa = "Do you now or in the future require visa sponsorship to work in the UK?"
+    assert asked == ["What university are you currently studying at or have most recently graduated from?", visa,
+                     "Why are you applying to this role?"]
+    assert [(q["question"], q["answer"]) for q in final["questions"]][1] == (visa, "No")
+    assert visa not in final["empty"] and "School" in final["empty"]          # filled; the plain field left alone
+    assert_no_chromium_left()
+
+
 class ScreenfulOfOptionsLLM(GreenhouseLLM):
     def next_action(self, text: str) -> list[dict]:
         self.step += 1
@@ -601,8 +636,9 @@ def test_a_questions_options_are_read_off_the_page_even_when_the_agent_gives_som
             f"{site}/greenhouse.html", {"core_info": {"first_name": "Ada"}}, "", asyncio.Queue(), answerer=answerer,
             decide=lambda filled: asyncio.sleep(0, result=False))]
     asyncio.run(flow())
-    assert asked == {"Undergrad Discipline(s)": ["Mathematics", "Computer Science", "Physics"],
-                     "School": ["Bath Spa University"]}
+    # (The page's other required questions are asked after the agent stops: not what this is about.)
+    assert {q: asked[q] for q in ("Undergrad Discipline(s)", "School")} == {
+        "Undergrad Discipline(s)": ["Mathematics", "Computer Science", "Physics"], "School": ["Bath Spa University"]}
     assert_no_chromium_left()
 
 
@@ -629,7 +665,7 @@ def test_an_answer_no_option_takes_is_asked_again_with_the_options(ba, site, mon
             f"{site}/greenhouse.html", {"core_info": {"first_name": "Ada"}}, "", asyncio.Queue(), answerer=answerer,
             decide=lambda filled: asyncio.sleep(0, result=False))]
     final = asyncio.run(flow())[-1]
-    assert asked == [[[]], [["Yes", "No"]]]
+    assert asked[:2] == [[[]], [["Yes", "No"]]]           # then the questions the agent never asked about
     assert '"Do you now or in the future require visa sponsorship to work in the UK?": filled in with "No"' in \
         "\n".join(llm.seen)
     assert final["questions"][0]["answer"] == "No"

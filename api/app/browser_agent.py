@@ -1280,6 +1280,43 @@ async def _submit_button_shown(browser_session) -> bool:
         return False
 
 
+async def _ask_left_over(browser_session, answerer: Answerer, asked: dict[str, dict], filled: set[str],
+                         empty: list[str]) -> bool:
+    """
+    Put the required questions still empty that the agent never gave answer_questions (Catapult's demographic-data
+    consent, on some runs) through the answerer, and fill in what it answers, so a saved answer isn't missed and the
+    review lists the question. A plain field ("School", "Country") is the agent's to fill from the details it has:
+    only a label that asks something or states something is asked. True when anything was asked.
+    """
+    asked_any = False
+    for label in empty:
+        if not (label.rstrip().endswith("?") or len(label.split()) >= 6):
+            continue
+        if any(form_widgets.same_question(label, a["question"]) for a in asked.values()):
+            continue
+        try:
+            found = (await _field_at(browser_session, None, label))[0]
+            if not found:
+                continue
+            field, info = found
+            question = {"question": label, "options": [], "max_length": info.get("maxLength")}
+            if info.get("details"):
+                question["details"] = info["details"]
+            if info["kind"] != form_widgets.TEXT:
+                question["options"] = await form_widgets.read_options(field)
+            result = (await answerer([question]))[0]
+        except Exception as exc:
+            logger.debug("asking the left-over question %r failed: %s", label[:60], exc)
+            continue
+        asked[_question_key(result["question"])] = result
+        asked_any = True
+        if result["source"] != "needs_you" and result["answer"]:
+            ok, _ = await form_widgets.fill_field(field, result["answer"])
+            if ok:
+                filled.update({result["question"], info.get("group") or info.get("label") or ""})
+    return asked_any
+
+
 def _persona_words(persona) -> set[str]:
     """Every word and number in the persona's values, with each value's digits run together too (a phone
     number typed without spaces)."""
@@ -1491,6 +1528,8 @@ async def apply_with_browser(
 
         summary = notes
         empty = await _empty_required_fields(browser_session)
+        if await _ask_left_over(browser_session, answerer or _no_answers, asked, tool_filled, empty):
+            empty = await _empty_required_fields(browser_session)
         questions = list(asked.values())
         left_blank = [q["question"] for q in questions if q["source"] == "needs_you"]
         # The agent can take a field it couldn't fill for a step it can't get past (DV Trading: a School list
