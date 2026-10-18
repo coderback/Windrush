@@ -45,6 +45,13 @@ def test_agent_is_told_to_open_its_summary_with_what_needs_input():
     assert "don't stop it being done: that is still success=true" in task
 
 
+def test_an_education_field_asked_as_a_question_goes_to_answer_questions():
+    # fill_fields refuses a label ending in "?", so the task mustn't send "What university…?" to it: on a live form
+    # the agent was refused, didn't try answer_questions, and left the university blank.
+    task = ba._build_task("https://x.example/job", {}, "", "", "", "")
+    assert "A field asked as a question is one of the questions below even when it's about education" in task
+
+
 def test_given_answers_are_stated_including_no():
     persona = {
         "core_info": {"right_to_work_uk": False, "require_sponsorship": True, "has_government_ties": False},
