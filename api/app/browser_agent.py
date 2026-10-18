@@ -975,20 +975,25 @@ def _add_fill_fields(tools, browser_session, asked: dict[str, dict], filled: set
         param_model=FillFieldsParams)
     async def fill_fields(params: FillFieldsParams) -> ActionResult:
         blank = [q["question"] for q in asked.values() if q.get("source") == "needs_you"]
+        answered = [q["question"] for q in asked.values() if q.get("source") != "needs_you" and q.get("answer")]
         lines = []
         for item in params.fields[:25]:
             if any(form_widgets.same_question(item.label, q) for q in blank):
                 lines.append(f"- “{item.label}”: NOT filled. Only the candidate can answer it: leave it blank.")
                 continue
-            if item.label.replace("*", "").strip().endswith("?"):
-                lines.append(f"- “{item.label}”: NOT filled. That's a question: get its answer with answer_questions.")
-                continue
             found, why = await _field_at(browser_session, item.index, item.label)
             if not found:
                 lines.append(f"- “{item.label}”: NOT filled: {why}. Check the index.")
                 continue
-            ok, detail = await form_widgets.fill_field(found[0], item.value)
             shown = found[1].get("group") or found[1].get("label") or ""
+            # A question, consent or declaration is answer_questions' (Catapult's demographic-data consent was ticked
+            # here, never asked). The field's own label is checked too: the agent can give it a short one.
+            if any(_asks_something(label) and not any(form_widgets.same_question(label, a) for a in answered)
+                   for label in (item.label, shown)):
+                lines.append(f"- “{item.label}”: NOT filled. It asks or states something (a question, consent or "
+                             f"declaration): get its answer with answer_questions, never fill it yourself.")
+                continue
+            ok, detail = await form_widgets.fill_field(found[0], item.value)
             if ok:
                 filled.update({item.label, shown})
             line = (f"- “{item.label}”: filled with “{detail}”. Done; leave it." if ok
@@ -1280,6 +1285,13 @@ async def _submit_button_shown(browser_session) -> bool:
         return False
 
 
+def _asks_something(label: str) -> bool:
+    """Whether a field's label asks or states something (a question, a consent, a declaration) rather than naming
+    a plain detail like "School" or "Country": it ends in "?", or runs to six words or more."""
+    label = label.replace("*", "").strip()
+    return label.endswith("?") or len(label.split()) >= 6
+
+
 async def _ask_left_over(browser_session, answerer: Answerer, asked: dict[str, dict], filled: set[str],
                          empty: list[str]) -> bool:
     """
@@ -1290,7 +1302,7 @@ async def _ask_left_over(browser_session, answerer: Answerer, asked: dict[str, d
     """
     asked_any = False
     for label in empty:
-        if not (label.rstrip().endswith("?") or len(label.split()) >= 6):
+        if not _asks_something(label):
             continue
         if any(form_widgets.same_question(label, a["question"]) for a in asked.values()):
             continue

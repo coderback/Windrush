@@ -577,6 +577,40 @@ class VisaOnlyLLM(GreenhouseLLM):
         return [{"done": {"text": "Done.", "success": True}}]
 
 
+class TicksConsentLLM(GreenhouseLLM):
+    def next_action(self, text: str) -> list[dict]:
+        self.step += 1
+        at = lambda element_id: self._index(text, element_id)  # noqa: E731
+        if self.step == 1:
+            return [{"fill_fields": {"fields": [
+                {"index": at("consent"), "label": "I consent to the processing of my data", "value": "checked"},
+                {"index": at("consent"), "label": "Consent", "value": "checked"},       # a short label for it
+                {"index": at("first_name"), "label": "First Name", "value": "Ada"},
+            ]}}]
+        if self.step == 2:
+            return [{"evaluate": {"code": "'CONSENT:' + document.getElementById('consent').checked"}}]
+        return [{"done": {"text": "Done.", "success": True}}]
+
+
+def test_fill_fields_never_ticks_a_consent_or_answers_a_question(ba, site, monkeypatch):
+    """Catapult's demographic-data consent was ticked with fill_fields, never asked about: nothing held the form for
+    it. A field whose label asks or states something is answer_questions', under its own label or a short one."""
+    llm = TicksConsentLLM()
+    monkeypatch.setattr(ba, "_make_browser_llm", lambda: llm)
+
+    async def flow():
+        return [event async for event in ba.apply_with_browser(
+            f"{site}/greenhouse.html", {"core_info": {"first_name": "Ada"}}, "", asyncio.Queue(),
+            answerer=ba._no_answers, decide=lambda filled: asyncio.sleep(0, result=False))]
+    asyncio.run(flow())
+    seen = "\n".join(llm.seen)
+    for label in ("I consent to the processing of my data", "Consent"):
+        assert f"- “{label}”: NOT filled. It asks or states something (a question, consent or declaration)" in seen
+    assert "CONSENT:false" in seen
+    assert "- “First Name”: filled with “Ada”. Done; leave it." in seen
+    assert_no_chromium_left()
+
+
 class AsksNothingLLM(GreenhouseLLM):
     def next_action(self, text: str) -> list[dict]:
         return [{"done": {"text": "Done.", "success": True}}]
