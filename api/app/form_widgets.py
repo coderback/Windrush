@@ -54,7 +54,26 @@ _DESCRIBE_JS = r"""function () {
            || /\bselect__input\b/.test(el.className) || el.closest('[class*=select__control]')) kind = 'combobox';
   else if (el.isContentEditable) kind = 'editable';
   else if (tag === 'textarea' || tag === 'input') kind = 'text';
-  return JSON.stringify({kind, label: labelOf(el), group, options, maxLength: el.maxLength > 0 ? el.maxLength : null,
+  // What the form says with the field besides its label and options, e.g. the statement under Catapult's bare
+  // "GDPR Statement": the text in the widest box around it that holds no other question's control.
+  const controls = 'input:not([type=hidden]), select, textarea, [contenteditable=true]';
+  const own = new Set(el.name && (kind === 'checkbox' || kind === 'radio')
+    ? [...doc.querySelectorAll('input[type=' + type + ']')].filter(m => m.name === el.name) : [el]);
+  let block = el;
+  while (block.parentElement && block.parentElement !== doc.body
+         && [...block.parentElement.querySelectorAll(controls)].every(c => own.has(c))) block = block.parentElement;
+  let details = '';
+  if (block !== el) {
+    const copy = block.cloneNode(true);
+    copy.querySelectorAll('label, legend, select, input, textarea, [class*=select__control], [class*=select__menu], ' +
+                          'script, style, [aria-hidden=true]').forEach(n => n.remove());
+    const parts = [], walk = doc.createTreeWalker(copy, NodeFilter.SHOW_TEXT);
+    while (walk.nextNode()) parts.push(walk.currentNode.nodeValue);
+    details = parts.join(' ').replace(/\s+/g, ' ').trim();
+    if (!/[a-z]{3}/i.test(details)) details = '';
+  }
+  return JSON.stringify({kind, label: labelOf(el), group, options, details: details.slice(0, 800),
+    maxLength: el.maxLength > 0 ? el.maxLength : null,
     connected: el.isConnected,
     multi: !!(el.multiple ||
     (el.closest('[class*=select__container]') || el).querySelector?.('[class*=value-container--is-multi]'))});

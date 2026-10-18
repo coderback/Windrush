@@ -294,6 +294,19 @@ def test_an_answer_saved_for_one_employer_is_not_reused_for_another(model):
     assert reused[0]["source"] == "saved"
 
 
+def test_a_question_is_read_with_what_the_form_says_with_it(model):
+    # Catapult's bare "GDPR Statement" was answered from the saved consent on some runs and left on others: the
+    # statement under it, which says what it asks, never reached the model.
+    statement = "Your personal data will be processed for the purposes of managing Catapult's recruitment. " * 20
+    fake = model(read={"GDPR Statement": fact("saved_1", answer="Yes")})
+    bank = [answers_entry("I consent to my personal data being processed for recruitment purposes", "Yes")]
+    got = ask([{"question": "GDPR Statement", "options": ["Yes", "No"], "details": statement}], bank=bank)
+    assert (got[0]["source"], got[0]["answer"]) == ("saved", "Yes")
+    shown = statement.strip()[:answers._MAX_DETAILS]
+    assert f"1. GDPR Statement\n   the form says with it: {shown}\n   options: Yes | No" in fake.prompts()
+    assert statement.strip()[:answers._MAX_DETAILS + 20] not in fake.prompts()       # capped
+
+
 def test_when_the_questions_cant_be_read_nothing_is_stated(model):
     model(read=None)
     got = ask([{"question": "Do you have the right to work in the UK?", "options": ["Yes", "No"]}])

@@ -32,6 +32,7 @@ SOURCES = ("saved", "profile", "drafted", "needs_you")
 
 _MAX_QUESTIONS = 40     # one form page rarely has more; a call with more is cut, not refused
 _MAX_OPTIONS = 1000     # a nationality dropdown lists every country; a university one, 350 UK institutions
+_MAX_DETAILS = 800      # the start of a statement under a question says what it is about
 _DRAFTS_AT_ONCE = 4
 
 
@@ -75,8 +76,13 @@ def _clean_questions(questions) -> list[dict]:
         options = [" ".join(str(o).split())[:200] for o in raw.get("options") or []
                    if not _PLACEHOLDER.search(str(o))][:_MAX_OPTIONS]
         limit = raw.get("max_length")
-        out.append({"question": text, "options": options,
-                    "max_length": int(limit) if isinstance(limit, (int, float)) and limit > 0 else None})
+        question = {"question": text, "options": options,
+                    "max_length": int(limit) if isinstance(limit, (int, float)) and limit > 0 else None}
+        # The text the form shows with it: a bare "GDPR Statement" says what it asks only there.
+        details = " ".join(str(raw.get("details") or "").split())[:_MAX_DETAILS]
+        if details:
+            question["details"] = details
+        out.append(question)
     return out
 
 
@@ -548,7 +554,8 @@ _READ_SYSTEM = (
     "number, a choice between options about them, equality monitoring, consent or a declaration.\n"
     "For a \"fact\" give fact_ids, the ids of the facts that state the answer, and answer, the answer they give "
     "in the form's terms: when options are listed, exactly one option copied word for word. If no fact states "
-    "it, fact_ids is [] and answer is \"\". Rules:\n"
+    "it, fact_ids is [] and answer is \"\". A question may come with what the form says with it (a statement or "
+    "a hint): read the question as that text explains it. Rules:\n"
     "- A fact about one country never answers a question about another. The job's location is given for "
     "questions about 'this country' or 'the country where this role is based'.\n"
     "- A fact marked (private) has its value hidden: cite its id when it is the fact asked for, and leave "
@@ -580,6 +587,8 @@ def _question_lines(questions: list[dict]) -> str:
     lines = []
     for n, q in enumerate(questions, 1):
         line = f"{n}. {q['question']}"
+        if q.get("details"):
+            line += "\n   the form says with it: " + q["details"]
         if q["options"]:
             line += "\n   options: " + " | ".join(q["options"])
         lines.append(line)
