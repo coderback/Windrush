@@ -354,3 +354,28 @@ def test_failed_takeover_typing_is_not_logged(takeover, monkeypatch, caplog):
     assert any("19 characters" in r.getMessage() for r in caplog.records)
     assert not any(SECRET.lower() in r.getMessage().lower() for r in caplog.records)
     assert not any(SECRET.lower() in json.dumps(e).lower() for e in events)
+
+
+# ── Typed values in the agent's page snapshot ────────────────────────────────
+
+def _ax(role, value=None, properties=()):
+    node = {"nodeId": "1", "ignored": False, "role": {"value": role},
+            "properties": [{"name": n, "value": {"value": v}} for n, v in properties]}
+    if value is not None:
+        node["value"] = {"type": "string", "value": value}
+    return node
+
+
+def test_the_snapshot_shows_what_is_typed_in_a_box_but_never_a_password():
+    from browser_use.dom.service import DomService
+    build = DomService._build_enhanced_ax_node
+
+    def values(ax_node):
+        return [p.value for p in build(None, ax_node).properties or [] if p.name == "value"]
+
+    # A phone box Greenhouse doesn't mirror into its value attribute: the agent saw it blank and retyped it.
+    assert values(_ax("textbox", "07700 900123", [("required", True)])) == ["07700 900123"]
+    assert values(_ax("textbox", "••••••••••")) == []                  # Chrome's password dots: nothing shown
+    assert values(_ax("textbox", "")) == []
+    assert values(_ax("button", "Submit")) == []
+    assert values(_ax("textbox", "x", [("value", "x")])) == ["x"]        # not twice
