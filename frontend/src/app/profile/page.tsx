@@ -9,10 +9,12 @@ import {
   AreaField, ChipInput, dateRange, EntryCard, monthLabel, SelectField, TextField, YesNoField,
 } from "@/components/persona/fields";
 import AnswerBank from "@/components/persona/AnswerBank";
-import { load, mutate, requestJson } from "@/lib/store";
+import Suggestions from "@/components/persona/Suggestions";
+import { load, mutate, requestJson, useResource } from "@/lib/store";
+import { SUGGESTIONS_URL } from "@/lib/suggestions";
 import { MIN_STORIES, personaChecks, personaStrength, type SectionKey } from "@/lib/persona";
 import type {
-  BehavioralStory, Certification, Education, Persona, Project, SkillCategory, WorkExperience,
+  BehavioralStory, Certification, Education, Persona, ProfileSuggestions, Project, SkillCategory, WorkExperience,
 } from "@/lib/types";
 
 type SaveState = "saved" | "pending" | "saving" | "error";
@@ -117,6 +119,7 @@ export default function ProfilePage() {
   const [removed, setRemoved] = useState<{ label: string; restore: () => void } | null>(null);
   const [showPassword, setShowPassword] = useState(false);
 
+  const suggestions = useResource<ProfileSuggestions>(SUGGESTIONS_URL);
   const latest = useRef<Persona | null>(null);
   const dirty = useRef(false);
   const timer = useRef<ReturnType<typeof setTimeout>>();
@@ -174,6 +177,18 @@ export default function ProfilePage() {
       clearTimeout(timer.current);
       flush();
     };
+  }, []);
+
+  /** Save any edit still waiting, so a change made on the server (an accepted suggestion) isn't overwritten. */
+  const flush = useCallback(async () => {
+    clearTimeout(timer.current);
+    await save();
+  }, [save]);
+
+  /** Take the persona as the server saved it. */
+  const replace = useCallback((p: Persona) => {
+    latest.current = p;
+    setPersona(p);
   }, []);
 
   const update = (fn: (p: Persona) => Persona) => {
@@ -528,6 +543,8 @@ export default function ProfilePage() {
         );
       case "answers":
         return <AnswerBank />;
+      case "suggestions":
+        return <Suggestions beforeChange={flush} onPersona={replace} />;
       case "prefs":
         return (
           <SectionCard title="Job preferences" intro="This shapes your feed. Discovery searches each title in each location.">
@@ -615,6 +632,17 @@ export default function ProfilePage() {
 
         <div className="flex flex-wrap gap-4 items-start">
           <nav aria-label="Persona sections" className="flex-[1_1_220px] max-w-full md:max-w-[260px] bg-surface border border-border rounded-card p-2 flex flex-col gap-[2px]">
+            <button type="button" onClick={() => go("suggestions")} aria-current={section === "suggestions" ? "true" : undefined}
+              className={cx("flex items-center gap-[10px] h-[38px] px-[10px] rounded-[9px] text-[13.5px] text-left mb-1",
+                section === "suggestions" ? "bg-muted text-ink font-semibold" : "text-ink-2 font-medium hover:bg-subtle hover:text-ink")}>
+              <Icon name="sparkle" size={15} className="text-teal" />
+              <span className="flex-1 truncate">Suggestions</span>
+              {!!suggestions.data?.suggestions.length && (
+                <span className="min-w-5 h-5 px-[6px] rounded-full font-mono text-[11px] font-semibold flex items-center justify-center bg-teal-logo text-teal">
+                  {suggestions.data.suggestions.length}<span className="sr-only"> waiting</span>
+                </span>
+              )}
+            </button>
             {checks.map((s) => {
               const on = s.key === section;
               return (
