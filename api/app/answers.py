@@ -159,6 +159,24 @@ def _has_ended(end_date) -> bool:
     return bool(_END_YEAR.search(end)) and not _PRESENT_WORD.search(end)
 
 
+_MONTHS = {m: n for n, m in enumerate(("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov",
+                                       "dec"), 1)}
+
+
+def _end_month(end_date) -> tuple[int, int] | None:
+    """(year, month) an end date names: "11/2025", "2025-11", "Nov 2025"; a bare year is its December. None
+    without a year, or with a present word in it."""
+    end = str(end_date or "")
+    year = _END_YEAR.search(end)
+    if not year or _PRESENT_WORD.search(end):
+        return None
+    numeric = re.search(r"(?<!\d)(0?[1-9]|1[0-2])\s*[/.-]\s*(?:19|20)\d{2}|(?:19|20)\d{2}\s*[/.-]\s*(0?[1-9]|1[0-2])(?!\d)",
+                        end)
+    named = re.search(r"\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\b", end, re.I)
+    month = int(numeric.group(1) or numeric.group(2)) if numeric else _MONTHS[named.group(1).lower()] if named else 12
+    return int(year.group()), month
+
+
 def _birth_date(raw: str) -> date | None:
     for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y", "%d.%m.%Y", "%d %B %Y", "%d %b %Y", "%B %d, %Y"):
         try:
@@ -244,7 +262,19 @@ def profile_facts(persona: dict, today: date | None = None) -> list[Fact]:
     for i, job in enumerate(history):
         add(f"role_{i + 1}", "Work history", f"{job.get('title', '')} at {job.get('employer', '')}"
             + _dates(job, "start_date", "end_date", "is_current"), summary=True)
-    for i, edu in enumerate(e for e in persona.get("education") or [] if isinstance(e, dict)):
+    # Left to the model, "already graduated" was read off a degree's end date on some runs and not on others. "Yes"
+    # needs every degree to have finished: not enrolled, with an end date that has passed. "No" needs one still
+    # going. Anything less certain (an end date still to come but not marked as enrolled) is left out.
+    education = [e for e in persona.get("education") or [] if isinstance(e, dict)]
+    ends = [_end_month(e.get("end_date")) for e in education]
+    now = (today or date.today()).timetuple()[:2]
+    if any(e.get("is_currently_enrolled") or is_present_end_date(e.get("end_date")) for e in education):
+        facts.append(Fact("graduated", "Has already graduated (finished their studies)", "No", yes_no=True))
+    elif education and all(end and end < now for end in ends):
+        last = max(ends)
+        facts.append(Fact("graduated", f"Has already graduated (finished their studies, last in {last[1]:02d}/{last[0]})",
+                          "Yes", yes_no=True))
+    for i, edu in enumerate(education):
         grade = f", {edu['grade']}" if edu.get("grade") else ""
         add(f"education_{i + 1}", "Education", f"{edu.get('degree', '')} at {edu.get('institution', '')}"
             + _dates(edu, "start_date", "end_date", "is_currently_enrolled") + grade, summary=True)
