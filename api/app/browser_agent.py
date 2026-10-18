@@ -1083,9 +1083,14 @@ def _apply_tools(cover_letter: str, browser_session, answerer: Answerer | None =
                 fields[_question_key(q.question)] = found
                 if not question.get("max_length") and found[1].get("maxLength"):
                     question["max_length"] = found[1]["maxLength"]
-                if not question["options"] and found[1]["kind"] != form_widgets.TEXT:
+                # Read even when the agent gave options: it lists only what's on screen (DV Trading's 83 disciplines
+                # came as the last 17, without Computer Science). A type-ahead lists fewer until typed into: the
+                # agent's then stand.
+                if found[1]["kind"] != form_widgets.TEXT:
                     try:
-                        question["options"] = await form_widgets.read_options(found[0])
+                        on_page = await form_widgets.read_options(found[0])
+                        if len(on_page) >= len(question["options"]):
+                            question["options"] = on_page
                     except Exception as exc:
                         logger.debug("reading options failed: %s", exc)
             questions.append(question)

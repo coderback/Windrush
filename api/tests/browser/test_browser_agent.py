@@ -574,6 +574,38 @@ class VisaOnlyLLM(GreenhouseLLM):
         return [{"done": {"text": "Done.", "success": True}}]
 
 
+class ScreenfulOfOptionsLLM(GreenhouseLLM):
+    def next_action(self, text: str) -> list[dict]:
+        self.step += 1
+        if self.step == 1:
+            return [{"answer_questions": {"questions": [
+                {"question": "Undergrad Discipline(s)", "index": self._index(text, "d3"), "options": ["Physics"]},
+                {"question": "School", "index": self._index(text, "school"), "options": ["Bath Spa University"]}]}}]
+        return [{"done": {"text": "Done.", "success": True}}]
+
+
+def test_a_questions_options_are_read_off_the_page_even_when_the_agent_gives_some(ba, site, monkeypatch):
+    """The agent lists only the options on screen: DV Trading's 83 disciplines came as the last 17, without the
+    candidate's. The page's are read instead, unless it shows fewer (a type-ahead lists nothing until typed)."""
+    llm = ScreenfulOfOptionsLLM()
+    monkeypatch.setattr(ba, "_make_browser_llm", lambda: llm)
+    asked = {}
+
+    async def answerer(questions):
+        asked.update({q["question"]: q["options"] for q in questions})
+        return [{"question": q["question"], "options": q["options"], "kind": "fact", "source": "needs_you",
+                 "answer": "", "because": "", "bank_id": "", "flags": []} for q in questions]
+
+    async def flow():
+        return [event async for event in ba.apply_with_browser(
+            f"{site}/greenhouse.html", {"core_info": {"first_name": "Ada"}}, "", asyncio.Queue(), answerer=answerer,
+            decide=lambda filled: asyncio.sleep(0, result=False))]
+    asyncio.run(flow())
+    assert asked == {"Undergrad Discipline(s)": ["Mathematics", "Computer Science", "Physics"],
+                     "School": ["Bath Spa University"]}
+    assert_no_chromium_left()
+
+
 def test_an_answer_no_option_takes_is_asked_again_with_the_options(ba, site, monkeypatch):
     """When a dropdown's options didn't show the first time, the free-text answer it gets ('Nope') isn't left for
     the agent to type: the options are read again and the question asked again with them."""
