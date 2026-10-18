@@ -221,6 +221,10 @@ async def read_options(field: Field) -> list[str]:
         if options:
             break
     await field.key("Escape")
+    if info.get("multi"):
+        # A multi-select stops listing what's already picked: those are still its options.
+        held = [h for h in await field.held() if h]
+        options = held + [o for o in options if o not in held]
     return options
 
 
@@ -239,6 +243,10 @@ _FAR_DOWN = 10
 
 
 async def _choose_in_combobox(field: Field, value: str) -> tuple[bool, str]:
+    # Already picked (a multi-select no longer lists it): done.
+    already = best_option(value, [h for h in await field.held() if h])
+    if already and (await field.describe())["multi"]:
+        return True, already
     await field.call(_FOCUS_JS)
     await field.clear_typed()
     await field.key("ArrowDown")
