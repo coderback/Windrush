@@ -5,7 +5,6 @@ import os
 import pathlib
 import re
 import uuid
-from collections import Counter
 from contextlib import aclosing, asynccontextmanager
 from typing import Optional, Annotated
 
@@ -16,12 +15,12 @@ from fastapi.security import OAuth2PasswordRequestForm
 
 from .cv_parser import extract_text, extract_links, profile_links
 from .agent import run_apply, execute_tool
-from .company_names import normalise_company_name as _normalise_company_name
 from .guardrails import check_cv_for_injection, GuardrailViolation
 from . import tracker
 from . import answers
 from . import autopilot
 from . import gmail
+from . import enrich
 from . import auth
 from . import pdf_generator
 from . import doc_render
@@ -31,8 +30,8 @@ from . import net_guard
 from . import seniority
 from . import sponsor_register
 from . import job_attributes
-from .models import (Persona, WorkExperience, Education, Project, Certification, SkillCategory,
-                     is_present_end_date)
+from .models import Persona
+from .profile_merge import merge_cv as _merge_cv, _split_cv_dates  # noqa: F401  (tests use _split_cv_dates)
 
 logger = logging.getLogger("windrush.main")
 
@@ -226,155 +225,6 @@ async def export_persona(
 @app.get("/health")
 async def health():
     return {"status": "ok"}
-
-
-# Between the two dates of a CV role. Spaced separators first, then en/em dashes, then a bare hyphen,
-# so "2020-01 - 2021-03" and "2020-01–2021-06" split between the dates rather than inside the first one.
-_DATE_RANGE_SEPS = (re.compile(r"\s+(?:-|–|—|to|till|until)\s+", re.I), re.compile(r"\s*[–—]\s*"),
-                    re.compile(r"\s*-\s*"))
-# The pieces of an end date that is itself a range or a list of stints.
-_END_DATE_PIECES = re.compile(r"[-–—,]|\s+(?:to|till|until)\s+", re.I)
-
-
-def _split_cv_dates(dates) -> tuple[str, str, bool]:
-    """(start_date, end_date, is_current) from a parsed CV role's free-text dates. An end such as
-    "Present" or "Now" means the role is current, so it isn't kept as an end date."""
-    text = str(dates or "").strip()
-    for sep in _DATE_RANGE_SEPS:
-        parts = sep.split(text, maxsplit=1)
-        if len(parts) == 2:
-            start, end = parts[0].strip(), parts[1].strip()
-            if is_present_end_date(end):
-                return start, "", True
-            # "Mid-2019-Present" splits at its first hyphen and "2010 – 2012, 2013 – Present" lists
-            # stints: still current when the end's last piece is a present word. The end is kept, as
-            # it holds a date the user may want.
-            return start, end, is_present_end_date(_END_DATE_PIECES.split(end)[-1].strip())
-    return "", "", is_present_end_date(text)
-
-
-def _norm(text) -> str:
-    """Lower-case words only, for matching CV entries to persona ones."""
-    return " ".join(re.sub(r"[^a-z0-9]+", " ", str(text or "").lower()).split())
-
-
-def _str_list(value) -> list[str]:
-    """A model-returned list of strings, cleaned; a lone string becomes a one-item list."""
-    if isinstance(value, str):
-        value = [value]
-    if not isinstance(value, list):
-        return []
-    return [" ".join(str(v).split()) for v in value if isinstance(v, (str, int, float)) and str(v).strip()]
-
-
-def _text(value) -> str:
-    return " ".join(str(value).split()) if isinstance(value, (str, int, float)) else ""
-
-
-def _fill(obj, field: str, value) -> None:
-    """Set a field only when the persona has nothing in it."""
-    if value and not getattr(obj, field):
-        setattr(obj, field, value)
-
-
-def _matching_role(history: list[WorkExperience], role: WorkExperience, only_one_at_employer: bool):
-    """The persona's entry for a CV role: same employer (legal suffixes ignored) and title, else the
-    employer's only entry when the CV also has one role there, so a reworded title still matches."""
-    employer = _normalise_company_name(role.employer)
-    same = [h for h in history if _normalise_company_name(h.employer) == employer]
-    titled = next((h for h in same if _norm(h.title) == _norm(role.title)), None)
-    return titled or (same[0] if len(same) == 1 and only_one_at_employer else None)
-
-
-def _merge_cv(persona: Persona, cv: dict) -> None:
-    """
-    Merge a parsed CV into the persona without overwriting anything the user has entered or edited:
-    entries the persona lacks (a role, a project, a qualification) are added, and ones it has gain
-    only the details they're missing. Re-uploading a CV therefore completes an earlier import.
-    """
-    core = persona.core_info
-    name = _text(cv.get("name")).split()
-    _fill(core, "first_name", name[0] if name else "")
-    _fill(core, "last_name", " ".join(name[1:]))
-    for field, key in (("email", "email"), ("phone", "phone"), ("address_line_1", "address"),
-                       ("city", "location"), ("linkedin", "linkedin"), ("github", "github")):
-        _fill(core, field, _text(cv.get(key)))
-    website = _text(cv.get("website"))
-    if "." in website and " " not in website:
-        _fill(core, "website", website)
-    _fill(persona, "summary", _text(cv.get("summary")))
-
-    # A skill the persona has in any category is kept where it is: the CV's categories needn't match
-    # the persona's (an earlier import, or the user, may have grouped them differently).
-    have = {s.lower() for c in persona.skills for s in c.skills}
-    for cat in cv.get("skills") or []:
-        # Categorised ({category, skills}); an older flat list of names goes under "Uncategorized".
-        category = (_text(cat.get("category")) or "Uncategorized") if isinstance(cat, dict) else "Uncategorized"
-        new = []
-        for skill in _str_list(cat.get("skills") if isinstance(cat, dict) else cat):
-            if skill.lower() not in have:
-                have.add(skill.lower())
-                new.append(skill)
-        if not new:
-            continue
-        target = next((c for c in persona.skills if c.category.lower() == category.lower()), None)
-        if target is None:
-            persona.skills.append(SkillCategory(category=category, skills=new))
-        else:
-            target.skills.extend(new)
-
-    roles = [r for r in cv.get("experience") or [] if isinstance(r, dict) and (r.get("employer") or r.get("title"))]
-    per_employer = Counter(_normalise_company_name(_text(r.get("employer"))) for r in roles)
-    for r in roles:
-        start, end, current = _split_cv_dates(r.get("dates"))
-        role = WorkExperience(employer=_text(r.get("employer")), title=_text(r.get("title")),
-                              start_date=start, end_date=end, is_current=current, summary=_text(r.get("summary")),
-                              achievements=_str_list(r.get("achievements")), tech_stack=_str_list(r.get("tech_stack")))
-        match = _matching_role(persona.history, role, per_employer[_normalise_company_name(role.employer)] == 1)
-        if match is None:
-            persona.history.append(role)
-            continue
-        for field in ("summary", "achievements", "tech_stack"):
-            _fill(match, field, getattr(role, field))
-        if not (match.start_date or match.end_date):
-            match.start_date, match.end_date, match.is_current = start, end, current
-
-    for e in cv.get("education") or []:
-        if not isinstance(e, dict) or not _text(e.get("institution")):
-            continue
-        dates = _text(e.get("dates"))
-        start, end, current = _split_cv_dates(dates)
-        if not (start or end or current):
-            end = dates  # a lone year is when the course ended
-        edu = Education(institution=_text(e.get("institution")), degree=_text(e.get("degree")), start_date=start,
-                        end_date=end, grade=_text(e.get("grade")), is_currently_enrolled=current)
-        match = next((x for x in persona.education if _norm(x.institution) == _norm(edu.institution)), None)
-        if match is None:
-            persona.education.append(edu)
-            continue
-        for field in ("degree", "grade"):
-            _fill(match, field, getattr(edu, field))
-        if not (match.start_date or match.end_date):
-            match.start_date, match.end_date, match.is_currently_enrolled = start, end, current
-
-    for p in cv.get("projects") or []:
-        if not isinstance(p, dict) or not _text(p.get("name")):
-            continue
-        proj = Project(name=_text(p.get("name")), url=_text(p.get("url")) or None,
-                       problem_solved=_text(p.get("description")), outcomes=_text(p.get("outcomes")),
-                       technologies=_str_list(p.get("technologies")))
-        match = next((x for x in persona.projects if _norm(x.name) == _norm(proj.name)), None)
-        if match is None:
-            persona.projects.append(proj)
-            continue
-        for field in ("url", "problem_solved", "outcomes", "technologies"):
-            _fill(match, field, getattr(proj, field))
-
-    for c in cv.get("certifications") or []:
-        cert_name = _text(c.get("name")) if isinstance(c, dict) else ""
-        if cert_name and not any(_norm(x.name) == _norm(cert_name) for x in persona.certifications):
-            persona.certifications.append(Certification(
-                name=cert_name, issuing_organization=_text(c.get("issuer")), issue_date=_text(c.get("date"))))
 
 
 @app.post("/upload")
@@ -1299,3 +1149,61 @@ async def gmail_dismiss(event_id: str, current_user: Annotated[auth.User, Depend
 async def gmail_undo(event_id: str, current_user: Annotated[auth.User, Depends(auth.get_current_user)]):
     """Put the application back to where it was before this email changed it."""
     return _email_action(gmail.undo, current_user.id, event_id)
+
+
+# ── Profile suggestions (see enrich.py) ───────────────────────────────────────
+
+_LINKEDIN_ZIP_LIMIT = 50_000_000
+
+
+def _ids(body: dict) -> list[str]:
+    ids = body.get("ids")
+    return [i for i in ids if isinstance(i, str)][:500] if isinstance(ids, list) else []
+
+
+@app.get("/profile/suggestions")
+async def profile_suggestions(current_user: Annotated[auth.User, Depends(auth.get_current_user)]):
+    """What GitHub, the website and a LinkedIn export suggest adding to the persona, and how each read went."""
+    persona = Persona(**tracker.get_user_persona(current_user.id))
+    return {"suggestions": enrich.pending(current_user.id), **enrich.status(current_user.id, persona)}
+
+
+@app.post("/profile/suggestions/read", status_code=202)
+async def profile_suggestions_read(body: dict, current_user: Annotated[auth.User, Depends(auth.get_current_user)]):
+    """Read {source: github | website} in the background; GET /profile/suggestions shows when it's done."""
+    source = body.get("source")
+    if source not in ("github", "website"):
+        raise HTTPException(status_code=400, detail="source must be github or website")
+    if not enrich.start(current_user.id, source):
+        raise HTTPException(status_code=409, detail="Already reading a source")
+    return {"started": True}
+
+
+@app.post("/profile/suggestions/linkedin")
+async def profile_suggestions_linkedin(file: UploadFile = File(...),
+                                       current_user: Annotated[auth.User, Depends(auth.get_current_user)] = None):
+    """Read a LinkedIn data export (the zip LinkedIn emails) into suggestions."""
+    data = await file.read(_LINKEDIN_ZIP_LIMIT + 1)
+    if len(data) > _LINKEDIN_ZIP_LIMIT:
+        raise HTTPException(status_code=413, detail="That file is too big for a LinkedIn export")
+    try:
+        added = await enrich.read(current_user.id, "linkedin", data)
+    except enrich.SourceError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"added": added}
+
+
+@app.post("/profile/suggestions/accept")
+async def profile_suggestions_accept(body: dict, current_user: Annotated[auth.User, Depends(auth.get_current_user)]):
+    """Add {ids} to the persona. Each only adds an entry or fills an empty field; ones the persona has caught
+    up with are counted as outdated and change nothing."""
+    result = enrich.accept(current_user.id, _ids(body))
+    persona = result["persona"]
+    persona.core_info.job_password = JOB_PASSWORD_MASK if tracker.has_job_password(current_user.id) else ""
+    return result
+
+
+@app.post("/profile/suggestions/dismiss")
+async def profile_suggestions_dismiss(body: dict, current_user: Annotated[auth.User, Depends(auth.get_current_user)]):
+    """Say no to {ids}: they aren't offered again when the source is read again."""
+    return {"dismissed": enrich.dismiss(current_user.id, _ids(body))}

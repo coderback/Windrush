@@ -5,7 +5,7 @@ import type { Persona } from "./types";
 
 export type SectionKey =
   | "identity" | "login" | "links" | "skills" | "work" | "education" | "projects" | "certs"
-  | "stories" | "screening" | "answers" | "prefs" | "equality" | "directives";
+  | "stories" | "screening" | "answers" | "prefs" | "equality" | "directives" | "suggestions";
 
 export type SectionState = "complete" | "attention" | "optional";
 

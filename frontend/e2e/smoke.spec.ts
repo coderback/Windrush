@@ -28,9 +28,12 @@ const app = (id: string, status: string, extra: object = {}) => ({
   fit_score: 80, skill_gaps: [], level_match: "strong", notes: "", created_at: new Date().toISOString(), ...extra,
 });
 
-/** What every signed-in page asks for: the sidebar reads the persona, the applications, autopilot's runs and the inbox. */
+/** What every signed-in page asks for: the sidebar reads the persona, the applications, autopilot's runs, the inbox
+    and the profile suggestions. */
+const NO_SUGGESTIONS = { suggestions: [], reading: "", sources: { github: { address: "" }, website: { address: "" },
+                                                                 linkedin: { address: "" } } };
 const SHELL = { "GET /api/persona": PERSONA, "GET /api/applications": [], "GET /api/autopilot/runs": [],
-                "GET /api/gmail/events": [] };
+                "GET /api/gmail/events": [], "GET /api/profile/suggestions": NO_SUGGESTIONS };
 
 test("a signed-out visitor is sent to the login page", async ({ page }) => {
   const api = await mockApi(page, {});
@@ -117,7 +120,7 @@ test("an expired session sends you back to the login page", async ({ page }) => 
   const expired = { status: 401, json: { detail: "Could not validate credentials" } };
   const api = await mockApi(page, {
     "GET /api/jobs": expired, "GET /api/persona": expired, "GET /api/applications": expired,
-    "GET /api/autopilot/runs": expired, "GET /api/gmail/events": expired,
+    "GET /api/autopilot/runs": expired, "GET /api/gmail/events": expired, "GET /api/profile/suggestions": expired,
   });
   await page.goto("/login");
   await page.evaluate(() => localStorage.setItem("windrush_token", "expired-token"));
@@ -556,5 +559,66 @@ test("inbox: setup steps when not configured, then email updates you can confirm
   await page.getByRole("tab", { name: /Updated/ }).click();
   await page.getByRole("tabpanel").getByRole("button", { name: "Undo" }).click();
   await expect.poll(() => posts.at(-1)?.path).toBe("undo 3");
+  api.expectAllMocked();
+});
+
+test("persona suggestions: read GitHub, then add or dismiss what it found", async ({ page }) => {
+  const suggestion = (id: string, extra: object) => ({
+    id, source: "github", category: "", evidence: { text: "Card fraud detection", url: `https://github.com/sam/${id}` },
+    created_at: new Date().toISOString(), ...extra,
+  });
+  let pending = [
+    suggestion("p1", { section: "projects", action: "add", key: "Fraud Detector",
+                       value: { name: "Fraud Detector", url: "https://github.com/sam/fraud", problem_solved: "Finds card fraud.",
+                                technologies: ["Python", "XGBoost"], outcomes: "" } }),
+    suggestion("p2", { section: "projects", action: "fill", key: "Olimpia", value: { url: "https://github.com/sam/olimpia" } }),
+    suggestion("s1", { section: "skills", action: "add", key: "Rust", value: "Rust", category: "Languages" }),
+  ];
+  let reading = "";
+  const posts: { path: string; body: unknown }[] = [];
+  const api = await mockApi(page, {
+    ...SHELL,
+    "GET /api/persona": { ...PERSONA, core_info: { ...PERSONA.core_info, github: "https://github.com/sam" } },
+    "GET /api/profile/suggestions": () => ({
+      suggestions: pending, reading,
+      sources: { github: { address: "https://github.com/sam" }, website: { address: "" }, linkedin: { address: "" } },
+    }),
+    "PUT /api/persona": { ok: true },
+    "POST /api/profile/suggestions/read": (r: { postDataJSON: () => unknown }) => {
+      posts.push({ path: "read", body: r.postDataJSON() });
+      return { status: 202, json: { started: true } };
+    },
+    "POST /api/profile/suggestions/accept": (r: { postDataJSON: () => { ids: string[] } }) => {
+      const { ids } = r.postDataJSON();
+      posts.push({ path: "accept", body: { ids } });
+      pending = pending.filter((s) => !ids.includes(s.id));
+      return { accepted: ids.length, outdated: 0,
+               persona: { ...PERSONA, projects: [{ name: "Fraud Detector", url: "", problem_solved: "", technologies: [], outcomes: "",
+                                                   summary: "", is_ongoing: false }] } };
+    },
+    "POST /api/profile/suggestions/dismiss": (r: { postDataJSON: () => { ids: string[] } }) => {
+      const { ids } = r.postDataJSON();
+      posts.push({ path: "dismiss", body: { ids } });
+      pending = pending.filter((s) => !ids.includes(s.id));
+      return { dismissed: ids.length };
+    },
+  });
+  await signIn(page);
+  await page.goto("/profile#suggestions");
+  await expect(page.getByRole("navigation", { name: "Main" }).getByRole("link", { name: "Persona 3 new" })).toBeVisible();
+  await expect(page.getByText("New project: Fraud Detector")).toBeVisible();
+  await expect(page.getByText("Add to “Olimpia”")).toBeVisible();
+
+  await page.getByRole("button", { name: "Read github" }).click();
+  await expect.poll(() => posts.at(-1)).toEqual({ path: "read", body: { source: "github" } });
+
+  await page.getByRole("button", { name: "Add New project: Fraud Detector" }).click();
+  await expect.poll(() => posts.at(-1)).toEqual({ path: "accept", body: { ids: ["p1"] } });
+  await expect(page.getByText("Added 1 change to your persona.")).toBeVisible();
+  await expect(page.getByText("New project: Fraud Detector")).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Dismiss Rust" }).click();
+  await expect.poll(() => posts.at(-1)).toEqual({ path: "dismiss", body: { ids: ["s1"] } });
+  await expect(page.getByText("Add to “Olimpia”")).toBeVisible();
   api.expectAllMocked();
 });

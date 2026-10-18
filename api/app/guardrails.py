@@ -11,8 +11,7 @@ logger = logging.getLogger("windrush.guardrails")
 # ── Prompt injection patterns (CV input check) ───────────────────────────────
 
 CV_INJECTION_PATTERNS: list[re.Pattern] = [
-    re.compile(r"ignore\s+(previous|all|prior|above)\s+instructions", re.I),
-    re.compile(r"disregard\s+(previous|all|prior|above)\s+instructions", re.I),
+    re.compile(r"(ignore|disregard)\s+(all\s+|any\s+|the\s+)?(previous|all|prior|above|earlier)\s+instructions", re.I),
     re.compile(r"forget\s+(everything|previous|your\s+instructions)", re.I),
     re.compile(r"you\s+are\s+now\s+(a\s+)?(different|new|evil|jailbroken)", re.I),
     re.compile(r"\bDAN\b"),                          # "Do Anything Now" jailbreak

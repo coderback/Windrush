@@ -41,6 +41,8 @@ services:
       - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
       - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-}
       - GOOGLE_REDIRECT_URI=${GOOGLE_REDIRECT_URI:-http://localhost/api/gmail/callback}
+      # Optional: lifts GitHub's 60-requests-an-hour limit when reading your repositories for profile suggestions.
+      - GITHUB_TOKEN=${GITHUB_TOKEN:-}
       # Quoted: an unquoted ": " inside the message would make YAML read the item as a mapping.
       - "JWT_SECRET=${JWT_SECRET:?JWT_SECRET must be set in .env (generate with: openssl rand -hex 32)}"
       - "CREDENTIALS_KEY=${CREDENTIALS_KEY:?CREDENTIALS_KEY must be set in .env (see .env.example)}"

@@ -323,3 +323,39 @@ export interface EmailEvent {
   app_company: string | null;
   app_status: string | null;
 }
+
+/* Profile suggestions (api/app/enrich.py): what GitHub, the website and a LinkedIn export would add to the persona. */
+
+export type SuggestionSource = "github" | "website" | "linkedin";
+export type SuggestionSection =
+  | "core_info" | "summary" | "skills" | "history" | "education" | "projects" | "certifications";
+
+export interface ProfileSuggestion {
+  id: string;
+  source: SuggestionSource;
+  section: SuggestionSection;
+  /** add: a new entry or skill · fill: empty fields of an existing entry (or a contact field) filled in. */
+  action: "add" | "fill";
+  /** The entry it adds or fills: a project's name, "Title at Employer", an institution, a skill, a field. */
+  key: string;
+  /** For a skill: the persona group it goes in. */
+  category: string;
+  /** add: the entry (or the skill's name) · fill: {field: value} for each field it fills. */
+  value: string | Record<string, unknown>;
+  evidence: { text?: string; url?: string; detail?: string };
+  created_at: string;
+}
+
+export interface SourceRead {
+  address: string;
+  at?: string;
+  added?: number;
+  error?: string;
+}
+
+export interface ProfileSuggestions {
+  suggestions: ProfileSuggestion[];
+  /** The source being read now, or "". */
+  reading: "" | "github" | "website";
+  sources: Record<SuggestionSource, SourceRead>;
+}

@@ -151,6 +151,7 @@ def init_db(db_path: str = "") -> None:
         con.execute(_CREATE_AUTOPILOT_SETTINGS_TABLE)
         con.execute(_CREATE_AUTOPILOT_RUNS_TABLE)
         _gmail_tables(con)
+        _suggestion_tables(con)
         con.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_autopilot_job ON autopilot_runs(user_id, job_id)")
         # Migrations — safe to run on existing DBs
         for stmt in [
@@ -891,3 +892,93 @@ def get_application(user_id: str, app_id: str) -> dict | None:
                       "WHERE id=? AND user_id=?", (app_id, user_id)).fetchone()
     con.close()
     return dict(row) if row else None
+
+
+# ── Profile suggestions (see enrich.py) ───────────────────────────────────────
+# What the user's GitHub, website or LinkedIn export say that the persona doesn't, one row per change it
+# would make. fingerprint names the change (not its wording), so a dismissed one isn't offered again when
+# the source is read again. data is the suggestion as enrich.py builds it.
+
+def _suggestion_tables(con: sqlite3.Connection) -> None:
+    con.execute("""CREATE TABLE IF NOT EXISTS profile_suggestions (
+        id          TEXT PRIMARY KEY,
+        user_id     TEXT NOT NULL,
+        source      TEXT NOT NULL,
+        fingerprint TEXT NOT NULL,
+        data        TEXT NOT NULL,
+        status      TEXT NOT NULL DEFAULT 'pending',
+        created_at  TEXT NOT NULL,
+        updated_at  TEXT NOT NULL
+    )""")
+    con.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_profile_suggestions_fp ON profile_suggestions(user_id, fingerprint)")
+
+
+# pending: waiting on the user · accepted: added to the persona · dismissed: the user said no ·
+# outdated: the persona already has it now (the user added it themselves, or accepted another suggestion).
+SUGGESTION_STATUSES = ("pending", "accepted", "dismissed", "outdated")
+
+
+def _suggestion_con() -> sqlite3.Connection:
+    con = sqlite3.connect(_DB_PATH)
+    _suggestion_tables(con)
+    return con
+
+
+def _suggestion_row(row: sqlite3.Row) -> dict:
+    return {**json.loads(row["data"]), "id": row["id"], "source": row["source"], "status": row["status"],
+            "created_at": row["created_at"]}
+
+
+def save_suggestions(user_id: str, source: str, suggestions: list[dict]) -> int:
+    """Store what a fresh read of `source` suggests: changes not seen before are added; ones still waiting
+    from an earlier read that this one no longer suggests are dropped. Returns how many were added."""
+    now = _now()
+    fresh = {s["fingerprint"]: s for s in suggestions}
+    con = _suggestion_con()
+    with con:
+        seen = {fp for (fp,) in con.execute("SELECT fingerprint FROM profile_suggestions WHERE user_id=?", (user_id,))}
+        stale = [fp for (fp,) in con.execute(
+            "SELECT fingerprint FROM profile_suggestions WHERE user_id=? AND source=? AND status='pending'",
+            (user_id, source)) if fp not in fresh]
+        con.executemany("DELETE FROM profile_suggestions WHERE user_id=? AND fingerprint=?",
+                        [(user_id, fp) for fp in stale])
+        new = [s for fp, s in fresh.items() if fp not in seen]
+        con.executemany(
+            "INSERT INTO profile_suggestions (id, user_id, source, fingerprint, data, status, created_at, updated_at) "
+            "VALUES (?,?,?,?,?,'pending',?,?)",
+            [(uuid.uuid4().hex, user_id, source, s["fingerprint"], json.dumps(s), now, now) for s in new])
+    con.close()
+    return len(new)
+
+
+def list_suggestions(user_id: str, status: str = "pending") -> list[dict]:
+    con = _suggestion_con()
+    con.row_factory = sqlite3.Row
+    rows = con.execute("SELECT * FROM profile_suggestions WHERE user_id=? AND status=? ORDER BY rowid",
+                       (user_id, status)).fetchall()
+    con.close()
+    return [_suggestion_row(r) for r in rows]
+
+
+def get_suggestions(user_id: str, ids: list[str]) -> list[dict]:
+    if not ids:
+        return []
+    con = _suggestion_con()
+    con.row_factory = sqlite3.Row
+    rows = con.execute(f"SELECT * FROM profile_suggestions WHERE user_id=? AND id IN ({','.join('?' * len(ids))}) "
+                       "ORDER BY rowid", (user_id, *ids)).fetchall()
+    con.close()
+    return [_suggestion_row(r) for r in rows]
+
+
+def set_suggestion_status(user_id: str, ids: list[str], status: str) -> int:
+    if status not in SUGGESTION_STATUSES:
+        raise ValueError(f"unknown suggestion status: {status}")
+    if not ids:
+        return 0
+    con = _suggestion_con()
+    with con:
+        cur = con.execute(f"UPDATE profile_suggestions SET status=?, updated_at=? "
+                          f"WHERE user_id=? AND id IN ({','.join('?' * len(ids))})", (status, _now(), user_id, *ids))
+    con.close()
+    return cur.rowcount
