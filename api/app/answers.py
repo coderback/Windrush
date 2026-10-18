@@ -31,7 +31,7 @@ logger = logging.getLogger("windrush.answers")
 SOURCES = ("saved", "profile", "drafted", "needs_you")
 
 _MAX_QUESTIONS = 40     # one form page rarely has more; a call with more is cut, not refused
-_MAX_OPTIONS = 300      # a nationality dropdown lists every country
+_MAX_OPTIONS = 1000     # a nationality dropdown lists every country; a university one, 350 UK institutions
 _DRAFTS_AT_ONCE = 4
 
 
@@ -485,6 +485,10 @@ def resolve_fact(question: dict, reading: dict, facts: dict[str, Fact], job_loca
 
     if options:
         answer = _in_options(said, options)
+        if answer is None and said and _polarity(said) is None and _supported(said, cited):
+            # What the facts say, in other words than the form's: "The University of the West of England" is
+            # "Bristol, UWE".
+            answer = pick_option(said, options)
         if answer is None and len(cited) == 1:
             answer = pick_option(first.value, options)
         # "Other" says no option states the fact; a saved answer may still have chosen it.

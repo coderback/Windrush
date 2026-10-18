@@ -574,7 +574,9 @@ def _build_task(job_url: str, persona: dict, cover_letter: str,
         "filled form and submits it themselves. As soon as the only thing left is that final submission, stop and "
         "call done with success=true. In the done text, start with 'Needs your input: ...' (one question per line) "
         "if you left any question unanswered, then summarise what you filled and anything you were unsure about. "
-        "If you cannot fill the form (blocked, missing information, page errors), call done with success=false and "
+        "Fields left blank for the candidate (questions answer_questions said to leave blank, or a field you "
+        "couldn't fill and listed) don't stop it being done: that is still success=true. Only if you cannot get "
+        "through the form (blocked, a page error, a step you can't get past), call done with success=false and "
         "say why, again starting with 'Needs your input: ...' for anything the candidate must answer."
     )
     return task
@@ -738,7 +740,8 @@ def _review_answers(raw) -> list[dict]:
         answer = str(item.get("answer") or "").strip()[:5000]
         if not question or not answer:
             continue
-        options = [str(o)[:200] for o in item.get("options") or [] if isinstance(o, str)][:300]
+        # As many as answers._MAX_OPTIONS (not imported: answers imports agent, which imports this module).
+        options = [str(o)[:200] for o in item.get("options") or [] if isinstance(o, str)][:1000]
         kind = "written" if item.get("kind") == "written" else "fact"
         out.append({"question": question, "answer": answer, "kind": kind, "options": options})
     return out[:_MAX_REVIEW_ANSWERS]

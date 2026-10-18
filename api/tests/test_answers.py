@@ -220,6 +220,18 @@ def test_other_is_never_an_answer_from_the_profile():
                                 fact("saved_1", answer="Other"), saved)[0] == "Other"
 
 
+def test_a_long_dropdown_keeps_every_option(model):
+    # Cambridge Consultants lists 350 UK institutions; the candidate's is 320th, under other words.
+    unis = [f"College {i}" for i in range(319)] + ["University of Bristol", "Northfield, NU"] + \
+           [f"Academy {i}" for i in range(29)]
+    question = "What university are you currently studying at or have most recently graduated from?"
+    fake = model(read={question: fact("education_1", answer="The Northfield University")})
+    persona = {**PERSONA, "education": [{**PERSONA["education"][0], "institution": "The Northfield University"}]}
+    got = ask([{"question": question, "options": unis}], persona=persona)
+    assert (got[0]["source"], got[0]["answer"]) == ("profile", "Northfield, NU")
+    assert "Academy 28" in fake.prompts()
+
+
 def test_how_they_heard_about_a_job_is_left_for_the_user():
     assert not [f for f in answers.profile_facts(PERSONA) if "heard" in f.label.lower()]
 
