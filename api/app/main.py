@@ -14,7 +14,7 @@ from fastapi.responses import RedirectResponse, StreamingResponse
 from fastapi.security import OAuth2PasswordRequestForm
 
 from .cv_parser import extract_text, extract_links, profile_links
-from .agent import run_apply, execute_tool
+from .agent import run_apply, execute_tool, career_stage
 from .guardrails import check_cv_for_injection, GuardrailViolation
 from . import tracker
 from . import answers
@@ -593,8 +593,8 @@ async def get_jobs(
     status_map = tracker.get_user_application_statuses(current_user.id)
     hidden = {key for key, status in status_map.items() if status in _HIDE_STATUSES}
     # Someone who needs a visa sponsored doesn't see jobs that rule them out unless they ask to.
+    needs_sponsorship = (persona_data.get("core_info") or {}).get("require_sponsorship") is True
     if sponsorship not in jobs_db.SPONSORSHIP_FILTERS:
-        needs_sponsorship = (persona_data.get("core_info") or {}).get("require_sponsorship") is True
         sponsorship = "possible" if needs_sponsorship else "any"
     marks = tracker.get_job_marks(current_user.id)
 
@@ -603,6 +603,7 @@ async def get_jobs(
         query=query, location=effective_location, level=level, category=category, remote=remote,
         tags=tag_list, persona_vector=persona_vector, limit=limit, offset=(page - 1) * limit,
         exclude=hidden, sponsorship=sponsorship, marks=marks, max_years=max_years, no_degree=no_degree,
+        career_stage=career_stage(persona_data), needs_sponsorship=needs_sponsorship,
     )
     for job in jobs:
         status = status_map.get(((job.get("company") or "").lower(), (job.get("title") or "").lower()))

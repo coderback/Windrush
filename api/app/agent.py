@@ -848,6 +848,9 @@ def _seniority(persona: dict) -> str:
     return "junior"
 
 
+career_stage = _seniority  # the feed ranks jobs at this level higher (jobs_db.get_jobs)
+
+
 def _headline_from_persona(persona: dict, level: str) -> str:
     """
     A concise professional-identity line for the cover-letter header, e.g.

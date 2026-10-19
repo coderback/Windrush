@@ -222,10 +222,12 @@ async def _feed(user_id: str, persona: dict, live: bool) -> list[dict]:
     core = persona.get("core_info") or {}
     vector = await semantic.get_embedding(semantic.vectorize_persona(persona), timeout=20.0)
     tracked = set(tracker.get_user_application_statuses(user_id))
+    needs_sponsorship = core.get("require_sponsorship") is True
     jobs, _ = await asyncio.to_thread(
         jobs_db.get_jobs, location=_distinct(prefs.get("preferred_locations")), persona_vector=vector,
-        limit=_FEED_DEPTH, exclude=tracked, sponsorship="possible" if core.get("require_sponsorship") is True else "any",
-        marks=tracker.get_job_marks(user_id))
+        limit=_FEED_DEPTH, exclude=tracked, sponsorship="possible" if needs_sponsorship else "any",
+        marks=tracker.get_job_marks(user_id), career_stage=agent.career_stage(persona),
+        needs_sponsorship=needs_sponsorship)
     tried = tracker.autopilot_tried(user_id, count_practice=not live)
     return [j for j in jobs if ats_of(j.get("url")) and str(j.get("id")) not in tried]
 
