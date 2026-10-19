@@ -369,6 +369,63 @@ def test_location_from_a_job_url(url, expected):
     assert job_searcher._location_from_url(url) == expected
 
 
+# ── Web search results ────────────────────────────────────────────────────────
+
+@pytest.mark.parametrize("url, expected", [
+    ("https://www.gradcracker.com/hub/275/lloyds-banking-group/graduate-job/82966/data-science-and-ai", True),
+    ("https://www.gradcracker.com/search/computing-technology/ai-machine-learning-graduate-jobs", False),
+    ("https://targetjobs.co.uk/jobs/graduate-software-engineer-2026-232060", True),
+    ("https://targetjobs.co.uk/careers-advice/information-technology/how-get-it-graduate", False),
+    ("https://targetjobs.co.uk/graduate-jobs/it/data", False),
+    ("https://www.totaljobs.com/job/graduate-software-engineer/acme-ltd-job105230817", True),
+    ("https://www.totaljobs.com/jobs/graduate-software-engineer/in-london", False),
+    ("https://www.reed.co.uk/jobs/software-engineer-ai/56239586", True),
+    ("https://www.reed.co.uk/jobs/graduate-information-technology-jobs-in-london", False),
+    ("https://wellfound.com/jobs/2871376-machine-learning-ml-engineer-ii", True),
+    ("https://wellfound.com/role/l/ai-engineer/india", False),
+    ("https://lseg.wd3.myworkdayjobs.com/en-US/Careers/job/Junior-Data-Scientist_R0102107-1", True),
+    ("https://lbg.wd3.myworkdayjobs.com/Graduate_careers", False),
+    ("https://careers.arm.com/graduates", False),
+    ("https://jobs.example.com/anything", True),
+])
+def test_only_one_posting_pages_of_known_sites_are_jobs(url, expected):
+    assert job_searcher._is_a_posting(url) is expected
+
+
+@pytest.mark.parametrize("tail, url, expected", [
+    ("Careers - Myworkdayjobs.com", "https://lseg.wd3.myworkdayjobs.com/en-US/Careers/job/X_R1", ("LSEG", "")),
+    ("China", "https://nvidia.wd5.myworkdayjobs.com/en-US/External/job/X_R1", ("NVIDIA", "")),
+    ("Engineering Pathways in Austin at Arm", "https://careers.arm.com/job/austin/graduate/1/2", ("Arm", "")),
+    ("2027 | Graduate Jobs | Accenture Hub | Gradcracker", "https://www.gradcracker.com/hub/269/accenture/graduate-job/75245/x",
+     ("Accenture", "")),
+    ("Updated Daily", "https://www.totaljobs.com/job/graduate-developer/bright-network-job105230817", ("Bright Network", "")),
+    ("Edinburgh", "https://targetjobs.co.uk/jobs/data-science-ai-graduate-scheme-edinburgh-239709", ("Unknown", "Edinburgh")),
+    ("August 2026 - London", "https://targetjobs.co.uk/jobs/software-development-engineering-graduate-210738", ("Unknown", "August 2026 - London")),
+    ("Full-Time – London (February Start)", "https://targetjobs.co.uk/jobs/2026-software-engineer-program-184526",
+     ("Unknown", "Full-Time – London (February Start)")),
+    ("2027 | Wellfound", "https://wellfound.com/jobs/3208571-ml-engineer", ("Unknown", "")),
+    ("The Mobilise Academy", "https://targetjobs.co.uk/jobs/graduate-cloud-engineer-mobilise-academy-228516",
+     ("The Mobilise Academy", "")),
+])
+def test_a_search_results_employer_comes_from_its_address_not_the_sites_name(tail, url, expected):
+    assert job_searcher._employer_and_place(tail, url) == expected
+
+
+@pytest.mark.parametrize("title", [
+    "Data Scientist Jobs in London", "Backend Engineer Jobs", "IT graduate jobs & schemes 2027",
+    "Graduate Software Engineer Job Vacancies", "25 Startups Hiring For Junior Software Engineers",
+    "Machine Learning Engineer Salary and Equity",
+])
+def test_a_job_boards_page_of_jobs_is_not_a_job(title):
+    assert not job_searcher._passes_title_filter(title, "software engineer")
+
+
+def test_an_aggregators_copy_of_a_board_job_is_dropped():
+    board = {"title": "Quant Researcher", "company": "Squarepoint Capital", "url": "https://boards.greenhouse.io/x/1"}
+    adzuna = {"title": "Quant Researcher", "company": "Squarepoint Capital LLP", "url": "https://www.adzuna.co.uk/jobs/land/ad/9"}
+    assert job_searcher._deduplicate([board, adzuna]) == [board]
+
+
 # ── What a search keeps ───────────────────────────────────────────────────────
 
 def test_every_match_in_the_searched_locations_is_kept(monkeypatch):
