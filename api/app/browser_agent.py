@@ -994,6 +994,10 @@ def _add_fill_fields(tools, browser_session, asked: dict[str, dict], filled: set
                 continue
             found, why = await _field_at(browser_session, item.index, item.label)
             if not found:
+                # Cambridge Consultants' two "Country" fields, asked for with stale indexes: the label alone can't say
+                # which, so the first of them still empty takes it (the agent then typed both in itself).
+                found = await _first_empty_labelled(browser_session, item.label)
+            if not found:
                 lines.append(f"- “{item.label}”: NOT filled: {why}. Check the index.")
                 continue
             shown = found[1].get("group") or found[1].get("label") or ""
@@ -1026,6 +1030,22 @@ def _add_fill_fields(tools, browser_session, asked: dict[str, dict], filled: set
         if empty:
             text += "\nRequired fields still empty on the page: " + "; ".join(f"“{label}”" for label in empty)
         return ActionResult(extracted_content=text, long_term_memory=text)
+
+
+async def _first_empty_labelled(browser_session, label: str):
+    """(field, description) for the first of the fields sharing `label` that's still empty; None when fewer than two
+    fields share it, or none of them is empty."""
+    try:
+        fields = await form_widgets.labelled_fields(browser_session, label)
+        if len(fields) < 2:
+            return None
+        for field in fields:
+            field = await field.open()
+            if not any(h.strip() for h in await field.held()):
+                return field, await field.describe()
+    except Exception as exc:
+        logger.debug("finding an empty field labelled %r failed: %s", label[:60], exc)
+    return None
 
 
 async def _label_of(browser_session, node) -> str:
@@ -1306,29 +1326,39 @@ async def _submit_button_shown(browser_session) -> bool:
         return False
 
 
-async def _fill_again(browser_session, tried: dict[str, str], filled: set[str], empty: list[str]) -> bool:
+async def _fill_again(browser_session, tried: dict[str, str], filled: set[str], empty: list[str],
+                      profile: dict[str, str] | None = None) -> bool:
     """
     One more try at each required field still empty once the agent stops that it gave fill_fields a value for: DV
     Trading's Discipline ended up empty on one run though the agent had filled it. A value no option takes (School,
-    without the user's university) fails again, harmlessly. True when one took.
+    without the user's university) fails again, harmlessly. A label two fields share is tried on each of them that's
+    still empty: Cambridge Consultants' address "Country" stayed empty beside the phone's, which the agent filled.
+    A field the agent never gave a value takes `profile`'s for its label (by question key), when there is one: the
+    agent once left both "Country" fields blank on purpose.
+    True when one took.
     """
     took = False
+    profile = profile or {}
     for label in empty:
         value = next((v for t, v in tried.items() if _question_key(t) == _question_key(label)), None)
+        if value is None:
+            value = profile.get(_question_key(label)) or None
         if value is None:
             continue
         try:
             field = await form_widgets.find_by_label(browser_session, label)
-            if not field:
-                continue
-            ok, _ = await form_widgets.fill_field(await field.open(), value)
+            fields = [field] if field else await form_widgets.labelled_fields(browser_session, label)
+            for field in fields:
+                field = await field.open()
+                if len(fields) > 1 and any(h.strip() for h in await field.held()):
+                    continue        # the one of them the agent did fill
+                ok, _ = await form_widgets.fill_field(field, value)
+                logger.info("filled again after the agent: %r %s", label[:80], "took" if ok else "didn't take")
+                if ok:
+                    filled.add(label)
+                    took = True
         except Exception as exc:
             logger.debug("filling %r again failed: %s", label[:60], exc)
-            continue
-        logger.info("filled again after the agent: %r %s", label[:80], "took" if ok else "didn't take")
-        if ok:
-            filled.add(label)
-            took = True
     return took
 
 
@@ -1595,7 +1625,9 @@ async def apply_with_browser(
 
         summary = notes
         empty = await _empty_required_fields(browser_session)
-        if await _fill_again(browser_session, tool_tried, tool_filled, empty):
+        # Where they live: not one of their private details. The agent once left a required "Country" blank on purpose.
+        profile = {"country": str((cv_profile.get("core_info") or {}).get("country") or "").strip()}
+        if await _fill_again(browser_session, tool_tried, tool_filled, empty, profile):
             empty = await _empty_required_fields(browser_session)
         if await _ask_left_over(browser_session, answerer or _no_answers, asked, tool_filled, empty):
             empty = await _empty_required_fields(browser_session)

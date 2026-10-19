@@ -616,6 +616,105 @@ def test_a_question_given_by_the_text_under_its_label_is_asked_as_the_form_label
     assert_no_chromium_left()
 
 
+class OneCountryLLM(GreenhouseLLM):
+    def next_action(self, text: str) -> list[dict]:
+        self.step += 1
+        if self.step == 1:          # the phone's dial-code "Country" only, as on Cambridge Consultants' form
+            return [{"fill_fields": {"fields": [
+                {"index": self._index(text, "country"), "label": "Country", "value": "United Kingdom"}]}}]
+        if self.step == 3:
+            return [{"done": {"text": "Done.", "success": True}}]
+        return [{"evaluate": {"code": "'STEP'"}}]
+
+
+def test_a_label_two_fields_share_is_tried_again_on_the_one_still_empty(ba, site, monkeypatch):
+    """Cambridge Consultants' address "Country" stayed empty beside the phone's dial-code one the agent filled: the
+    second try looked it up by label and gave up on two matches. Each of them still empty gets the value now, and
+    the one already filled is left alone."""
+    monkeypatch.setattr(ba, "_make_browser_llm", lambda: OneCountryLLM())
+    held = {}
+    real_fill_again = ba._fill_again
+
+    async def fill_again(session, tried, filled, empty, profile=None):
+        took = await real_fill_again(session, tried, filled, empty, profile)
+        for element_id in ("country", "address-country"):
+            node = await session.get_element_by_index(await session.get_index_by_id(element_id))
+            held[element_id] = await (await ba.form_widgets.Field(session, node).open()).held()
+        return took
+    monkeypatch.setattr(ba, "_fill_again", fill_again)
+
+    async def flow():
+        return [event async for event in ba.apply_with_browser(
+            f"{site}/greenhouse.html", {"core_info": {"first_name": "Ada"}}, "", asyncio.Queue(),
+            answerer=ba._no_answers, decide=lambda filled: asyncio.sleep(0, result=False))]
+    final = asyncio.run(flow())[-1]
+    assert held == {"country": ["+44"], "address-country": ["United Kingdom"]}
+    assert "Country" not in final["empty"]
+    assert_no_chromium_left()
+
+
+class StaleCountriesLLM(GreenhouseLLM):
+    def next_action(self, text: str) -> list[dict]:
+        self.step += 1
+        if self.step == 1:          # both "Country" fields, with indexes from an earlier view of the page
+            return [{"fill_fields": {"fields": [{"index": 99998, "label": "Country", "value": "United Kingdom"},
+                                                {"index": 99999, "label": "Country", "value": "United Kingdom"}]}}]
+        return [{"done": {"text": "Done.", "success": True}}]
+
+
+def test_fill_fields_fills_a_shared_label_with_a_stale_index_into_the_one_still_empty(ba, site, monkeypatch):
+    """On Cambridge Consultants' form fill_fields was given both "Country" fields with stale indexes: the label alone
+    matched two fields, so neither was filled and the agent typed them in itself. Each goes into the first of them
+    still empty."""
+    llm = StaleCountriesLLM()
+    monkeypatch.setattr(ba, "_make_browser_llm", lambda: llm)
+
+    async def flow():
+        return [event async for event in ba.apply_with_browser(
+            f"{site}/greenhouse.html", {"core_info": {"first_name": "Ada"}}, "", asyncio.Queue(),
+            answerer=ba._no_answers, decide=lambda filled: asyncio.sleep(0, result=False))]
+    final = asyncio.run(flow())[-1]
+    seen = "\n".join(llm.seen)
+    assert "- “Country”: filled with “United Kingdom +44”" in seen      # the phone's dial code, first on the page
+    assert "- “Country”: filled with “United Kingdom”." in seen          # then the address's
+    assert "Country" not in final["empty"]
+    assert_no_chromium_left()
+
+
+class NoCountryLLM(GreenhouseLLM):
+    def next_action(self, text: str) -> list[dict]:
+        return [{"done": {"text": "Country fields were left blank.", "success": True}}]
+
+
+@pytest.mark.parametrize("country, held", [
+    ("United Kingdom", {"country": ["+44"], "address-country": ["United Kingdom"]}),
+    ("", {"country": [], "address-country": []}),
+])
+def test_a_country_the_agent_never_filled_is_filled_from_the_profile(ba, site, monkeypatch, country, held):
+    """The agent once left both of Cambridge Consultants' required "Country" fields blank on purpose, so the second try
+    had no value of its own. Where the user lives isn't a private detail: it fills them. Without one, nothing is."""
+    monkeypatch.setattr(ba, "_make_browser_llm", lambda: NoCountryLLM())
+    seen = {}
+    real_fill_again = ba._fill_again
+
+    async def fill_again(session, tried, filled, empty, profile=None):
+        took = await real_fill_again(session, tried, filled, empty, profile)
+        for element_id in ("country", "address-country"):
+            node = await session.get_element_by_index(await session.get_index_by_id(element_id))
+            seen[element_id] = await (await ba.form_widgets.Field(session, node).open()).held()
+        return took
+    monkeypatch.setattr(ba, "_fill_again", fill_again)
+
+    async def flow():
+        return [event async for event in ba.apply_with_browser(
+            f"{site}/greenhouse.html", {"core_info": {"first_name": "Ada", "country": country}}, "", asyncio.Queue(),
+            answerer=ba._no_answers, decide=lambda filled: asyncio.sleep(0, result=False))]
+    final = asyncio.run(flow())[-1]
+    assert seen == held
+    assert ("Country" in final["empty"]) is not bool(country)
+    assert_no_chromium_left()
+
+
 class LosesAFieldLLM(GreenhouseLLM):
     def next_action(self, text: str) -> list[dict]:
         self.step += 1
