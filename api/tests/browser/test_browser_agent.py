@@ -653,6 +653,34 @@ def test_a_label_two_fields_share_is_tried_again_on_the_one_still_empty(ba, site
     assert_no_chromium_left()
 
 
+class StaleCountriesLLM(GreenhouseLLM):
+    def next_action(self, text: str) -> list[dict]:
+        self.step += 1
+        if self.step == 1:          # both "Country" fields, with indexes from an earlier view of the page
+            return [{"fill_fields": {"fields": [{"index": 99998, "label": "Country", "value": "United Kingdom"},
+                                                {"index": 99999, "label": "Country", "value": "United Kingdom"}]}}]
+        return [{"done": {"text": "Done.", "success": True}}]
+
+
+def test_fill_fields_fills_a_shared_label_with_a_stale_index_into_the_one_still_empty(ba, site, monkeypatch):
+    """On Cambridge Consultants' form fill_fields was given both "Country" fields with stale indexes: the label alone
+    matched two fields, so neither was filled and the agent typed them in itself. Each goes into the first of them
+    still empty."""
+    llm = StaleCountriesLLM()
+    monkeypatch.setattr(ba, "_make_browser_llm", lambda: llm)
+
+    async def flow():
+        return [event async for event in ba.apply_with_browser(
+            f"{site}/greenhouse.html", {"core_info": {"first_name": "Ada"}}, "", asyncio.Queue(),
+            answerer=ba._no_answers, decide=lambda filled: asyncio.sleep(0, result=False))]
+    final = asyncio.run(flow())[-1]
+    seen = "\n".join(llm.seen)
+    assert "- “Country”: filled with “United Kingdom +44”" in seen      # the phone's dial code, first on the page
+    assert "- “Country”: filled with “United Kingdom”." in seen          # then the address's
+    assert "Country" not in final["empty"]
+    assert_no_chromium_left()
+
+
 class NoCountryLLM(GreenhouseLLM):
     def next_action(self, text: str) -> list[dict]:
         return [{"done": {"text": "Country fields were left blank.", "success": True}}]

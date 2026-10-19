@@ -994,6 +994,10 @@ def _add_fill_fields(tools, browser_session, asked: dict[str, dict], filled: set
                 continue
             found, why = await _field_at(browser_session, item.index, item.label)
             if not found:
+                # Cambridge Consultants' two "Country" fields, asked for with stale indexes: the label alone can't say
+                # which, so the first of them still empty takes it (the agent then typed both in itself).
+                found = await _first_empty_labelled(browser_session, item.label)
+            if not found:
                 lines.append(f"- “{item.label}”: NOT filled: {why}. Check the index.")
                 continue
             shown = found[1].get("group") or found[1].get("label") or ""
@@ -1026,6 +1030,22 @@ def _add_fill_fields(tools, browser_session, asked: dict[str, dict], filled: set
         if empty:
             text += "\nRequired fields still empty on the page: " + "; ".join(f"“{label}”" for label in empty)
         return ActionResult(extracted_content=text, long_term_memory=text)
+
+
+async def _first_empty_labelled(browser_session, label: str):
+    """(field, description) for the first of the fields sharing `label` that's still empty; None when fewer than two
+    fields share it, or none of them is empty."""
+    try:
+        fields = await form_widgets.labelled_fields(browser_session, label)
+        if len(fields) < 2:
+            return None
+        for field in fields:
+            field = await field.open()
+            if not any(h.strip() for h in await field.held()):
+                return field, await field.describe()
+    except Exception as exc:
+        logger.debug("finding an empty field labelled %r failed: %s", label[:60], exc)
+    return None
 
 
 async def _label_of(browser_session, node) -> str:
