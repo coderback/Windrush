@@ -220,6 +220,26 @@ def test_required_fields_still_empty_are_read_from_the_page(ba, site):
     assert_no_chromium_left()
 
 
+def test_a_lever_forms_empty_questions_are_named_by_their_headings(ba, site):
+    """Palantir's held form listed "English (ENG)", "Yes" and "cards[…][field0]" as its required fields still empty."""
+    from browser_use import BrowserSession
+
+    async def run():
+        session = BrowserSession(browser_profile=ba._browser_profile())
+        await session.start()
+        try:
+            await session.navigate_to(f"{site}/lever.html")
+            await asyncio.sleep(1.0)
+            return await ba._empty_required_fields(session)
+        finally:
+            await session.kill()
+
+    assert asyncio.run(run()) == ["Full name", "Language Skill(s) (Check all that apply)",
+                                  "Do you have any, or anticipate any upcoming offer deadlines?",
+                                  "What is the hardest technical challenge you've faced?"]
+    assert_no_chromium_left()
+
+
 def test_the_button_that_sends_the_application_is_seen_on_the_form_only(ba, site):
     from browser_use import BrowserSession
 

@@ -20,9 +20,34 @@ import re
 TEXT, SELECT, COMBOBOX, CHECKBOX, RADIO, EDITABLE, FILE, OTHER = (
     "text", "select", "combobox", "checkbox", "radio", "editable", "file", "other")
 
+# headFor(el, own): a field's question when no <label>, aria label or legend names it: the first heading (a legend,
+# a label not wrapping one of its own controls, or anything with "label" in its class) in the nearest box around it
+# that holds none of another question's controls. Lever puts the question in <div class="application-label"> and
+# a <label> around each option, so every checkbox otherwise reads as its option ("English (ENG)", "Yes") and a text
+# box as its input name ("cards[…][field0]"). `own` is the field's controls (a checkbox or radio group's members).
+# Lever's "✱" required marker comes back as "*", which callers already strip.
+QUESTION_HEAD_JS = r"""
+  const headFor = (el, own) => {
+    const owned = new Set(own);
+    const words = n => (n && n.textContent || '').replace(/\s+/g, ' ').trim();
+    const ctl = 'input:not([type=hidden]), select, textarea, [contenteditable=true]';
+    let box = el.parentElement;
+    for (let up = 0; box && up < 8; up++, box = box.parentElement) {
+      if ([...box.querySelectorAll(ctl)].some(c => !owned.has(c))) return '';
+      for (const head of box.querySelectorAll('legend, label, [class*=label], [class*=Label]')) {
+        if ([...owned].some(c => head.contains(c))) continue;
+        const t = words(head).replace(/✱/g, '*');
+        if (t.replace(/\*/g, '').trim()) return t;
+      }
+    }
+    return '';
+  };
+"""
+
 _DESCRIBE_JS = r"""function () {
   const el = this, doc = el.ownerDocument;
   const text = n => (n && n.textContent || '').replace(/\s+/g, ' ').trim();
+""" + QUESTION_HEAD_JS + r"""
   const labelOf = e => {
     if (e.labels && e.labels.length) return text(e.labels[0]);
     const ids = (e.getAttribute('aria-labelledby') || '').split(/\s+/).filter(Boolean);
@@ -30,7 +55,7 @@ _DESCRIBE_JS = r"""function () {
     if (e.getAttribute('aria-label')) return e.getAttribute('aria-label');
     const set = e.closest('fieldset');
     if (set && set.querySelector('legend')) return text(set.querySelector('legend'));
-    return e.getAttribute('placeholder') || '';
+    return headFor(e, [e]) || e.getAttribute('placeholder') || '';
   };
   const tag = el.tagName.toLowerCase(), type = (el.getAttribute('type') || '').toLowerCase();
   let kind = 'other', options = [], group = '';
@@ -41,13 +66,8 @@ _DESCRIBE_JS = r"""function () {
     options = members.length > 1 ? members.map(m => labelOf(m)) : [];
     const set = el.closest('fieldset');
     group = set && set.querySelector('legend') ? text(set.querySelector('legend')) : '';
-    if (!group && members.length > 1) {
-      // Greenhouse-style: the group's question is the label of the box around the checkboxes.
-      let box = el.parentElement;
-      while (box && box.querySelectorAll('input[type=' + type + ']').length < members.length) box = box.parentElement;
-      const head = box && box.querySelector('label:not(:has(input)), legend, [class*=label]');
-      group = head ? text(head) : '';
-    }
+    // Greenhouse and Lever: the group's question is the heading of the box around the checkboxes.
+    if (!group && members.length > 1) group = headFor(el, members);
   }
   else if (type === 'file') kind = 'file';
   else if (el.getAttribute('role') === 'combobox' || ['list', 'both'].includes(el.getAttribute('aria-autocomplete'))
@@ -70,6 +90,11 @@ _DESCRIBE_JS = r"""function () {
     const parts = [], walk = doc.createTreeWalker(copy, NodeFilter.SHOW_TEXT);
     while (walk.nextNode()) parts.push(walk.currentNode.nodeValue);
     details = parts.join(' ').replace(/\s+/g, ' ').trim();
+    // A question read from a heading (headFor) is in that box too: it's the label, not something said with it.
+    const bare = s => s.replace(/[*✱]/g, ' ').replace(/\s+/g, ' ').trim();
+    details = bare(details);
+    for (const t of [group, labelOf(el)].map(bare).filter(Boolean)) details = details.split(t).join(' ');
+    details = details.replace(/\s+/g, ' ').trim();
     if (!/[a-z]{3}/i.test(details)) details = '';
   }
   return JSON.stringify({kind, label: labelOf(el), group, options, details: details.slice(0, 800),
@@ -397,11 +422,14 @@ _CONTROLS_JS = r"""
   const text = n => (n && n.textContent || '').replace(/\s+/g, ' ').trim();
   const docs = [document];
   for (const f of document.querySelectorAll('iframe')) { try { if (f.contentDocument) docs.push(f.contentDocument); } catch (e) {} }
+""" + QUESTION_HEAD_JS + r"""
   const labelOf = (e, doc) => {
     if (e.labels && e.labels.length) return text(e.labels[0]);
     const ids = (e.getAttribute('aria-labelledby') || '').split(/\s+/).filter(Boolean);
     if (ids.length) return ids.map(i => text(doc.getElementById(i))).join(' ');
-    return e.getAttribute('aria-label') || '';
+    if (e.getAttribute('aria-label')) return e.getAttribute('aria-label');
+    // A checkbox or radio without its own label is named by its group (groupOf); anything else by its heading.
+    return ['checkbox', 'radio'].includes(e.type) ? '' : headFor(e, [e]);
   };
   const groupOf = (e, doc) => {
     const type = e.type;
@@ -409,10 +437,7 @@ _CONTROLS_JS = r"""
     if (members.length < 2) return null;
     const set = e.closest('fieldset');
     if (set && set.querySelector('legend')) return {label: text(set.querySelector('legend')), members};
-    let box = e.parentElement;
-    while (box && box.querySelectorAll('input[type=' + type + ']').length < members.length) box = box.parentElement;
-    const head = box && box.querySelector('label:not(:has(input)), legend, [class*=label]');
-    return {label: head ? text(head) : '', members};
+    return {label: headFor(e, members), members};
   };
   const shown = el => { const s = el.ownerDocument.defaultView.getComputedStyle(el); const b = el.getBoundingClientRect();
                         return s.display !== 'none' && s.visibility !== 'hidden' && (b.width > 0 || b.height > 0); };

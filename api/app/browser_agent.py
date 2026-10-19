@@ -1219,8 +1219,9 @@ _EMPTY_REQUIRED_JS = r"""() => {
     try { if (frame.contentDocument) docs.push(frame.contentDocument); } catch (e) {}
   }
   const text = node => (node && node.textContent) || '';
-  const clean = t => t.replace(/\*/g, ' ').replace(/\s+/g, ' ').trim();
-  const starred = t => /\*\s*$/.test(t.trim());
+  const clean = t => t.replace(/[*✱]/g, ' ').replace(/\s+/g, ' ').trim();
+  const starred = t => /[*✱]\s*$/.test(t.trim());
+""" + form_widgets.QUESTION_HEAD_JS + r"""
   const shown = el => {
     const style = el.ownerDocument.defaultView.getComputedStyle(el);
     const box = el.getBoundingClientRect();
@@ -1234,7 +1235,7 @@ _EMPTY_REQUIRED_JS = r"""() => {
     if (el.getAttribute('aria-label')) return el.getAttribute('aria-label');
     const set = el.closest('fieldset');
     if (set && set.querySelector('legend')) return text(set.querySelector('legend'));
-    return el.getAttribute('placeholder') || el.getAttribute('name') || '';
+    return headFor(el, [el]) || el.getAttribute('placeholder') || el.getAttribute('name') || '';
   };
   const controls = 'input:not([type=hidden]), select, textarea, [contenteditable=true]';
   // The widest ancestor holding no other form control: the field's own widget.
@@ -1263,7 +1264,9 @@ _EMPTY_REQUIRED_JS = r"""() => {
         const group = el.name ? [...doc.querySelectorAll('input[type=' + type + ']')].filter(g => g.name === el.name) : [el];
         const set = el.closest('fieldset');
         const legend = set && set.querySelector('legend') ? text(set.querySelector('legend')) : '';
-        const label = type === 'radio' || group.length > 1 ? (legend || labelOf(el, doc)) : labelOf(el, doc);
+        // A group is named by its question, not its first option (Lever: "English (ENG)", "Yes").
+        const label = type === 'radio' || group.length > 1 ? (legend || headFor(el, group) || labelOf(el, doc))
+                                                           : labelOf(el, doc);
         const required = group.some(markedRequired) || starred(label) || (set && set.getAttribute('aria-required') === 'true');
         if (required && group.some(shown) && !group.some(g => g.checked)) found.push(clean(label));
         continue;
