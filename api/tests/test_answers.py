@@ -457,6 +457,19 @@ def test_draft_endpoint_answers_without_saving(client, model):
 
 # ── The apply agent ───────────────────────────────────────────────────────────
 
+@pytest.mark.parametrize("label, asks", [
+    ("Do you need visa sponsorship?*", True),
+    ("By checking this box, I consent to Catapult Sports collecting my responses", True),
+    # A consent under a short label: DV Trading's was left unasked and unlisted, and fill_fields would have ticked it.
+    ("Terms & Conditions*", True), ("GDPR Statement", True), ("Candidate Personal Data Disclosure", True),
+    ("Privacy Policy", True), ("Declaration", True), ("I agree", True),
+    ("School*", False), ("Country", False), ("Location (City)", False), ("Undergrad Discipline(s)", False),
+    ("Confirm email", False), ("Notice period", False),
+])
+def test_a_label_that_asks_or_states_something_is_told_from_a_plain_detail(label, asks):
+    assert ba._asks_something(label) is asks
+
+
 def test_answer_lines_tell_the_agent_what_to_fill_and_what_to_leave():
     assert ba._answer_line(1, {"question": "Sponsorship?", "options": ["Yes", "No"], "kind": "fact",
                                "source": "profile", "answer": "No"}) == '1. "Sponsorship?": choose "No"'
