@@ -13,6 +13,7 @@ has listed for a few days.
 """
 import asyncio
 import logging
+import math
 import multiprocessing
 import os
 import time
@@ -231,10 +232,73 @@ def collection_plan() -> tuple[list[str], list[str]]:
     return titles[:_MAX_COLLECT_TITLES], places
 
 
+_collection: asyncio.Task | None = None   # the collection in flight, scheduled or asked for
+_REFRESH_GAP_S = 30 * 60                   # an asked-for refresh waits this long after the last collection started
+
+
+def collecting() -> bool:
+    return _collection is not None and not _collection.done()
+
+
 async def collect() -> dict | None:
-    """Run one collection now: search every target title in one pass over the sources, store what's
-    found, then expire the jobs nobody has listed for _UNSEEN_DAYS. Returns the stored run, or None when
-    no user has a target title."""
+    """Run one collection now, or join the one already running (one at a time)."""
+    global _collection
+    if not collecting():
+        _collection = asyncio.create_task(_collect())
+    return await _collection
+
+
+def _report_failure(task: asyncio.Task) -> None:
+    if not task.cancelled() and task.exception():
+        logger.warning("asked-for job collection failed: %s", task.exception())
+
+
+async def refresh_now() -> tuple[bool, str]:
+    """Start a collection now for the feed's Refresh button: (started, what to tell the user). Not while
+    one runs, not without target titles, and not within _REFRESH_GAP_S of the last one starting (each
+    costs aggregator calls and model reads)."""
+    global _collection
+    if collecting():
+        return False, "The feed is being refreshed now."
+    searches, _ = await asyncio.to_thread(collection_plan)
+    if not searches:
+        return False, "Add target job titles to your profile so a refresh knows what to look for."
+    last = await asyncio.to_thread(jobs_db.last_collection)
+    if last:
+        ago = (datetime.now(timezone.utc) - datetime.fromisoformat(last["started_at"])).total_seconds()
+        if ago < _REFRESH_GAP_S:
+            return False, (f"The feed was refreshed {int(ago // 60)} min ago. "
+                           f"You can refresh again in {math.ceil((_REFRESH_GAP_S - ago) / 60)} min.")
+    if collecting():  # started while this looked things up
+        return False, "The feed is being refreshed now."
+    _collection = asyncio.create_task(_collect())
+    _collection.add_done_callback(_report_failure)
+    return True, "Refreshing the feed: new roles appear as they're found."
+
+
+def collection_status() -> dict | None:
+    """The last collection for the feed to show: when it ran, what it added, whether one is running,
+    and when the next is due (None when there's no schedule)."""
+    last = jobs_db.last_collection()
+    if last is None:
+        return {"running": collecting()} if collecting() else None
+    started = datetime.fromisoformat(last["started_at"])
+    return {
+        "running": collecting(),
+        "started_at": last["started_at"],
+        "finished_at": last["finished_at"],
+        "found": last["found"],
+        "added": last["added"],
+        "failed": bool(last["error"]),
+        "next_at": (started + timedelta(seconds=_COLLECT_EVERY_S)).isoformat() if _COLLECT_EVERY_S > 0 else None,
+        "refresh_after": (started + timedelta(seconds=_REFRESH_GAP_S)).isoformat(),
+    }
+
+
+async def _collect() -> dict | None:
+    """One collection: search every target title in one pass over the sources, store what's found,
+    then expire the jobs nobody has listed for _UNSEEN_DAYS. Returns the stored run, or None when no
+    user has a target title."""
     searches, locations = await asyncio.to_thread(collection_plan)
     if not searches:
         logger.info("collection skipped: no user has a target title")

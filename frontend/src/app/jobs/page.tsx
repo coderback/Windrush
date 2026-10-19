@@ -12,11 +12,11 @@ import FeedFilters, { type FeedFilterState } from "@/components/feed/FeedFilters
 import JobRow from "@/components/feed/JobRow";
 import JobPreview from "@/components/feed/JobPreview";
 import { parseCommaList } from "@/components/CommaListInput";
-import { jobKey, workSetting } from "@/lib/format";
+import { jobKey, longAgo, workSetting } from "@/lib/format";
 import { jobHref, rememberFeed, rememberJob } from "@/lib/jobs";
 import { discardJob } from "@/lib/actions";
 import { useResource } from "@/lib/store";
-import type { Job, Persona } from "@/lib/types";
+import type { FeedSummary, Job, Persona } from "@/lib/types";
 
 const PAGE_SIZE = 20;
 const WIDE = "(min-width: 1000px)";
@@ -111,6 +111,10 @@ function FeedPage() {
   const [discovering, setDiscovering] = useState(false);
   const discoveryPolls = useRef(0);
   const observerRef = useRef<HTMLDivElement | null>(null);
+  // Page 1's count of matches, what the filters hide, and when the feed was last refreshed.
+  const [summary, setSummary] = useState<FeedSummary | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshNote, setRefreshNote] = useState<string | null>(null);
 
   // Remote alone is an API filter; with Hybrid as well both are matched on the page instead.
   const remoteParam = filters.remote && !filters.hybrid;
@@ -143,6 +147,9 @@ function FeedPage() {
         if (pageNum === 1) {
           setDiscovering(!!data.discovering);
           setSponsorshipApplied(data.sponsorship ?? "any");
+          setSummary(typeof data.total === "number"
+            ? { total: data.total, hidden: data.hidden ?? { sponsorship: 0, dealt_with: 0 }, collection: data.collection ?? null }
+            : null);
         }
         setJobs((prev) => (append ? [...prev, ...incoming] : incoming));
       } catch (err) {
@@ -232,6 +239,38 @@ function FeedPage() {
     setFilters(NO_FILTERS);
   };
 
+  // The Refresh button: POST /jobs/refresh starts a collection; while it runs the feed reports
+  // `discovering`, so page 1 is re-polled until it's done. A 429 says why it can't start yet.
+  const refresh = async () => {
+    setRefreshing(true);
+    setRefreshNote(null);
+    try {
+      const res = await authFetch("/api/jobs/refresh", { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setRefreshNote(data?.detail || "Couldn't refresh the feed. Try again later.");
+        return;
+      }
+      setRefreshNote(data.detail ?? null);
+      discoveryPolls.current = 0;
+      setDiscovering(true);
+    } catch {
+      setRefreshNote("Couldn't refresh the feed. Try again later.");
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  // Salary, hybrid and clearance are matched on the loaded page, so with any of them on the server's
+  // total isn't what's shown.
+  const pageFiltered = salary[0] > SALARY_MIN || salary[1] < SALARY_MAX || filters.hybrid || filters.noClearance;
+  const shownCount = summary && !pageFiltered ? `${summary.total}` : `${visible.length}${hasMore ? "+" : ""}`;
+  const hiddenBySponsorship = summary?.hidden.sponsorship ?? 0;
+  const dealtWith = summary?.hidden.dealt_with ?? 0;
+  const lastRun = summary?.collection;
+  const updated = lastRun?.finished_at ? longAgo(lastRun.finished_at) : null;
+  const showSponsored = () => setFilters((f) => ({ ...f, sponsorship: "any" }));
+
   const filterState = { ...filters, sponsorship: filters.sponsorship || sponsorshipApplied };
   const activeCount = [tags.length > 0, !!location, !!maxYears, salary[0] > SALARY_MIN || salary[1] < SALARY_MAX,
     !!filters.sponsorship, filters.remote, filters.hybrid, !!filters.level, filters.noDegree, filters.noClearance].filter(Boolean).length;
@@ -270,19 +309,51 @@ function FeedPage() {
             <h1 className="m-0 text-[22px] font-semibold tracking-[-0.02em]">Roles for you</h1>
             {!loading && (
               <span className="font-mono text-[12px] font-semibold px-[10px] py-[3px] rounded-full border border-border bg-surface">
-                {visible.length}{hasMore ? "+" : ""}<span className="sr-only"> {visible.length === 1 ? "job" : "jobs"}</span>
+                {shownCount}<span className="sr-only"> {shownCount === "1" ? "job" : "jobs"}</span>
               </span>
             )}
             <span className="text-[13px] text-ink-3">
-              ranked by match to your persona{discovering ? " · searching job boards now" : ""}
+              ranked by match to your persona
+              {discovering ? " · searching job boards now"
+                : updated ? <> · <span title={lastRun?.next_at ? `Next refresh ${new Date(lastRun.next_at).toLocaleString()}` : undefined}>
+                    updated {updated}{lastRun?.failed ? " (that refresh failed)" : ""}</span></>
+                : ""}
             </span>
           </div>
-          <button type="button" onClick={() => setShowFilters((s) => !s)} aria-expanded={showFilters} aria-controls="feed-filters-narrow"
-            className={cx(buttonClass("secondary", "sm"), "min-[1200px]:hidden")}>
-            <Icon name="filter" size={15} />
-            Filters{activeCount > 0 ? ` (${activeCount})` : ""}
-          </button>
+          <div className="flex items-center gap-2">
+            <button type="button" onClick={refresh} disabled={refreshing || discovering}
+              className={buttonClass("secondary", "sm")}>
+              {refreshing || discovering ? <Spinner /> : <Icon name="refresh" size={15} />}
+              {discovering ? "Refreshing…" : "Refresh"}
+            </button>
+            <button type="button" onClick={() => setShowFilters((s) => !s)} aria-expanded={showFilters} aria-controls="feed-filters-narrow"
+              className={cx(buttonClass("secondary", "sm"), "min-[1200px]:hidden")}>
+              <Icon name="filter" size={15} />
+              Filters{activeCount > 0 ? ` (${activeCount})` : ""}
+            </button>
+          </div>
         </div>
+
+        {!loading && (hiddenBySponsorship > 0 || dealtWith > 0 || refreshNote) && (
+          <div className="flex flex-col gap-1 text-[13px] text-ink-2">
+            {refreshNote && <p role="status" className="m-0">{refreshNote}</p>}
+            {hiddenBySponsorship > 0 && (
+              <p className="m-0">
+                {hiddenBySponsorship} more {hiddenBySponsorship === 1 ? "role is" : "roles are"} hidden by the sponsorship
+                filter: the ad rules out sponsoring a visa or needs security clearance.{" "}
+                <button type="button" onClick={showSponsored} className="text-teal underline underline-offset-2 hover:text-ink">
+                  Show {hiddenBySponsorship === 1 ? "it" : "them"}
+                </button>
+              </p>
+            )}
+            {dealtWith > 0 && (
+              <p className="m-0">
+                {dealtWith} {dealtWith === 1 ? "role you've" : "roles you've"} applied to or discarded {dealtWith === 1 ? "isn't" : "aren't"} shown.{" "}
+                <Link href="/applications" className="text-teal underline underline-offset-2 hover:text-ink">See applications</Link>
+              </p>
+            )}
+          </div>
+        )}
 
         {showFilters && <div id="feed-filters-narrow" className="min-[1200px]:hidden">{filtersPanel}</div>}
 
@@ -296,13 +367,19 @@ function FeedPage() {
             {loading ? (
               Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-[150px] rounded-[14px]" />)
             ) : visible.length === 0 && !discovering ? (
-              <EmptyState action={activeCount > 0 ? (
+              <EmptyState action={hiddenBySponsorship > 0 ? (
+                <button type="button" onClick={showSponsored} className={buttonClass("secondary", "sm")}>
+                  Show the {hiddenBySponsorship} hidden
+                </button>
+              ) : activeCount > 0 ? (
                 <button type="button" onClick={clearAll} className={buttonClass("secondary", "sm")}>Clear filters</button>
               ) : !hasTitles && persona.data ? (
                 <Link href="/profile#prefs" className={buttonClass("secondary", "sm")}>Add target titles</Link>
               ) : undefined}>
-                {activeCount > 0 ? "No roles match these filters."
-                  : hasTitles ? "No roles here yet. Discovery looks again each time the feed runs low."
+                {hiddenBySponsorship > 0
+                  ? `No roles here that could sponsor a visa. ${hiddenBySponsorship} ${hiddenBySponsorship === 1 ? "is" : "are"} hidden because the ad rules it out or needs security clearance.`
+                  : activeCount > 0 ? "No roles match these filters."
+                  : hasTitles ? "No roles here yet. The feed refreshes every few hours, or press Refresh."
                   : "No roles yet. Add target job titles to your persona so discovery knows what to look for."}
               </EmptyState>
             ) : (

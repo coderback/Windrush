@@ -527,9 +527,8 @@ _THIN_FEED = 5
 # It runs once per top target title, each run covering their first few preferred locations;
 # capped because each run is a full multi-source search in the worker pool.
 _DISCOVERY_TITLES = 3
-# Each location is one Adzuna call per title, or two when a title with a seniority word finds nothing
-# and is retried without it: 3 titles x 4 locations = 12 to 24 calls per feed load, just under
-# Adzuna's default ~25 calls/minute.
+# Each location is two Adzuna calls per title (plain and in its graduate category; a UK city isn't
+# searched when the UK is), made two at a time to stay under Adzuna's ~25 calls/minute.
 _DISCOVERY_LOCATIONS = 4
 # Request-path embedding budget: past this the feed falls back to recency ranking rather than
 # making the user wait on Ollama loading the model (background work still allows 600s).
@@ -611,7 +610,23 @@ async def get_jobs(
             job["tracker_status"] = status
         job["sponsorship_mark"] = marks.get(job["id"], "")
 
-    discovering = False
+    # Page 1 also says how many match, what the sponsorship filter and the jobs already dealt with hide,
+    # and when the feed was last refreshed, so a thin feed explains itself.
+    summary = {}
+    if page == 1:
+        filters = dict(query=query, location=effective_location, level=level, category=category, remote=remote,
+                       tags=tag_list, marks=marks, max_years=max_years, no_degree=no_degree)
+        total = await asyncio.to_thread(jobs_db.count_jobs, exclude=hidden, sponsorship=sponsorship, **filters)
+        by_sponsorship = (await asyncio.to_thread(jobs_db.count_jobs, exclude=hidden, sponsorship="any", **filters)
+                          if sponsorship != "any" else total)
+        with_dealt = await asyncio.to_thread(jobs_db.count_jobs, exclude=None, sponsorship=sponsorship, **filters)
+        summary = {
+            "total": total,
+            "hidden": {"sponsorship": by_sponsorship - total, "dealt_with": with_dealt - total},
+            "collection": await asyncio.to_thread(discovery.collection_status),
+        }
+
+    discovering = discovery.collecting()
     if page == 1 and len(jobs) < _THIN_FEED:
         free_text = [t for t in tag_list if t.lower() not in jobs_db.ROLE_TAGS | jobs_db.DOMAIN_TAGS]
         live_queries = [query] if query else free_text[:1] or titles[:_DISCOVERY_TITLES] or ["software engineer"]
@@ -620,7 +635,7 @@ async def get_jobs(
         # One run per title over its locations not already in flight or in cooldown. ensure() is
         # cheap for those; evaluate every title.
         discovering = any([discovery.ensure(q, live_locations) for q in live_queries
-                           if len(q) > 2])  # don't fire on a stray character
+                           if len(q) > 2]) or discovering  # don't fire on a stray character
 
     return {
         "jobs": jobs,
@@ -631,7 +646,19 @@ async def get_jobs(
         "has_more": has_more,
         "discovering": discovering,
         "sponsorship": sponsorship,
+        **summary,
     }
+
+
+@app.post("/jobs/refresh")
+async def refresh_jobs(current_user: Annotated[auth.User, Depends(auth.get_current_user)]):
+    """The feed's Refresh button: start a collection now (see discovery.refresh_now). 429 when it can't
+    start yet, with why."""
+    started, detail = await discovery.refresh_now()
+    if not started and not discovery.collecting():
+        raise HTTPException(status_code=429, detail=detail)
+    return {"started": started, "detail": detail,
+            "collection": await asyncio.to_thread(discovery.collection_status)}
 
 
 def _sponsorship_view(job: dict, mark: str) -> dict:

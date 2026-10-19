@@ -226,3 +226,82 @@ def test_discovery_state_is_per_query_and_location(db, monkeypatch):
     asyncio.run(flow())
     assert sorted(runs) == [("Data Analyst", ["Bristol"]), ("Data Analyst", ["Leeds"]),
                             ("Data Analyst", ["London", "Manchester"])]
+
+
+# ── What the feed says about itself ───────────────────────────────────────────
+
+@pytest.fixture
+def sponsored_user(db, monkeypatch):
+    uid = tracker.create_user("sponsor@x.com", "h")
+    tracker.update_user_persona(uid, {"core_info": {"require_sponsorship": True},
+                                      "preferences": {"target_titles": ["Data Engineer"], "preferred_locations": ["London"]}})
+
+    async def no_search(query, locations, web_search=True):
+        return []
+    monkeypatch.setattr(discovery, "search_jobs", no_search)
+    main.app.dependency_overrides[auth.get_current_user] = lambda: auth.User(id=uid, email="sponsor@x.com")
+    yield uid
+    main.app.dependency_overrides.clear()
+
+
+def _call(method, path, **kwargs):
+    async def flow():
+        async with _client() as c:
+            return await getattr(c, method)(path, **kwargs)
+    return asyncio.run(flow())
+
+
+def test_page_one_says_how_many_match_and_what_is_hidden(sponsored_user, ollama):
+    jobs_db.add_jobs([make_job(1, "Data Engineer", "Open Co", "London, UK", "pipelines"),
+                      make_job(2, "Data Engineer", "Closed Co", "London, UK", "We are unable to sponsor visas."),
+                      make_job(3, "Data Engineer", "Done Co", "London, UK", "pipelines")])
+    tracker.add_application(sponsored_user, {"job_id": "3", "title": "Data Engineer", "company": "Done Co"}, {}, "", {},
+                            status="Applied")
+    body = _call("get", "/jobs").json()
+    assert [j["company"] for j in body["jobs"]] == ["Open Co"]
+    assert body["total"] == 1 and body["hidden"] == {"sponsorship": 1, "dealt_with": 1}
+    assert body["collection"] is None  # nothing collected yet
+
+    # With the sponsorship filter off, nothing is hidden by it; later pages don't recount.
+    assert _call("get", "/jobs", params={"sponsorship": "any"}).json()["hidden"]["sponsorship"] == 0
+    assert "total" not in _call("get", "/jobs", params={"page": 2}).json()
+
+
+def test_the_feed_says_when_it_was_last_refreshed(sponsored_user, ollama):
+    run_id = jobs_db.start_collection(["Data Engineer"], ["London"])
+    jobs_db.finish_collection(run_id, found=40, added=12)
+    status = _call("get", "/jobs").json()["collection"]
+    assert (status["running"], status["found"], status["added"], status["failed"]) == (False, 40, 12, False)
+    assert status["finished_at"] and status["next_at"] > status["started_at"]
+
+
+def test_refresh_starts_a_collection_but_not_twice_in_half_an_hour(sponsored_user, ollama, monkeypatch):
+    runs = []
+
+    async def fake_collect():
+        runs.append(1)
+        run_id = jobs_db.start_collection(["Data Engineer"], ["London"])
+        jobs_db.finish_collection(run_id, found=3, added=3)
+        return jobs_db.last_collection()
+    monkeypatch.setattr(discovery, "_collect", fake_collect)
+
+    async def flow():
+        async with _client() as c:
+            first = await c.post("/jobs/refresh")
+            while discovery.collecting():
+                await asyncio.sleep(0.01)
+            second = await c.post("/jobs/refresh")
+            return first, second
+    first, second = asyncio.run(flow())
+    assert first.status_code == 200 and first.json()["started"] is True and runs == [1]
+    assert second.status_code == 429 and "refreshed 0 min ago" in second.json()["detail"]
+
+
+def test_refresh_needs_target_titles(db, monkeypatch):
+    uid = tracker.create_user("blank@x.com", "h")
+    main.app.dependency_overrides[auth.get_current_user] = lambda: auth.User(id=uid, email="blank@x.com")
+    try:
+        r = _call("post", "/jobs/refresh")
+    finally:
+        main.app.dependency_overrides.clear()
+    assert r.status_code == 429 and "target job titles" in r.json()["detail"]
