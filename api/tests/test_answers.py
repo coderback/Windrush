@@ -428,6 +428,19 @@ def test_a_plain_field_is_answered_only_by_a_saved_answer_to_it(model):
     assert fake.seen == []
 
 
+def test_a_plain_fields_saved_answer_goes_as_saved_when_the_list_shows_only_its_first_results(model):
+    # DV Trading's School list reads as its first 100 schools; "Other" is in it only once typed.
+    model(read={"Which school did you attend?": fact()})
+    first_hundred = [f"University {n}" for n in range(100)]
+    bank = [answers_entry("School", "Other", company="Harbourline")]
+    got = ask([{"question": "School", "options": first_hundred, "saved_only": True}], bank=bank)
+    assert (got[0]["source"], got[0]["answer"]) == ("saved", "Other")
+    # A question (not a plain field) still needs its saved answer among the options.
+    got = ask([{"question": "Which school did you attend?", "options": first_hundred}],
+              bank=[answers_entry("Which school did you attend?", "Other", company="Harbourline")])
+    assert got[0]["source"] != "saved"
+
+
 def test_a_question_is_read_with_what_the_form_says_with_it(model):
     # Catapult's bare "GDPR Statement" was answered from the saved consent on some runs and left on others: the
     # statement under it, which says what it asks, never reached the model.
