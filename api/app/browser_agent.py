@@ -1310,7 +1310,9 @@ async def _fill_again(browser_session, tried: dict[str, str], filled: set[str], 
     """
     One more try at each required field still empty once the agent stops that it gave fill_fields a value for: DV
     Trading's Discipline ended up empty on one run though the agent had filled it. A value no option takes (School,
-    without the user's university) fails again, harmlessly. True when one took.
+    without the user's university) fails again, harmlessly. A label two fields share is tried on each of them that's
+    still empty: Cambridge Consultants' address "Country" stayed empty beside the phone's, which the agent filled.
+    True when one took.
     """
     took = False
     for label in empty:
@@ -1319,16 +1321,18 @@ async def _fill_again(browser_session, tried: dict[str, str], filled: set[str], 
             continue
         try:
             field = await form_widgets.find_by_label(browser_session, label)
-            if not field:
-                continue
-            ok, _ = await form_widgets.fill_field(await field.open(), value)
+            fields = [field] if field else await form_widgets.labelled_fields(browser_session, label)
+            for field in fields:
+                field = await field.open()
+                if len(fields) > 1 and any(h.strip() for h in await field.held()):
+                    continue        # the one of them the agent did fill
+                ok, _ = await form_widgets.fill_field(field, value)
+                logger.info("filled again after the agent: %r %s", label[:80], "took" if ok else "didn't take")
+                if ok:
+                    filled.add(label)
+                    took = True
         except Exception as exc:
             logger.debug("filling %r again failed: %s", label[:60], exc)
-            continue
-        logger.info("filled again after the agent: %r %s", label[:80], "took" if ok else "didn't take")
-        if ok:
-            filled.add(label)
-            took = True
     return took
 
 

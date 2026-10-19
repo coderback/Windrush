@@ -616,6 +616,43 @@ def test_a_question_given_by_the_text_under_its_label_is_asked_as_the_form_label
     assert_no_chromium_left()
 
 
+class OneCountryLLM(GreenhouseLLM):
+    def next_action(self, text: str) -> list[dict]:
+        self.step += 1
+        if self.step == 1:          # the phone's dial-code "Country" only, as on Cambridge Consultants' form
+            return [{"fill_fields": {"fields": [
+                {"index": self._index(text, "country"), "label": "Country", "value": "United Kingdom"}]}}]
+        if self.step == 3:
+            return [{"done": {"text": "Done.", "success": True}}]
+        return [{"evaluate": {"code": "'STEP'"}}]
+
+
+def test_a_label_two_fields_share_is_tried_again_on_the_one_still_empty(ba, site, monkeypatch):
+    """Cambridge Consultants' address "Country" stayed empty beside the phone's dial-code one the agent filled: the
+    second try looked it up by label and gave up on two matches. Each of them still empty gets the value now, and
+    the one already filled is left alone."""
+    monkeypatch.setattr(ba, "_make_browser_llm", lambda: OneCountryLLM())
+    held = {}
+    real_fill_again = ba._fill_again
+
+    async def fill_again(session, tried, filled, empty):
+        took = await real_fill_again(session, tried, filled, empty)
+        for element_id in ("country", "address-country"):
+            node = await session.get_element_by_index(await session.get_index_by_id(element_id))
+            held[element_id] = await (await ba.form_widgets.Field(session, node).open()).held()
+        return took
+    monkeypatch.setattr(ba, "_fill_again", fill_again)
+
+    async def flow():
+        return [event async for event in ba.apply_with_browser(
+            f"{site}/greenhouse.html", {"core_info": {"first_name": "Ada"}}, "", asyncio.Queue(),
+            answerer=ba._no_answers, decide=lambda filled: asyncio.sleep(0, result=False))]
+    final = asyncio.run(flow())[-1]
+    assert held == {"country": ["+44"], "address-country": ["United Kingdom"]}
+    assert "Country" not in final["empty"]
+    assert_no_chromium_left()
+
+
 class LosesAFieldLLM(GreenhouseLLM):
     def next_action(self, text: str) -> list[dict]:
         self.step += 1

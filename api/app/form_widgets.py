@@ -448,6 +448,10 @@ _COUNT_JS = "(wanted) => {" + _CONTROLS_JS + _LABELLED_JS + r"""
   return labelled(wanted).exact.length;
 }"""
 
+_FIND_NTH_JS = "(wanted, n) => {" + _CONTROLS_JS + _LABELLED_JS + r"""
+  return labelled(wanted).exact[n] || null;
+}"""
+
 # Every field that holds something, as {label, value}: what the user would read on the form.
 _FILLED_JS = "() => {" + _CONTROLS_JS + r"""
   const out = [], seen = new Set();
@@ -493,6 +497,20 @@ async def find_by_label(browser_session, label: str) -> Field | None:
     if found.get("subtype") != "node" or not found.get("objectId"):
         return None
     return Field(send=send, session_id=session_id, object_id=found["objectId"])
+
+
+async def labelled_fields(browser_session, label: str) -> list[Field]:
+    """Every field labelled `label` exactly, in page order: both of a Greenhouse form's "Country" fields."""
+    send, session_id = await _tab(browser_session)
+    fields = []
+    for n in range(await label_count(browser_session, label)):
+        result = await send.Runtime.evaluate(
+            params={"expression": f"({_FIND_NTH_JS})({json.dumps(str(label))}, {n})", "returnByValue": False},
+            session_id=session_id)
+        found = result.get("result") or {}
+        if found.get("subtype") == "node" and found.get("objectId"):
+            fields.append(Field(send=send, session_id=session_id, object_id=found["objectId"]))
+    return fields
 
 
 async def label_count(browser_session, label: str) -> int:
