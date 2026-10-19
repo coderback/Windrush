@@ -132,9 +132,11 @@ def enabled() -> bool:
 
 
 async def extract_pending(batch: int = _BATCH) -> tuple[int, int]:
-    """Read up to `batch` waiting jobs. Returns (jobs tried, jobs the model read)."""
-    from . import jobs_db
-    rows = await asyncio.to_thread(jobs_db.jobs_needing_attributes, batch)
+    """Read up to `batch` waiting jobs in a place some user's feed shows (each read is an LLM call).
+    Returns (jobs tried, jobs the model read)."""
+    from . import jobs_db, tracker
+    locations = await asyncio.to_thread(tracker.feed_locations)
+    rows = await asyncio.to_thread(jobs_db.jobs_needing_attributes, batch, locations)
     gate = asyncio.Semaphore(_CONCURRENCY)
 
     async def one(row: dict) -> bool:

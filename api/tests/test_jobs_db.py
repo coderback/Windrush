@@ -135,6 +135,20 @@ def test_london_ontario_rows_cannot_crowd_uk_jobs_out_of_the_candidate_pool(db, 
     assert ids(location=location) == expected
 
 
+@pytest.mark.parametrize("job_location, locations, expected", [
+    ("London, United Kingdom (Hybrid)", ["London", "United Kingdom"], True),
+    ("Cambridge, UK", ["United Kingdom"], True),
+    ("Austin, TX", ["London", "United Kingdom"], False),
+    ("London, Ontario, Canada", ["London"], False),
+    ("Remote - US", ["London"], True),  # the feed's remote filter decides
+    ("", ["London"], True),             # the source didn't say where
+    ("Austin, TX", [], True),
+    ("Austin, TX", ["Remote"], True),
+])
+def test_in_locations(job_location, locations, expected):
+    assert jobs_db.in_locations(job_location, locations) is expected
+
+
 def test_exclusions_apply_before_pagination(seeded):
     seen, page, more = [], 0, True
     while more:
