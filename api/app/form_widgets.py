@@ -161,8 +161,11 @@ _SET_CHECKS_JS = r"""function (wanted, single) {
 }"""
 
 _STOP = {"the", "of", "and", "a", "an", "in", "at", "for", "to", "or", "on"}
-_YES = re.compile(r"^(yes|y|true|checked|agree|i agree|accept|i accept|confirm|i confirm)\b", re.I)
-_NO = re.compile(r"^(no|n|false|unchecked|disagree)\b", re.I)
+# What ticks or clears a single checkbox. A consent box is often answered in its own words: the user's saved
+# "Consent" for Catapult's demographic-data box was refused as not yes or no.
+_YES = re.compile(r"^(yes|y|true|checked|agree|i agree|accept|i accept|confirm|i confirm|consent|i consent|"
+                  r"acknowledge|i acknowledge)\b", re.I)
+_NO = re.compile(r"^(no|n|false|unchecked|disagree|do not|don['’]t|decline|i do not|i don['’]t)\b", re.I)
 
 
 def _norm(text: str) -> str:
