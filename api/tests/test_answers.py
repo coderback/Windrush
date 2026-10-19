@@ -211,6 +211,27 @@ def test_a_list_of_skills_says_yes_only_to_what_it_names():
     assert resolve("Do you hold a degree from Oxford?", fact("education_1", answer="No"), ["Yes", "No"]) is None
 
 
+@pytest.mark.parametrize("said, options, picked", [
+    # DV Trading: the model chose "University of Bristol" for a degree at the University of the West of England,
+    # Bristol, and it went through because it was an option: every word of it is in the education line.
+    ("University of Bristol", ["University of Bath", "University of Bristol"], None),
+    # Cambridge Consultants lists the same university as "Bristol, UWE": the institution picks it.
+    ("Bristol, UWE", ["University of Bristol", "Bristol, UWE"], "Bristol, UWE"),
+    ("Computer Science", ["Mathematics", "Computer Science"], "Computer Science"),
+    ("2025", ["2024", "2025", "2026"], "2025"),
+    ("Bachelor's Degree", ["Bachelor's Degree", "Master's Degree"], "Bachelor's Degree"),
+    ("Master's Degree", ["Bachelor's Degree", "Master's Degree"], None),
+])
+def test_an_option_from_a_degree_line_must_be_one_it_names(said, options, picked):
+    persona = {**PERSONA, "education": [{"institution": "The University of the West of England, Bristol",
+                                         "degree": "BSc (Hons) Computer Science", "start_date": "09/2022",
+                                         "end_date": "11/2025", "grade": "2:1"}]}
+    facts = {f.id: f for f in answers.profile_facts(persona)}
+    got = answers.resolve_fact({"question": "Your education", "options": options}, fact("education_1", answer=said),
+                               facts)
+    assert (got[0] if got else None) == picked
+
+
 def test_other_is_never_an_answer_from_the_profile():
     # Seen on a live form: "If you have multiple disciplines…" answered "Other" from the education line.
     disciplines = ["Mathematics", "Physics", "Economics", "Other"]
