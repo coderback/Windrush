@@ -97,6 +97,29 @@ def _plural(n: int, word: str) -> str:
     return f"{n} {word}{'' if n == 1 else 's'}"
 
 
+# A follow-up a form shows whatever was answered just before it: "If yes, ..." after a No, "If other, ..." when Other
+# wasn't chosen, "If applicable, ...". Left blank, it isn't something the user still has to answer; a form that
+# requires it anyway lists it among the required fields still empty, which holds the form on its own.
+_IF_YES = re.compile(r"^\W*if\s+(?:yes|so)\b", re.I)
+_IF_OTHER = re.compile(r"^\W*if\s+(?:other|you\s+(?:selected|chose|answered)\s+['\"“]?other)\b", re.I)
+_IF_APPLICABLE = re.compile(r"^\W*if\s+applicable\b", re.I)
+_OTHER = re.compile(r"^\W*other\b", re.I)
+
+
+def _follow_up_applies(questions: list[dict], i: int) -> bool:
+    """Whether question i, left blank, still needs the user: False for a follow-up whose condition the question
+    asked just before it rules out. Unsure counts as applying."""
+    text = questions[i].get("question") or ""
+    if _IF_APPLICABLE.match(text):
+        return False
+    before = (questions[i - 1].get("answer") or "").strip() if i > 0 else None
+    if _IF_YES.match(text):
+        return before is None or answers._polarity(before) is not False
+    if _IF_OTHER.match(text):
+        return before is None or bool(_OTHER.match(before))
+    return True
+
+
 def hold_reasons(filled: dict, document_problems: list[str]) -> list[str]:
     """
     Why a filled form must not go out without the user, as sentences for the queue; [] when it can.
@@ -108,11 +131,13 @@ def hold_reasons(filled: dict, document_problems: list[str]) -> list[str]:
     elif not filled.get("ready"):
         reasons.append("The agent couldn't finish the form.")
     questions = filled.get("questions") or []
-    blank = [q["question"] for q in questions if q.get("source") == "needs_you" or not q.get("answer")]
+    unanswered = [(i, q) for i, q in enumerate(questions) if q.get("source") == "needs_you" or not q.get("answer")]
+    blank = [q["question"] for i, q in unanswered if _follow_up_applies(questions, i)]
+    left_out = [q["question"] for i, q in unanswered if q["question"] not in blank]   # follow-ups that don't apply
     drafted = [q["question"] for q in questions if q["question"] not in blank and q.get("source") == "drafted"]
     # Anything else that isn't the answer bank or the profile isn't the user's own data either.
-    other = [q["question"] for q in questions
-             if q["question"] not in blank + drafted and (q.get("source") not in ("saved", "profile") or q.get("flags"))]
+    other = [q["question"] for q in questions if q["question"] not in blank + drafted + left_out
+             and (q.get("source") not in ("saved", "profile") or q.get("flags"))]
     if blank:
         reasons.append(f"{_plural(len(blank), 'question')} only you can answer: {_listed(blank)}")
     if drafted:

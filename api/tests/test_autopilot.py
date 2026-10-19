@@ -45,6 +45,41 @@ def test_anything_new_or_missing_holds_the_form(filled, expected):
     assert len(reasons) == 1 and expected in reasons[0]
 
 
+def _held(questions, empty=()):
+    return autopilot.hold_reasons({"ready": True, "error": "", "questions": questions, "empty": list(empty)}, [])
+
+
+def test_follow_ups_the_answer_before_rules_out_dont_hold_the_form():
+    # DV Trading's form, as asked: each follow-up comes straight after the question it follows.
+    questions = [
+        _answer("Do you have relevant internship experience at a proprietary trading firm?", "saved", "No"),
+        _answer("If yes, select your most recent proprietary trading firm experience", "needs_you"),
+        _answer("If other, please specify", "needs_you"),
+        _answer("What country do you currently reside in?", "profile", "United Kingdom"),
+        _answer("If applicable, which US state do you reside in?", "needs_you"),
+        _answer("How did you hear about DV Trading?", "saved", "LinkedIn"),
+        _answer("If other, please explain", "needs_you"),
+    ]
+    assert _held(questions) == []
+
+
+@pytest.mark.parametrize("before, follow_up", [
+    (_answer("Will you require sponsorship?", "profile", "Yes"), "If yes, please provide your visa type and expiration date."),
+    (_answer("How did you hear about us?", "saved", "Other"), "If other, please explain"),
+    (_answer("Have you worked here before?", "needs_you"), "If so, when?"),   # unsure: the question before is unanswered
+    (None, "If yes, give details"),                                          # nothing before it
+])
+def test_a_follow_up_that_applies_still_holds_the_form(before, follow_up):
+    questions = ([before] if before else []) + [_answer(follow_up, "needs_you")]
+    reasons = _held(questions)
+    assert reasons and follow_up in reasons[0]
+
+
+def test_a_follow_up_the_form_requires_holds_it_as_an_empty_field():
+    questions = [_answer("Country?", "profile", "United Kingdom"), _answer("If applicable, which US state?", "needs_you")]
+    assert _held(questions, empty=["If applicable, which US state?"]) == ["1 required field still empty: “If applicable, which US state?”"]
+
+
 def test_a_document_claim_the_profile_doesnt_back_holds_the_form():
     persona = {"core_info": {"first_name": "Ada"}, "skills": [{"category": "Languages", "skills": ["Python"]}]}
     cv = {"summary": "Python and Kubernetes engineer", "experience": [], "projects": []}
