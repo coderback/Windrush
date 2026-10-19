@@ -321,6 +321,7 @@ export default function ProfilePage() {
             </div>
             <div className={grid2}>
               <TextField label="Visa type" value={c.visa_type} placeholder="e.g. Graduate visa, Skilled Worker" onChange={(v) => set("core_info", "visa_type", v)} />
+              <TextField label="Visa expires" value={c.visa_expiry ?? ""} placeholder="MM/YYYY" onChange={(v) => set("core_info", "visa_expiry", v)} />
               <TextField label="Nationality" value={c.nationality} onChange={(v) => set("core_info", "nationality", v)} />
               {c.holds_other_nationality === true && (
                 <TextField label="Other nationalities" value={c.other_nationalities} onChange={(v) => set("core_info", "other_nationalities", v)} />
@@ -330,6 +331,8 @@ export default function ProfilePage() {
               )}
               <TextField label="Security clearance" value={c.security_clearance} placeholder="None, SC, DV…" onChange={(v) => set("core_info", "security_clearance", v)} />
             </div>
+            <AreaField label="Visa details" rows={3} value={c.visa_status} onChange={(v) => set("core_info", "visa_status", v)}
+              hint="In your words: the visa, when it ends, what it lets you do, and any sponsorship you'd need later. Forms that ask for visa details or your immigration status get this." />
           </SectionCard>
         );
       case "login":

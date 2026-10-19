@@ -292,7 +292,7 @@ def _recency_key(entry: dict) -> tuple[int, int]:
 _LLM_CORE_FIELDS = (
     "first_name", "last_name", "preferred_name", "city", "country",
     "linkedin", "github", "portfolio", "website",
-    "visa_status", "visa_type", "right_to_work_uk", "require_sponsorship", "security_clearance",
+    "visa_status", "visa_type", "visa_expiry", "right_to_work_uk", "require_sponsorship", "security_clearance",
 )
 
 

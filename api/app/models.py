@@ -97,8 +97,11 @@ class CoreInfo(BaseModel):
     twitter: str = ""
     portfolio: str = ""
     website: str = ""
+    # The visa in the candidate's own words: what it is, when it ends, what it allows, any sponsorship
+    # needed later. Answers "visa details" / "immigration status" questions in full.
     visa_status: str = ""
     visa_type: str = ""
+    visa_expiry: str = ""  # month/year it ends, e.g. "11/2027"
     # Yes/no facts stated on applications: None means "not answered", and the browser agent
     # never fills in an answer the user hasn't given.
     right_to_work_uk: Optional[bool] = None

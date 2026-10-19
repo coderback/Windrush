@@ -134,8 +134,11 @@ _CORE_TEXT_FACTS = (
     ("twitter", "Twitter / X profile", False),
     ("portfolio", "Portfolio URL", False),
     ("website", "Personal website URL", False),
-    ("visa_status", "Visa / immigration status", False),
-    ("visa_type", "Visa type", False),
+    ("visa_status", "Visa details / immigration status in full: the visa, when it ends, what it allows and any "
+                    "sponsorship needed later (their own words)", False),
+    ("visa_type", "Visa type (the visa's name only)", False),
+    # The label's words may phrase an answer joined with the type ("Graduate visa, valid until 11/2027").
+    ("visa_expiry", "Visa expiry date: when it expires, valid until (month/year)", False),
     ("nationality", "Nationality", False),
     ("security_clearance", "Security clearance held", False),
     ("dob", "Date of birth", True),
