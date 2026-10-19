@@ -1306,17 +1306,23 @@ async def _submit_button_shown(browser_session) -> bool:
         return False
 
 
-async def _fill_again(browser_session, tried: dict[str, str], filled: set[str], empty: list[str]) -> bool:
+async def _fill_again(browser_session, tried: dict[str, str], filled: set[str], empty: list[str],
+                      profile: dict[str, str] | None = None) -> bool:
     """
     One more try at each required field still empty once the agent stops that it gave fill_fields a value for: DV
     Trading's Discipline ended up empty on one run though the agent had filled it. A value no option takes (School,
     without the user's university) fails again, harmlessly. A label two fields share is tried on each of them that's
     still empty: Cambridge Consultants' address "Country" stayed empty beside the phone's, which the agent filled.
+    A field the agent never gave a value takes `profile`'s for its label (by question key), when there is one: the
+    agent once left both "Country" fields blank on purpose.
     True when one took.
     """
     took = False
+    profile = profile or {}
     for label in empty:
         value = next((v for t, v in tried.items() if _question_key(t) == _question_key(label)), None)
+        if value is None:
+            value = profile.get(_question_key(label)) or None
         if value is None:
             continue
         try:
@@ -1599,7 +1605,9 @@ async def apply_with_browser(
 
         summary = notes
         empty = await _empty_required_fields(browser_session)
-        if await _fill_again(browser_session, tool_tried, tool_filled, empty):
+        # Where they live: not one of their private details. The agent once left a required "Country" blank on purpose.
+        profile = {"country": str((cv_profile.get("core_info") or {}).get("country") or "").strip()}
+        if await _fill_again(browser_session, tool_tried, tool_filled, empty, profile):
             empty = await _empty_required_fields(browser_session)
         if await _ask_left_over(browser_session, answerer or _no_answers, asked, tool_filled, empty):
             empty = await _empty_required_fields(browser_session)

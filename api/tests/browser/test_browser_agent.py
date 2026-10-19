@@ -635,8 +635,8 @@ def test_a_label_two_fields_share_is_tried_again_on_the_one_still_empty(ba, site
     held = {}
     real_fill_again = ba._fill_again
 
-    async def fill_again(session, tried, filled, empty):
-        took = await real_fill_again(session, tried, filled, empty)
+    async def fill_again(session, tried, filled, empty, profile=None):
+        took = await real_fill_again(session, tried, filled, empty, profile)
         for element_id in ("country", "address-country"):
             node = await session.get_element_by_index(await session.get_index_by_id(element_id))
             held[element_id] = await (await ba.form_widgets.Field(session, node).open()).held()
@@ -650,6 +650,40 @@ def test_a_label_two_fields_share_is_tried_again_on_the_one_still_empty(ba, site
     final = asyncio.run(flow())[-1]
     assert held == {"country": ["+44"], "address-country": ["United Kingdom"]}
     assert "Country" not in final["empty"]
+    assert_no_chromium_left()
+
+
+class NoCountryLLM(GreenhouseLLM):
+    def next_action(self, text: str) -> list[dict]:
+        return [{"done": {"text": "Country fields were left blank.", "success": True}}]
+
+
+@pytest.mark.parametrize("country, held", [
+    ("United Kingdom", {"country": ["+44"], "address-country": ["United Kingdom"]}),
+    ("", {"country": [], "address-country": []}),
+])
+def test_a_country_the_agent_never_filled_is_filled_from_the_profile(ba, site, monkeypatch, country, held):
+    """The agent once left both of Cambridge Consultants' required "Country" fields blank on purpose, so the second try
+    had no value of its own. Where the user lives isn't a private detail: it fills them. Without one, nothing is."""
+    monkeypatch.setattr(ba, "_make_browser_llm", lambda: NoCountryLLM())
+    seen = {}
+    real_fill_again = ba._fill_again
+
+    async def fill_again(session, tried, filled, empty, profile=None):
+        took = await real_fill_again(session, tried, filled, empty, profile)
+        for element_id in ("country", "address-country"):
+            node = await session.get_element_by_index(await session.get_index_by_id(element_id))
+            seen[element_id] = await (await ba.form_widgets.Field(session, node).open()).held()
+        return took
+    monkeypatch.setattr(ba, "_fill_again", fill_again)
+
+    async def flow():
+        return [event async for event in ba.apply_with_browser(
+            f"{site}/greenhouse.html", {"core_info": {"first_name": "Ada", "country": country}}, "", asyncio.Queue(),
+            answerer=ba._no_answers, decide=lambda filled: asyncio.sleep(0, result=False))]
+    final = asyncio.run(flow())[-1]
+    assert seen == held
+    assert ("Country" in final["empty"]) is not bool(country)
     assert_no_chromium_left()
 
 
