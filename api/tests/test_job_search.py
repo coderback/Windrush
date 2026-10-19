@@ -109,6 +109,24 @@ def test_adzuna_routes_by_whole_words(monkeypatch, location, country):
     assert urls[0].split("/jobs/")[1].split("/")[0] == country
 
 
+def test_a_failed_adzuna_call_never_logs_the_key(monkeypatch, caplog):
+    class FakeClient:
+        def __init__(self, *a, **k): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): pass
+        async def get(self, url, params=None):
+            request = httpx.Request("GET", url, params=params)
+            return httpx.Response(429, request=request)
+
+    monkeypatch.setattr(job_searcher, "ADZUNA_APP_ID", "the-app-id")
+    monkeypatch.setattr(job_searcher, "ADZUNA_API_KEY", "the-secret-key")
+    monkeypatch.setattr(job_searcher, "http_client", MagicMock(async_client=FakeClient))
+    with caplog.at_level("DEBUG"):
+        assert asyncio.run(job_searcher._search_level4_adzuna("engineer", "London")) == []
+    assert "HTTP 429" in caplog.text
+    assert "the-secret-key" not in caplog.text and "the-app-id" not in caplog.text
+
+
 # ── Title filter ──────────────────────────────────────────────────────────────
 
 @pytest.mark.parametrize("title, query, expected", [

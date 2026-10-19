@@ -37,6 +37,8 @@ services:
       - BRAVE_SEARCH_API_KEY=${BRAVE_SEARCH_API_KEY:-}
       - SPONSOR_REGISTER_REFRESH=${SPONSOR_REGISTER_REFRESH:-1}
       - JOB_ATTRIBUTES_LLM=${JOB_ATTRIBUTES_LLM:-}
+      # Collect jobs for every user's target titles every N hours; 0 turns it off.
+      - JOB_COLLECT_HOURS=${JOB_COLLECT_HOURS:-6}
       # Gmail tracking (read-only): an OAuth client from Google Cloud. Leave unset to keep it off.
       - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
       - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-}

@@ -26,7 +26,7 @@ def feed_user(db):
 def slow_live_search(monkeypatch):
     calls = []
 
-    async def fake_search(query, locations):
+    async def fake_search(query, locations, web_search=True):
         calls.append((query, locations))
         await asyncio.sleep(1.5)
         return [make_job(f"Q{i}", f"Quantum Engineer {i}", f"QCo{i}", "London, UK", "qubits") for i in range(40)]
@@ -89,7 +89,7 @@ def test_hung_embedder_falls_back_to_unranked_results(feed_user, ollama, monkeyp
 
 
 def test_fixture_jobs_from_discovery_are_never_stored(db, ollama, monkeypatch):
-    async def fixture_only(query, locations):
+    async def fixture_only(query, locations, web_search=True):
         return [dict(j) for j in job_searcher._FIXTURE]
     monkeypatch.setattr(discovery, "search_jobs", fixture_only)
     asyncio.run(discovery._discover("anything", ["London"]))
@@ -112,7 +112,7 @@ def multi_user(db):
 def recorded_searches(monkeypatch):
     searches = []
 
-    async def record(query, locations):
+    async def record(query, locations, web_search=True):
         searches.append((query, locations))
         return []
     monkeypatch.setattr(discovery, "search_jobs", record)
@@ -191,7 +191,7 @@ def test_discovery_state_is_per_query_and_location(db, monkeypatch):
     async def flow():
         release = asyncio.Event()
 
-        async def held_search(query, locations):
+        async def held_search(query, locations, web_search=True):
             runs.append((query, locations))
             await release.wait()
             return []
@@ -224,5 +224,5 @@ def test_discovery_state_is_per_query_and_location(db, monkeypatch):
         assert discovery._running == {}  # every pair of every run is released when it finishes
 
     asyncio.run(flow())
-    assert runs == [("Data Analyst", ["London", "Manchester"]), ("Data Analyst", ["Leeds"]),
-                    ("Data Analyst", ["Bristol"])]
+    assert sorted(runs) == [("Data Analyst", ["Bristol"]), ("Data Analyst", ["Leeds"]),
+                            ("Data Analyst", ["London", "Manchester"])]

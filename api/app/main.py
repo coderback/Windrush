@@ -64,14 +64,15 @@ async def lifespan(app: FastAPI):
     tracker.init_db()
     jobs_db.init_db()
     pdf_generator.init_pdf_dir(data_dir)
+    from . import discovery
     background = [asyncio.create_task(sponsor_register.keep_fresh()),
                   asyncio.create_task(job_attributes.keep_extracting()),
+                  asyncio.create_task(discovery.keep_collecting()),
                   asyncio.create_task(autopilot.keep_running()),
                   asyncio.create_task(gmail.keep_syncing())]
     yield
     for task in background:
         task.cancel()
-    from . import discovery
     discovery.shutdown()
 
 
