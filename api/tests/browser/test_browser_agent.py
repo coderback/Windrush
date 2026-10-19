@@ -651,10 +651,12 @@ class TicksConsentLLM(GreenhouseLLM):
             return [{"fill_fields": {"fields": [
                 {"index": at("consent"), "label": "I consent to the processing of my data", "value": "checked"},
                 {"index": at("consent"), "label": "Consent", "value": "checked"},       # a short label for it
+                {"index": at("terms"), "label": "Terms & Conditions", "value": "checked"},  # a consent's short label
                 {"index": at("first_name"), "label": "First Name", "value": "Ada"},
             ]}}]
         if self.step == 2:
-            return [{"evaluate": {"code": "'CONSENT:' + document.getElementById('consent').checked"}}]
+            return [{"evaluate": {"code": "'CONSENT:' + document.getElementById('consent').checked + "
+                                          "',TERMS:' + document.getElementById('terms').checked"}}]
         return [{"done": {"text": "Done.", "success": True}}]
 
 
@@ -670,9 +672,9 @@ def test_fill_fields_never_ticks_a_consent_or_answers_a_question(ba, site, monke
             answerer=ba._no_answers, decide=lambda filled: asyncio.sleep(0, result=False))]
     asyncio.run(flow())
     seen = "\n".join(llm.seen)
-    for label in ("I consent to the processing of my data", "Consent"):
+    for label in ("I consent to the processing of my data", "Consent", "Terms & Conditions"):
         assert f"- “{label}”: NOT filled. It asks or states something (a question, consent or declaration)" in seen
-    assert "CONSENT:false" in seen
+    assert "CONSENT:false,TERMS:false" in seen
     assert "- “First Name”: filled with “Ada”. Done; leave it." in seen
     assert_no_chromium_left()
 

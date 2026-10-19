@@ -1332,11 +1332,17 @@ async def _fill_again(browser_session, tried: dict[str, str], filled: set[str], 
     return took
 
 
+# A consent or declaration under a short label: DV Trading's "Terms & Conditions", Catapult's "GDPR Statement".
+# Not "confirm": "Confirm email" is a plain detail.
+_CONSENT_WORDS = re.compile(r"\b(?:terms|conditions|consent\w*|privacy|gdpr|disclos\w*|declar\w*|acknowledg\w*|"
+                            r"agree\w*|polic(?:y|ies)|statement)\b", re.I)
+
+
 def _asks_something(label: str) -> bool:
     """Whether a field's label asks or states something (a question, a consent, a declaration) rather than naming
-    a plain detail like "School" or "Country": it ends in "?", or runs to six words or more."""
+    a plain detail like "School" or "Country": it ends in "?", runs to six words or more, or names a consent."""
     label = label.replace("*", "").strip()
-    return label.endswith("?") or len(label.split()) >= 6
+    return label.endswith("?") or len(label.split()) >= 6 or bool(_CONSENT_WORDS.search(label))
 
 
 async def _ask_left_over(browser_session, answerer: Answerer, asked: dict[str, dict], filled: set[str],
