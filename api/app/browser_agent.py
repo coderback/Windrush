@@ -1407,15 +1407,16 @@ def _persona_words(persona) -> set[str]:
 async def _answered_outside_tools(browser_session, tool_filled: set[str], persona: dict) -> list[str]:
     """'label: value' for each field holding an answer that didn't come through answer_questions or fill_fields:
     one the agent picked or typed itself. An applicant detail typed straight from the persona (a name, an email)
-    isn't counted; a question (its label ends in '?') always is."""
+    isn't counted; a question, consent or declaration always is, and so is a ticked box. (A consent the agent
+    clicked reads "checked", a word the user's own persona holds: it went unnoticed.)"""
     known = _persona_words(persona)
     out = []
     for field in await form_widgets.filled_fields(browser_session):
         label, value = field["label"], field["value"]
         if any(t and form_widgets.same_question(label, t) for t in tool_filled):
             continue
-        question = label.replace("*", "").strip().endswith("?")
-        if not question and set(re.findall(r"[a-z0-9]+", value.lower())) <= known:
+        if not _asks_something(label) and value != "checked" \
+                and set(re.findall(r"[a-z0-9]+", value.lower())) <= known:
             continue
         out.append(f"{label[:120] or 'A field with no label'}: {value[:80]}")
     return out[:25]

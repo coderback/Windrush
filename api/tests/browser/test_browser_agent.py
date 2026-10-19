@@ -679,6 +679,36 @@ def test_fill_fields_never_ticks_a_consent_or_answers_a_question(ba, site, monke
     assert_no_chromium_left()
 
 
+class ClicksConsentLLM(GreenhouseLLM):
+    def next_action(self, text: str) -> list[dict]:
+        self.step += 1
+        if self.step == 1:          # browser-use's own click: no Windrush tool sees it
+            return [{"click": {"index": self._index(text, "consent")}}]
+        if self.step == 2:
+            return [{"evaluate": {"code": "'CONSENT:' + document.getElementById('consent').checked"}}]
+        return [{"done": {"text": "Done.", "success": True}}]
+
+
+def test_a_consent_the_agent_ticks_with_a_click_is_flagged_and_holds_the_form(ba, site, monkeypatch):
+    """A ticked box reads "checked", and the user's own persona holds that word: a consent the agent clicked
+    passed for a detail typed from the persona, so nothing flagged it and autopilot would have sent the form."""
+    llm = ClicksConsentLLM()
+    monkeypatch.setattr(ba, "_make_browser_llm", lambda: llm)
+    persona = {"core_info": {"first_name": "Ada"}, "summary": "I checked every result twice."}
+
+    async def flow():
+        return [event async for event in ba.apply_with_browser(
+            f"{site}/greenhouse.html", persona, "", asyncio.Queue(), answerer=ba._no_answers,
+            decide=lambda filled: asyncio.sleep(0, result=False))]
+    final = asyncio.run(flow())[-1]
+    from app import autopilot
+    assert "CONSENT:true" in "\n".join(llm.seen)
+    assert final["self_answered"] == ["I consent to the processing of my data: checked"]
+    assert any("the agent chose itself" in r and "I consent to the processing" in r
+               for r in autopilot.hold_reasons(final, []))
+    assert_no_chromium_left()
+
+
 class AsksNothingLLM(GreenhouseLLM):
     def next_action(self, text: str) -> list[dict]:
         return [{"done": {"text": "Done.", "success": True}}]
