@@ -122,8 +122,9 @@ def test_options_are_read_from_the_dropdown_not_the_page(ba, site):
 
 
 def test_a_field_is_described_with_what_the_form_says_with_it(ba, site):
-    """Catapult's "GDPR Statement" says what it asks only in the statement under it. A field with nothing but its
-    label and options has no details: not the label again, not "Select...", not the checkboxes' labels."""
+    """Catapult's "GDPR Statement" says what it asks only in the statement under it; DV Trading's disciplines have a
+    hint. A field with nothing but its label and options has no details: not the label again, not "Select...", and a
+    checkbox group's are its hint, never its checkboxes' labels."""
     from browser_use import BrowserSession
 
     async def run():
@@ -143,7 +144,7 @@ def test_a_field_is_described_with_what_the_form_says_with_it(ba, site):
 
     assert asyncio.run(run()) == {
         "gdpr": "Your personal data will be processed for the purposes of managing our recruitment related activities.",
-        "visa": "", "d1": "", "why": ""}
+        "visa": "", "d1": "If you have multiple disciplines, please select all that apply.", "why": ""}
     assert_no_chromium_left()
 
 

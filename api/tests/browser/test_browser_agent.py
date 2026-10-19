@@ -577,6 +577,72 @@ class VisaOnlyLLM(GreenhouseLLM):
         return [{"done": {"text": "Done.", "success": True}}]
 
 
+class HelperTextLLM(GreenhouseLLM):
+    def next_action(self, text: str) -> list[dict]:
+        self.step += 1
+        if self.step == 1:
+            return [{"answer_questions": {"questions": [
+                {"question": "If you have multiple disciplines, please select all that apply.",
+                 "index": self._index(text, "d1"), "options": ["Physics"]}]}}]
+        if self.step == 2:
+            return [{"evaluate": {"code": "'DISC:' + [...document.querySelectorAll('[name=disc]')]"
+                                          ".filter(b => b.checked).map(b => b.id).join(',')"}}]
+        return [{"done": {"text": "Done.", "success": True}}]
+
+
+def test_a_question_given_by_the_text_under_its_label_is_asked_as_the_form_labels_it(ba, site, monkeypatch):
+    """DV Trading's agent gave "Undergrad Discipline(s)" as its hint, "If you have multiple disciplines…": the field
+    wasn't found, so its real options weren't read nor the answer filled, and the hint read as a case the profile
+    doesn't show. It's found by the hint, and asked under its label with the hint as details."""
+    llm = HelperTextLLM()
+    monkeypatch.setattr(ba, "_make_browser_llm", lambda: llm)
+    asked = []
+
+    async def answerer(questions):
+        asked.extend(questions)
+        return [{"question": q["question"], "options": q["options"], "kind": "fact", "source": "profile",
+                 "answer": "Computer Science" if "Computer Science" in q["options"] else "", "because": "",
+                 "bank_id": "", "flags": []} for q in questions]
+
+    async def flow():
+        return [event async for event in ba.apply_with_browser(
+            f"{site}/greenhouse.html", {"core_info": {"first_name": "Ada"}}, "", asyncio.Queue(), answerer=answerer,
+            decide=lambda filled: asyncio.sleep(0, result=False))]
+    asyncio.run(flow())
+    assert {k: asked[0].get(k) for k in ("question", "options", "details")} == {
+        "question": "Undergrad Discipline(s)", "options": ["Mathematics", "Computer Science", "Physics"],
+        "details": "If you have multiple disciplines, please select all that apply."}
+    assert "DISC:d2" in "\n".join(llm.seen)
+    assert_no_chromium_left()
+
+
+class LosesAFieldLLM(GreenhouseLLM):
+    def next_action(self, text: str) -> list[dict]:
+        self.step += 1
+        at = lambda element_id: self._index(text, element_id)  # noqa: E731
+        if self.step == 1:
+            return [{"fill_fields": {"fields": [
+                {"index": at("notice"), "label": "Notice period", "value": "1 month"},
+                {"index": at("first_name"), "label": "First Name", "value": "Ada"}]}}]
+        if self.step == 2:      # something on the page empties it again
+            return [{"evaluate": {"code": "document.getElementById('notice').value = ''; 'EMPTIED'"}}]
+        return [{"done": {"text": "Done.", "success": True}}]
+
+
+def test_a_field_the_agent_filled_that_ends_up_empty_is_filled_again(ba, site, monkeypatch):
+    """DV Trading's Discipline was empty at the end of a run though the agent had filled it. Once the agent stops,
+    a required field still empty that fill_fields was given a value for gets one more try with that value."""
+    monkeypatch.setattr(ba, "_make_browser_llm", lambda: LosesAFieldLLM())
+
+    async def flow():
+        return [event async for event in ba.apply_with_browser(
+            f"{site}/greenhouse.html", {"core_info": {"first_name": "Ada"}}, "", asyncio.Queue(),
+            answerer=ba._no_answers, decide=lambda filled: asyncio.sleep(0, result=False))]
+    final = asyncio.run(flow())[-1]
+    assert "Notice period" not in final["empty"] and "School" in final["empty"]
+    assert_no_chromium_left()
+
+
 class TicksConsentLLM(GreenhouseLLM):
     def next_action(self, text: str) -> list[dict]:
         self.step += 1
