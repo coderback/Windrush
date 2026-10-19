@@ -1,6 +1,7 @@
 """
 SQLite-backed job database for Windrush job feed.
 """
+import functools
 import json
 import logging
 import os
@@ -509,11 +510,16 @@ def get_jobs(
     marks: dict[str, str] | None = None,
     max_years: int | None = None,
     no_degree: bool = False,
+    career_stage: str = "",
+    needs_sponsorship: bool = False,
 ) -> tuple[list[dict], bool]:
     """
-    Filter in SQL, then rank (semantic similarity to `persona_vector` when given, else
-    recency) and paginate. `location` is one location or a list (any of them matches; "remote"
-    in it means remote jobs too). `query`, `category` and free-text `tags` are hard filters; role
+    Filter in SQL, then rank and paginate: by `rank_score` (similarity to `persona_vector`, nudged
+    by the searched words in the title, the job's level against `career_stage` ("junior" or
+    "experienced"), sponsorship when `needs_sponsorship`, and freshness) when a vector is given, else
+    by recency. `semantic_score` stays the plain similarity. `location` is one location or a list (any
+    of them matches; "remote" in it means remote jobs too). `query`, `category` and free-text `tags`
+    are hard filters, matched as words with their other forms (see search_groups); role
     tags are OR'd, domain tags AND'd. `exclude` holds (lower company, lower title) pairs to
     drop *before* pagination (jobs the user already applied to / discarded), so pages stay
     full. `sponsorship` is one of SPONSORSHIP_FILTERS ("" = any); `marks` ({job id: OFFERED or
@@ -526,7 +532,8 @@ def get_jobs(
         init_db()
 
     roles, domains, text_terms = _parse_tags(list(tags or []) + ([category] if category else []))
-    text_terms += [w for w in re.split(r"[\s,]+", (query or "").lower()) if len(w) > 1]
+    groups = [g for term in text_terms for g in (search_groups(term) or [(term,)])] + search_groups(query)
+    groups = list(dict.fromkeys(groups))
 
     where = ["(expires_at IS NULL OR expires_at > ?)"]
     params: list = [_now()]
@@ -535,10 +542,12 @@ def get_jobs(
         where.append("lower(level) = ?")
         params.append(level.lower())
 
-    for term in text_terms:
-        where.append("(lower(title) LIKE ? ESCAPE '\\' OR lower(company) LIKE ? ESCAPE '\\' "
-                     "OR lower(description) LIKE ? ESCAPE '\\')")
-        params += [_like(term)] * 3
+    # Every searched word (or one of its other forms) somewhere in the job, as a word: LIKE narrows
+    # the rows cheaply, then words_match checks word boundaries ("ML" isn't the end of "HTML").
+    for group in groups:
+        likes = " OR ".join(f"lower({field}) LIKE ? ESCAPE '\\'" for _ in group for field in _SEARCHED_FIELDS)
+        where.append(f"(({likes}) AND words_match(?, {_SEARCHED_TEXT}))")
+        params += [_like(_first_word(form)) for form in group for _ in _SEARCHED_FIELDS] + [_group_pattern(group)]
     if roles:
         where.append("(" + " OR ".join("tags LIKE ?" for _ in roles) + ")")
         params += [f'%"{r}"%' for r in roles]
@@ -569,6 +578,7 @@ def get_jobs(
 
     con = sqlite3.connect(_DB_PATH)
     con.row_factory = sqlite3.Row
+    con.create_function("words_match", 2, _words_match, deterministic=True)
     rows = [dict(r) for r in con.execute(sql, params).fetchall()]
     con.close()
     for job in rows:
@@ -587,13 +597,132 @@ def get_jobs(
 
     if persona_vector:
         _rank_semantically(candidates, persona_vector)
-        candidates.sort(key=lambda j: j["semantic_score"], reverse=True)  # stable: ties stay newest-first
+        context = _RankContext(groups, career_stage, needs_sponsorship, marks or {})
+        for job in candidates:
+            job["rank_score"] = round(job["semantic_score"] + _boost(job, context), 4)
+        candidates.sort(key=lambda j: j["rank_score"], reverse=True)  # stable: ties stay newest-first
     else:
         for job in candidates:
             job["semantic_score"] = 0.0
 
     page = candidates[offset: offset + limit]
     return page, len(candidates) > offset + limit
+
+
+# ── Search words ──────────────────────────────────────────────────────────────
+# A search matches words, not a phrase: "ml engineer" finds "Machine Learning Engineer". Each word
+# (or a known phrase) must appear in the title, company or description, in any of the ways people
+# write it.
+
+_SYNONYM_GROUPS: list[tuple[str, ...]] = [
+    ("ml", "machine learning"),
+    ("ai", "artificial intelligence"),
+    ("llm", "large language model"),
+    ("genai", "generative ai", "gen ai"),
+    ("nlp", "natural language processing"),
+    ("quant", "quantitative"),
+    ("dev", "developer"),
+    ("frontend", "front end"),
+    ("backend", "back end"),
+    ("fullstack", "full stack"),
+    ("devops", "dev ops"),
+    ("sre", "site reliability"),
+    ("grad", "graduate"),
+    ("js", "javascript"),
+    ("ts", "typescript"),
+]
+# Looked up with hyphens as spaces: "front-end" is "front end". (A form's pattern already takes a
+# space, a hyphen or nothing between its words.)
+_FORM_GROUP = {form: group for group in _SYNONYM_GROUPS for form in group}
+_LONGEST_FORM = max(len(form.split()) for form in _FORM_GROUP)
+_SEARCH_STOP_WORDS = {"a", "an", "the", "and", "or", "of", "for", "in", "at", "to", "with", "on"}
+_SEARCHED_FIELDS = ("title", "company", "description")
+_SEARCHED_TEXT = "lower(title) || ' ' || lower(company) || ' ' || lower(coalesce(description, ''))"
+
+
+def search_groups(text: str) -> list[tuple[str, ...]]:
+    """The word groups a search must all match, each the interchangeable forms of one word or known
+    phrase: "ML engineer" -> [("ml", "machine learning"), ("engineer",)]."""
+    words = [w for w in re.findall(r"[a-z0-9+#]+(?:[.-][a-z0-9+#]+)*", (text or "").lower())
+             if w not in _SEARCH_STOP_WORDS]
+    groups, i = [], 0
+    while i < len(words):
+        for n in range(min(_LONGEST_FORM, len(words) - i), 0, -1):
+            phrase = " ".join(words[i:i + n])
+            known = _FORM_GROUP.get(phrase.replace("-", " "))
+            if n == 1 or known:
+                groups.append(known or (phrase,))
+                i += n
+                break
+    return list(dict.fromkeys(groups))
+
+
+def _first_word(form: str) -> str:
+    return re.split(r"[\s-]+", form)[0]
+
+
+def _form_pattern(form: str) -> str:
+    """A form as words: "front end" also matches "front-end" and "frontend"; words of 5+ letters may run
+    on ("engineer" -> "engineering"), shorter ones only take a plural ("ml" isn't the end of "html")."""
+    parts = [p for p in re.split(r"[\s-]+", form) if p]
+    body = r"[\s-]*".join(re.escape(p) for p in parts)
+    tail = "" if len(parts[-1]) >= 5 else r"s?(?![a-z0-9])"
+    return r"(?<![a-z0-9])" + body + tail
+
+
+def _group_pattern(group: tuple[str, ...]) -> str:
+    return "(?:" + "|".join(_form_pattern(form) for form in group) + ")"
+
+
+@functools.lru_cache(maxsize=256)
+def _compiled(pattern: str) -> re.Pattern:
+    return re.compile(pattern)
+
+
+def _words_match(pattern: str, text: str) -> int:
+    """SQL function words_match(pattern, text): 1 when the lower-cased text has the pattern."""
+    return 1 if text and _compiled(pattern).search(text) else 0
+
+
+# ── Ranking ───────────────────────────────────────────────────────────────────
+# Similarity to the persona (and what's searched for) decides the order, nudged by what the
+# similarity can't see. The nudges are sized against its spread on a real feed (median 0.70,
+# standard deviation 0.04), so each moves a job a little, never past a far better match.
+
+_TITLE_BOOST = 0.04             # x the share of searched words in the title
+_LEVEL_BOOST = {"junior": {"junior": 0.03, "senior": -0.05}, "experienced": {"junior": -0.02}}
+_OFFERED_BOOST = 0.03           # the ad (or the user's mark) says it sponsors visas
+_LICENSED_BOOST = 0.02          # the employer is a licensed sponsor
+_FRESH_BOOST = ((3, 0.02), (7, 0.01))   # first seen within N days
+
+
+class _RankContext:
+    def __init__(self, groups, career_stage, needs_sponsorship, marks):
+        self.title_patterns = [_compiled(_group_pattern(g)) for g in groups]
+        self.level_boost = _LEVEL_BOOST.get(career_stage or "", {})
+        self.needs_sponsorship = needs_sponsorship
+        self.marks = marks
+        self.now = datetime.now(timezone.utc)
+
+
+def _boost(job: dict, ctx: _RankContext) -> float:
+    boost = ctx.level_boost.get((job.get("level") or "").lower(), 0.0)
+    if ctx.title_patterns:
+        title = (job.get("title") or "").lower()
+        boost += _TITLE_BOOST * sum(1 for p in ctx.title_patterns if p.search(title)) / len(ctx.title_patterns)
+    if ctx.needs_sponsorship:
+        mark = ctx.marks.get(job.get("id"), "")
+        if mark == signals.OFFERED or (job.get("sponsorship") == signals.OFFERED and mark != signals.NOT_OFFERED):
+            boost += _OFFERED_BOOST
+        if job.get("licensed_sponsor"):
+            boost += _LICENSED_BOOST
+    try:
+        age_days = (ctx.now - datetime.fromisoformat(job.get("created_at") or "")).total_seconds() / 86400
+    except (TypeError, ValueError):
+        age_days = None
+    if age_days is not None:
+        boost += next((b for days, b in _FRESH_BOOST if age_days <= days), 0.0)
+    return boost
 
 
 def _rank_semantically(jobs: list[dict], persona_vector: list[float]) -> None:

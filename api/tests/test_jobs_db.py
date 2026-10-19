@@ -3,6 +3,7 @@ import sqlite3
 import threading
 import time
 
+import numpy as np
 import pytest
 from conftest import fake_vector, make_job
 
@@ -173,3 +174,100 @@ def test_semantic_ranking_puts_the_closest_job_first(seeded):
 def test_vector_dimension_mismatch_is_tolerated(seeded):
     jobs, _ = jobs_db.get_jobs(limit=8, persona_vector=[0.1] * 10)
     assert len(jobs) == 8 and all(j["semantic_score"] == 0.0 for j in jobs)
+
+
+# ── searching by words ────────────────────────────────────────────────────────
+
+@pytest.mark.parametrize("text, groups", [
+    ("ML engineer", [("ml", "machine learning"), ("engineer",)]),
+    ("machine learning engineer", [("ml", "machine learning"), ("engineer",)]),
+    ("front-end developer", [("frontend", "front end"), ("dev", "developer")]),
+    ("Quant Developer in London", [("quant", "quantitative"), ("dev", "developer"), ("london",)]),
+    ("C++ developer", [("c++",), ("dev", "developer")]),
+    ("engineer engineer", [("engineer",)]),
+    ("", []),
+])
+def test_search_groups(text, groups):
+    assert jobs_db.search_groups(text) == groups
+
+
+WORDS = [
+    make_job("M1", "Machine Learning Engineer", "DeepCo", description="models"),
+    make_job("M2", "ML Engineer", "TinyCo", description="pipelines"),
+    make_job("M3", "HTML Engineer", "WebCo", description="web pages"),
+    make_job("Q1", "Quantitative Developer", "HedgeCo", description="pricing"),
+    make_job("F1", "Frontend Engineer", "UiCo", description="react"),
+    make_job("F2", "Front-End Developer", "UiCo2", description="vue"),
+    make_job("G1", "Engineering Graduate Programme", "BigCo", description="Python and SQL"),
+]
+
+
+@pytest.fixture
+def worded(db, ollama):
+    jobs_db.add_jobs(WORDS)
+
+
+@pytest.mark.parametrize("kwargs, expected", [
+    ({"tags": ["ml engineer"]}, ["M1", "M2"]),                 # a synonym, and not the end of "HTML"
+    ({"tags": ["machine learning"]}, ["M1", "M2"]),
+    ({"tags": ["quant developer"]}, ["Q1"]),
+    ({"tags": ["front end"]}, ["F1", "F2"]),
+    ({"tags": ["graduate engineer"]}, ["G1"]),                 # any order; "engineer" runs on to "engineering"
+    ({"tags": ["python sql"]}, ["G1"]),                        # the description counts
+    ({"tags": ["ml engineer", "deepco"]}, ["M1"]),             # every term
+    ({"query": "machine learning"}, ["M1", "M2"]),
+])
+def test_search_matches_words(worded, kwargs, expected):
+    assert ids(**kwargs) == expected
+
+
+# ── ranking ───────────────────────────────────────────────────────────────────
+
+RANKED = [
+    make_job("JR", "Graduate Data Engineer", "A", level="junior"),
+    make_job("MD", "Data Engineer", "B", level="mid"),
+    make_job("SR", "Data Engineer II", "C", level="senior"),
+    make_job("SP", "Data Platform Engineer", "D", level="mid", description="Visa sponsorship is available."),
+]
+
+
+@pytest.fixture
+def ranked(db, ollama):
+    jobs_db.add_jobs(RANKED)
+    # Every job equally similar, so only the nudges order them.
+    con = sqlite3.connect(jobs_db._DB_PATH)
+    con.execute("UPDATE jobs SET semantic_vector = ?", (np.array(fake_vector("same"), dtype=np.float32).tobytes(),))
+    con.commit()
+    con.close()
+    return fake_vector("same")
+
+
+def order(vector, **kwargs):
+    return [j["job_id"] for j in jobs_db.get_jobs(limit=10, persona_vector=vector, **kwargs)[0]]
+
+
+def test_a_junior_sees_junior_jobs_first_and_senior_ones_last(ranked):
+    got = order(ranked, career_stage="junior")
+    assert got[0] == "JR" and got[-1] == "SR"
+
+
+def test_someone_who_needs_sponsorship_sees_sponsoring_jobs_higher(ranked):
+    assert order(ranked, needs_sponsorship=True)[0] == "SP"
+    # The user's own "doesn't sponsor" mark wins over the ad.
+    sp_id = next(j["id"] for j in jobs_db.get_jobs(limit=10)[0] if j["job_id"] == "SP")
+    assert order(ranked, needs_sponsorship=True, marks={sp_id: "not_offered"})[0] != "SP"
+
+
+def test_searched_words_in_the_title_rank_higher(ranked):
+    jobs_db.add_jobs([make_job("DESC", "Platform Engineer", "E", description="graduate scheme")])
+    con = sqlite3.connect(jobs_db._DB_PATH)
+    con.execute("UPDATE jobs SET semantic_vector = ?", (np.array(ranked, dtype=np.float32).tobytes(),))
+    con.commit()
+    con.close()
+    assert order(ranked, tags=["graduate"]) == ["JR", "DESC"]
+
+
+def test_the_match_score_stays_the_plain_similarity(ranked):
+    jobs = jobs_db.get_jobs(limit=10, persona_vector=ranked, career_stage="junior", needs_sponsorship=True)[0]
+    assert all(j["semantic_score"] == 1.0 for j in jobs)
+    assert max(j["rank_score"] for j in jobs) > 1.0
