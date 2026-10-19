@@ -1380,13 +1380,13 @@ async def _ask_left_over(browser_session, answerer: Answerer, asked: dict[str, d
     """
     Put the required questions still empty that the agent never gave answer_questions (Catapult's demographic-data
     consent, on some runs) through the answerer, and fill in what it answers, so a saved answer isn't missed and the
-    review lists the question. A plain field ("School", "Country") is the agent's to fill from the details it has:
-    only a label that asks something or states something is asked. True when anything was asked.
+    review lists the question. A plain field ("School", "Country") is the agent's to fill from the details it has;
+    one it couldn't (DV Trading's School list has no UWE) is filled only from the user's own saved answer to that
+    very field, never drafted or read from the profile. True when anything was asked.
     """
     asked_any = False
     for label in empty:
-        if not _asks_something(label):
-            continue
+        plain = not _asks_something(label)
         if any(form_widgets.same_question(label, a["question"]) for a in asked.values()):
             continue
         try:
@@ -1397,12 +1397,16 @@ async def _ask_left_over(browser_session, answerer: Answerer, asked: dict[str, d
             question = {"question": label, "options": [], "max_length": info.get("maxLength")}
             if info.get("details"):
                 question["details"] = info["details"]
+            if plain:
+                question["saved_only"] = True
             if info["kind"] != form_widgets.TEXT:
                 question["options"] = await form_widgets.read_options(field)
             result = (await answerer([question]))[0]
         except Exception as exc:
             logger.debug("asking the left-over question %r failed: %s", label[:60], exc)
             continue
+        if plain and result["source"] != "saved":
+            continue  # nothing saved for it: it stays one of the required fields left empty
         asked[_question_key(result["question"])] = result
         asked_any = True
         if result["source"] != "needs_you" and result["answer"]:
