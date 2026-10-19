@@ -863,6 +863,10 @@ async def answer_questions(questions, persona: dict, bank: list[dict], job: dict
         entry = _saved_match(q, bank, company)
         if entry:
             answer = pick_option(entry["answer"], q["options"]) if entry["kind"] == "fact" else entry["answer"]
+            if not answer and q.get("saved_only"):
+                # A searchable list shows only its first results (DV Trading's School: 100 of thousands, "Other"
+                # among them only once typed): the field's own search finds the saved answer, so it goes as saved.
+                answer = entry["answer"]
             if answer:
                 results[i] = _result(q, entry["kind"], "saved", answer, f"Saved answer to “{entry['question']}”",
                                      entry["id"])
