@@ -227,24 +227,46 @@ def get_user_persona(user_id: str) -> dict:
     return {}
 
 
-def feed_locations() -> list[str] | None:
-    """Every user's preferred locations together: the places some feed can show jobs from. None when a
-    user has none, since their feed isn't limited to a place."""
+def _users_preferences() -> list[dict]:
     con = sqlite3.connect(_DB_PATH)
     rows = con.execute("SELECT persona FROM users").fetchall()
     con.close()
-    out: list[str] = []
+    out = []
     for (raw,) in rows:
         try:
             persona = json.loads(raw or "{}")
         except json.JSONDecodeError:
             persona = {}
-        places = [str(p).strip() for p in ((persona.get("preferences") or {}).get("preferred_locations") or [])
-                  if str(p or "").strip()] if isinstance(persona, dict) else []
-        if not places:
-            return None
-        out += [p for p in places if p.lower() not in {o.lower() for o in out}]
-    return out or None
+        prefs = persona.get("preferences") if isinstance(persona, dict) else None
+        out.append(prefs if isinstance(prefs, dict) else {})
+    return out
+
+
+def _distinct_text(items) -> list[str]:
+    seen, out = set(), []
+    for item in items or []:
+        text = " ".join(str(item or "").split())
+        if text and text.lower() not in seen:
+            seen.add(text.lower())
+            out.append(text)
+    return out
+
+
+def collection_targets() -> tuple[list[str], list[str]]:
+    """(target titles, preferred locations) of every user together, without repeats: what a scheduled
+    collection searches for."""
+    prefs = _users_preferences()
+    return (_distinct_text(t for p in prefs for t in p.get("target_titles") or []),
+            _distinct_text(l for p in prefs for l in p.get("preferred_locations") or []))
+
+
+def feed_locations() -> list[str] | None:
+    """Every user's preferred locations together: the places some feed can show jobs from. None when a
+    user has none, since their feed isn't limited to a place."""
+    places = [_distinct_text(p.get("preferred_locations")) for p in _users_preferences()]
+    if not places or not all(places):
+        return None
+    return _distinct_text(l for user in places for l in user)
 
 
 def _strip_job_password(persona: dict) -> str:

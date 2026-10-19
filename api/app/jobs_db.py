@@ -63,6 +63,30 @@ CREATE TABLE IF NOT EXISTS sponsor_register (
 );
 """
 
+# Scheduled collections (discovery.keep_collecting): kept so the schedule survives restarts and the
+# feed can say when it was last refreshed.
+_CREATE_COLLECTIONS_TABLE = """
+CREATE TABLE IF NOT EXISTS collections (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    started_at  TEXT NOT NULL,
+    finished_at TEXT,
+    searches    TEXT,
+    locations   TEXT,
+    found       INTEGER,
+    added       INTEGER,
+    refreshed   INTEGER,
+    expired     INTEGER,
+    error       TEXT
+);
+"""
+# When a rate-limited source last ran, whoever ran it (see discovery: the web search is once a day).
+_CREATE_SOURCE_RUNS_TABLE = """
+CREATE TABLE IF NOT EXISTS source_runs (
+    source TEXT PRIMARY KEY,
+    ran_at TEXT NOT NULL
+);
+"""
+
 _CREATE_INDEX = """
 CREATE UNIQUE INDEX IF NOT EXISTS idx_dedup_jobs
     ON jobs(lower(normalized_company), lower(title), lower(location));
@@ -96,6 +120,8 @@ def init_db(db_path: str = "") -> None:
             except sqlite3.OperationalError: pass
         con.execute(_CREATE_SPONSORS_TABLE)
         con.execute(_CREATE_SPONSOR_REGISTER_TABLE)
+        con.execute(_CREATE_COLLECTIONS_TABLE)
+        con.execute(_CREATE_SOURCE_RUNS_TABLE)
 
         # Ensure older rows have a normalized_company before we create/recreate the index
         con.execute("UPDATE jobs SET normalized_company = lower(company) WHERE normalized_company IS NULL")
@@ -313,10 +339,11 @@ def add_jobs(jobs: list[dict]) -> tuple[int, int]:
         except Exception as exc:
             logger.error("Failed to insert job %s: %s", job.get("title"), exc)
     for row_id, job, _ in existing:
+        # Seen again, so still open: a job expire_unseen() hid comes back.
         con.execute(
-            """UPDATE jobs SET updated_at = ?, tags = ?, semantic_vector = COALESCE(semantic_vector, ?)
+            """UPDATE jobs SET updated_at = ?, tags = ?, semantic_vector = COALESCE(semantic_vector, ?), expires_at = ?
                WHERE lower(normalized_company)=? AND lower(title)=? AND lower(location)=?""",
-            (now_str, _extract_tags(job), blob_for.get(id(job)), *_job_key(job)),
+            (now_str, _extract_tags(job), blob_for.get(id(job)), job.get("expires_at"), *_job_key(job)),
         )
         updated += 1
     con.commit()
@@ -324,15 +351,77 @@ def add_jobs(jobs: list[dict]) -> tuple[int, int]:
     return added, updated
 
 
-def purge_expired_jobs(sync_start: str) -> None:
-    if not _DB_PATH: return
+def expire_unseen(before: str) -> int:
+    """Expire every live job last seen before `before` (an ISO time): it has closed, or no search looks
+    for it any more. It leaves the feed and autopilot but keeps its row, so a job page, a mark or an
+    application that points at it still works, and add_jobs revives it if a source lists it again."""
+    if not _DB_PATH:
+        init_db()
     con = sqlite3.connect(_DB_PATH)
-    cur = con.execute("DELETE FROM jobs WHERE source IN ('ats', 'adzuna', 'workable') AND (updated_at < ? OR updated_at IS NULL)", (sync_start,))
-    deleted = cur.rowcount
-    con.commit()
+    with con:
+        cur = con.execute("UPDATE jobs SET expires_at = ? WHERE expires_at IS NULL "
+                          "AND coalesce(updated_at, created_at) < ?", (_now(), before))
     con.close()
-    if deleted > 0:
-        logger.info("Purged %d expired jobs that were removed from their source ATS.", deleted)
+    return cur.rowcount
+
+
+# ── Collections and rate-limited sources (see discovery.py) ──────────────────
+
+def start_collection(searches: list[str], locations: list[str]) -> int:
+    if not _DB_PATH:
+        init_db()
+    con = sqlite3.connect(_DB_PATH)
+    with con:
+        cur = con.execute("INSERT INTO collections (started_at, searches, locations) VALUES (?, ?, ?)",
+                          (_now(), json.dumps(searches), json.dumps(locations)))
+    con.close()
+    return cur.lastrowid
+
+
+def finish_collection(run_id: int, *, found: int = 0, added: int = 0, refreshed: int = 0, expired: int = 0,
+                      error: str = "") -> None:
+    con = sqlite3.connect(_DB_PATH)
+    with con:
+        con.execute("UPDATE collections SET finished_at = ?, found = ?, added = ?, refreshed = ?, expired = ?, "
+                    "error = ? WHERE id = ?", (_now(), found, added, refreshed, expired, error or None, run_id))
+    con.close()
+
+
+def last_collection() -> dict | None:
+    """The latest collection, finished or not, else None."""
+    if not _DB_PATH:
+        init_db()
+    con = sqlite3.connect(_DB_PATH)
+    con.row_factory = sqlite3.Row
+    row = con.execute("SELECT * FROM collections ORDER BY id DESC LIMIT 1").fetchone()
+    con.close()
+    if not row:
+        return None
+    run = dict(row)
+    run["searches"], run["locations"] = json.loads(run["searches"] or "[]"), json.loads(run["locations"] or "[]")
+    return run
+
+
+def source_due(source: str, every_s: float) -> bool:
+    """Whether `source` last ran over `every_s` seconds ago (or never)."""
+    if not _DB_PATH:
+        init_db()
+    con = sqlite3.connect(_DB_PATH)
+    row = con.execute("SELECT ran_at FROM source_runs WHERE source = ?", (source,)).fetchone()
+    con.close()
+    if not row:
+        return True
+    return (datetime.now(timezone.utc) - datetime.fromisoformat(row[0])).total_seconds() >= every_s
+
+
+def mark_source_run(source: str) -> None:
+    if not _DB_PATH:
+        init_db()
+    con = sqlite3.connect(_DB_PATH)
+    with con:
+        con.execute("INSERT INTO source_runs (source, ran_at) VALUES (?, ?) "
+                    "ON CONFLICT(source) DO UPDATE SET ran_at = excluded.ran_at", (source, _now()))
+    con.close()
 
 
 def _like(term: str) -> str:

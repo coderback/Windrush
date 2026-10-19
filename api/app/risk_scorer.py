@@ -181,7 +181,7 @@ def lookup_onet(onet_code: str) -> dict:
 
 
 def occupation_exposure(title: str) -> float:
-    """Return exposure for a job title — used by job_proxy fixture scoring.
+    """Return exposure for a job title — used when job_searcher shapes jobs and the fixture.
 
     Uses word-overlap matching so titles like 'Graduate Software Engineer'
     correctly resolve to 'Software Developers' instead of defaulting to 0.5.

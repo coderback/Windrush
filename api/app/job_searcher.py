@@ -417,13 +417,13 @@ def _names_the_search(title: str, query: str) -> bool:
         for w in words)
 
 
-def _passes_title_filter(title: str, query: str = "") -> bool:
-    """A role we look for (a listed role word, or every word of the search itself) and none of the roles we
-    skip, all matched as whole words. Link text naming a page of jobs ("Engineering 26 open positions",
+def _passes_title_filter(title: str, *queries: str) -> bool:
+    """A role we look for (a listed role word, or every word of one of the searches) and none of the roles
+    we skip, all matched as whole words. Link text naming a page of jobs ("Engineering 26 open positions",
     "Arm Job Search Results for Graduate") isn't a job."""
     if _NEGATIVE.search(title) or _NOT_A_JOB.search(title):
         return False
-    return bool(_POSITIVE.search(title)) or _names_the_search(title, query)
+    return bool(_POSITIVE.search(title)) or any(_names_the_search(title, q) for q in queries)
 
 
 _NOT_A_JOB = re.compile(
@@ -1306,8 +1306,13 @@ async def _search_level4_adzuna(query: str, location: str) -> list[dict]:
                 jobs = await _fetch(simplified)
         logger.info("Level 4 (Adzuna %s): %d jobs for %r in %r", country, len(jobs), query, location)
         return jobs
+    except httpx.HTTPStatusError as exc:
+        # Not the exception's text: it carries the request URL, and with it app_id and app_key.
+        logger.warning("Adzuna %s search failed for %r in %r: HTTP %s", country, query, location,
+                       exc.response.status_code)
+        return []
     except Exception as exc:
-        logger.warning("Adzuna %s search failed: %s", country, exc)
+        logger.warning("Adzuna %s search failed for %r in %r: %s", country, query, location, type(exc).__name__)
         return []
 
 
@@ -1331,23 +1336,49 @@ def _deduplicate(jobs: list[dict]) -> list[dict]:
 
 # ── Public interface ──────────────────────────────────────────────────────────
 
-async def search_jobs_multi(query: str, locations: list[str]) -> list[dict]:
+async def search_jobs_multi(query: str, locations: list[str], web_search: bool = True) -> list[dict]:
+    """One search over `locations` (see collect_jobs)."""
+    return await collect_jobs([query], locations, web_search=web_search)
+
+
+async def _no_jobs() -> list[dict]:
+    return []
+
+
+_ADZUNA_CONCURRENCY = 2
+
+
+async def collect_jobs(queries: list[str], locations: list[str], web_search: bool = True) -> list[dict]:
     """
-    Run all 4 levels concurrently, keep the jobs in `locations`, deduplicate, apply the title filter,
-    sort seniority-boosted titles first, and return every match.
+    Run every source once for all `queries`: the career pages, job boards and web search are fetched
+    once and matched against every query locally; only the aggregator (level 4), which searches
+    server-side, runs per (query, location). Keep the jobs in `locations`, deduplicate, apply the title
+    filter, sort seniority-boosted titles first, and return every match. `web_search=False` skips level
+    3: its site: searches don't depend on the queries, so callers run it once a day.
     Falls back to fixture if all live sources return nothing.
     """
-    keywords = _query_keywords(query)
+    queries = [q for q in dict.fromkeys((q or "").strip() for q in queries) if q]
+    keywords = list(dict.fromkeys(k for q in queries for k in _query_keywords(q)))
+    pairs = [(q, location) for location in locations for q in queries]
+    # A collection makes one aggregator call per (query, location); all at once trips its rate limit (429).
+    gate = asyncio.Semaphore(_ADZUNA_CONCURRENCY)
+
+    async def adzuna(q: str, location: str) -> list[dict]:
+        async with gate:
+            return await _search_level4_adzuna(q, location)
 
     # Only the aggregator (level 4) takes a location: run levels 1-3 once and fan level 4
     # out over the locations, rather than repeating the whole search per location.
-    l1, l2, l3, *l4_per_location = await asyncio.gather(
+    l1, l2, l3, *l4_per_pair = await asyncio.gather(
         _search_level1_playwright(keywords),
-        _search_level2_ats_apis([query]),
-        _search_level3_websearch(),
-        *[_search_level4_adzuna(query, location) for location in locations],
+        _search_level2_ats_apis(queries),
+        _search_level3_websearch() if web_search else _no_jobs(),
+        *[adzuna(q, location) for q, location in pairs],
     )
-    l4 = [job for jobs in l4_per_location for job in jobs]
+    l4_per_location: dict[str, list[dict]] = {}
+    for (_, location), jobs in zip(pairs, l4_per_pair):
+        l4_per_location.setdefault(location, []).extend(jobs)
+    l4 = [job for jobs in l4_per_pair for job in jobs]
     found = len(l1) + len(l2) + len(l3) + len(l4)
 
     # Only jobs in the searched locations (or remote, or whose source didn't say where) are kept: the
@@ -1363,7 +1394,7 @@ async def search_jobs_multi(query: str, locations: list[str]) -> list[dict]:
     # that location's new jobs.
     base = _deduplicate(here(l1 + l2 + l3))
     deduped = list(base)
-    for jobs in l4_per_location:
+    for jobs in l4_per_location.values():
         deduped += _deduplicate(base + here(jobs))[len(base):]
 
     if found and not deduped:
@@ -1374,7 +1405,7 @@ async def search_jobs_multi(query: str, locations: list[str]) -> list[dict]:
         return [dict(j) for j in _FIXTURE]  # copies: callers mutate jobs
 
     # Apply title filter — fall back to unfiltered if filter removes everything
-    filtered = [j for j in deduped if _passes_title_filter(j["title"], query)]
+    filtered = [j for j in deduped if _passes_title_filter(j["title"], *queries)]
     if not filtered:
         logger.warning("Title filter removed all %d results — returning unfiltered", len(deduped))
         filtered = deduped
@@ -1383,7 +1414,7 @@ async def search_jobs_multi(query: str, locations: list[str]) -> list[dict]:
     filtered.sort(key=lambda j: _seniority_score(j["title"]), reverse=True)
 
     logger.info(
-        "Job discovery: L1=%d L2=%d L3=%d L4=%d → %d in %s after dedup → %d after filter",
-        len(l1), len(l2), len(l3), len(l4), len(deduped), locations, len(filtered),
+        "Job discovery for %s: L1=%d L2=%d L3=%d L4=%d → %d in %s after dedup → %d after filter",
+        queries, len(l1), len(l2), len(l3), len(l4), len(deduped), locations, len(filtered),
     )
     return filtered

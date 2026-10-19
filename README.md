@@ -92,7 +92,7 @@ data/task_penetration.csv  — O*NET task-level AI penetration scores (~18 000 r
 docker compose up --build
 ```
 
-Open [http://localhost](http://localhost), create an account, and complete onboarding. Optionally pre-fill the job store with `docker compose exec api python -m app.job_sync`.
+Open [http://localhost](http://localhost), create an account, and complete onboarding. The API collects jobs for every user's target titles and preferred locations every 6 hours (`JOB_COLLECT_HOURS`, `0` turns it off); to collect now, run `docker compose exec api python -m app.job_sync`.
 
 Local (non-Docker) dev:
 
@@ -238,7 +238,7 @@ Labels: **High ≥ 65 %**, **Medium 35–65 %**, **Low < 35 %**. **Job fit** (`s
 | `data/task_penetration.csv` | ~18 000 O\*NET task descriptions → `penetration` score. |
 | `api/app/jobs_fixture.json` | Mock job listings shown only when every live source is empty. |
 | `applications.db` (SQLite, `/appdata`) | `users` (bcrypt password hashes, persona JSON, encrypted job-site password, onboarding flag) + `applications`. |
-| `jobs.db` (SQLite, `/appdata`) | Cached jobs with semantic vectors; filled by discovery or `python -m app.job_sync`. |
+| `jobs.db` (SQLite, `/appdata`) | Cached jobs with semantic vectors, filled by the scheduled collection and the feed's discovery; jobs no source has listed for 3 days are expired. Also the collection runs and the sponsor register. |
 | `/appdata/pdfs`, `/appdata/cvs` | Generated PDFs; each user's uploaded CV. |
 
 ---
