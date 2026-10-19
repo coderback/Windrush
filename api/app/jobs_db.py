@@ -9,7 +9,7 @@ import re
 import sqlite3
 import uuid
 import numpy as np
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 logger = logging.getLogger("windrush.jobs_db")
 
@@ -80,6 +80,29 @@ CREATE TABLE IF NOT EXISTS collections (
     error       TEXT
 );
 """
+# Job boards (see job_searcher.find_board / check_board): every board checked or found, whether it's
+# gone, and which employers have been looked up, so a lookup isn't repeated every collection.
+_CREATE_BOARDS_TABLE = """
+CREATE TABLE IF NOT EXISTS boards (
+    ats        TEXT NOT NULL,
+    slug       TEXT NOT NULL,
+    company    TEXT,
+    origin     TEXT NOT NULL,          -- 'listed' (in job_searcher) or 'found'
+    gone       INTEGER NOT NULL DEFAULT 0,
+    jobs       INTEGER,
+    found_at   TEXT,
+    checked_at TEXT,
+    PRIMARY KEY (ats, slug)
+);
+"""
+_CREATE_BOARD_LOOKUPS_TABLE = """
+CREATE TABLE IF NOT EXISTS board_lookups (
+    company_key TEXT PRIMARY KEY,
+    company     TEXT,
+    looked_at   TEXT NOT NULL,
+    found       TEXT
+);
+"""
 # When a rate-limited source last ran, whoever ran it (see discovery: the web search is once a day).
 _CREATE_SOURCE_RUNS_TABLE = """
 CREATE TABLE IF NOT EXISTS source_runs (
@@ -123,6 +146,8 @@ def init_db(db_path: str = "") -> None:
         con.execute(_CREATE_SPONSOR_REGISTER_TABLE)
         con.execute(_CREATE_COLLECTIONS_TABLE)
         con.execute(_CREATE_SOURCE_RUNS_TABLE)
+        con.execute(_CREATE_BOARDS_TABLE)
+        con.execute(_CREATE_BOARD_LOOKUPS_TABLE)
 
         # Ensure older rows have a normalized_company before we create/recreate the index
         con.execute("UPDATE jobs SET normalized_company = lower(company) WHERE normalized_company IS NULL")
@@ -401,6 +426,121 @@ def last_collection() -> dict | None:
     run = dict(row)
     run["searches"], run["locations"] = json.loads(run["searches"] or "[]"), json.loads(run["locations"] or "[]")
     return run
+
+
+# ── Job boards (see job_searcher.find_board) ─────────────────────────────────
+
+# Jobs from these come from an employer's own board already; anything else (the aggregators, the web
+# search, Workable's job board, career pages) names an employer whose board may be worth finding.
+_FROM_A_BOARD = "(job_id LIKE 'gh-%' OR job_id LIKE 'ashby-%' OR job_id LIKE 'lever-%' OR job_id LIKE 'sr-%' " \
+                "OR (job_id LIKE 'workable-%' AND job_id NOT LIKE 'workable-global-%'))"
+
+
+def found_boards() -> list[tuple[str, str, str]]:
+    """(ats, slug, company) of the boards find_board found that are still there."""
+    if not _DB_PATH:
+        init_db()
+    con = sqlite3.connect(_DB_PATH)
+    rows = con.execute("SELECT ats, slug, company FROM boards WHERE origin = 'found' AND gone = 0").fetchall()
+    con.close()
+    return [tuple(r) for r in rows]
+
+
+def gone_boards() -> set[tuple[str, str]]:
+    """(ats, slug) of the boards a check found removed."""
+    if not _DB_PATH:
+        init_db()
+    con = sqlite3.connect(_DB_PATH)
+    rows = con.execute("SELECT ats, slug FROM boards WHERE gone = 1").fetchall()
+    con.close()
+    return {tuple(r) for r in rows}
+
+
+def boards_due_check(listed: list[tuple[str, str, str]], every_days: float, limit: int) -> list[tuple[str, str]]:
+    """Up to `limit` (ats, slug) of the listed and found boards not checked for `every_days`, the
+    longest-unchecked first (never-checked before all)."""
+    if not _DB_PATH:
+        init_db()
+    con = sqlite3.connect(_DB_PATH)
+    known = {(a, s): (gone, checked) for a, s, gone, checked in
+             con.execute("SELECT ats, slug, gone, checked_at FROM boards").fetchall()}
+    con.close()
+    boards = list(dict.fromkeys([(a, s) for a, s, _ in listed] + [(a, s) for a, s, _ in found_boards()]))
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=every_days)).isoformat()
+    due = [b for b in boards if not known.get(b, (0, None))[0] and (known.get(b, (0, None))[1] or "") < cutoff]
+    due.sort(key=lambda b: known.get(b, (0, None))[1] or "")
+    return due[:limit]
+
+
+def record_board_checks(alive: list[tuple[str, str, int]], gone: list[tuple[str, str]],
+                        listed: list[tuple[str, str, str]]) -> None:
+    if not _DB_PATH:
+        init_db()
+    company = {(a, s): c for a, s, c in listed}
+    now = _now()
+    con = sqlite3.connect(_DB_PATH)
+    with con:
+        for (ats, slug, jobs), is_gone in [*((b, 0) for b in alive), *(((a, s, None), 1) for a, s in gone)]:
+            con.execute("INSERT INTO boards (ats, slug, company, origin, gone, jobs, checked_at) VALUES (?, ?, ?, ?, ?, ?, ?) "
+                        "ON CONFLICT(ats, slug) DO UPDATE SET gone = excluded.gone, "
+                        "jobs = coalesce(excluded.jobs, boards.jobs), checked_at = excluded.checked_at",
+                        (ats, slug, company.get((ats, slug)), "listed" if (ats, slug) in company else "found",
+                         is_gone, jobs, now))
+    con.close()
+
+
+def save_found_boards(found: list[tuple[str, str, str, int]]) -> None:
+    """Store boards find_board found ((ats, slug, company, jobs)); one found again comes back if gone."""
+    if not _DB_PATH:
+        init_db()
+    now = _now()
+    con = sqlite3.connect(_DB_PATH)
+    with con:
+        for ats, slug, company, jobs in found:
+            con.execute("INSERT INTO boards (ats, slug, company, origin, gone, jobs, found_at, checked_at) "
+                        "VALUES (?, ?, ?, 'found', 0, ?, ?, ?) ON CONFLICT(ats, slug) DO UPDATE SET gone = 0, "
+                        "jobs = excluded.jobs, checked_at = excluded.checked_at", (ats, slug, company, jobs, now, now))
+    con.close()
+
+
+def employers_to_look_up(limit: int, retry_days: float, have_boards: list[tuple[str, str, str]]) -> list[str]:
+    """Up to `limit` employers named by live jobs that didn't come from a board, whose board isn't known
+    (`have_boards`: (ats, slug, company)) and who haven't been looked up for `retry_days`: licensed
+    sponsors first, then those with the most jobs."""
+    if not _DB_PATH:
+        init_db()
+    con = sqlite3.connect(_DB_PATH)
+    rows = con.execute(
+        f"SELECT company, count(*) AS n, max({_LICENSED}) AS sponsor FROM jobs "
+        f"WHERE expires_at IS NULL AND coalesce(company, '') != '' AND NOT {_FROM_A_BOARD} "
+        "GROUP BY lower(company) ORDER BY sponsor DESC, n DESC").fetchall()
+    looked = {k: t for k, t in con.execute("SELECT company_key, looked_at FROM board_lookups").fetchall()}
+    con.close()
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=retry_days)).isoformat()
+    have = {normalise_company_name(c) for _, _, c in have_boards}
+    out, seen = [], set()
+    for company, _, _ in rows:
+        key = normalise_company_name(company)
+        if not key or key in seen or key in have or looked.get(key, "") >= cutoff:
+            continue
+        seen.add(key)
+        out.append(company)
+        if len(out) >= limit:
+            break
+    return out
+
+
+def mark_looked_up(companies: list[str], found: dict[str, str]) -> None:
+    """Record that `companies` were looked up; `found` maps a company to "ats/slug" for the hits."""
+    if not _DB_PATH:
+        init_db()
+    now = _now()
+    con = sqlite3.connect(_DB_PATH)
+    with con:
+        con.executemany("INSERT INTO board_lookups (company_key, company, looked_at, found) VALUES (?, ?, ?, ?) "
+                        "ON CONFLICT(company_key) DO UPDATE SET looked_at = excluded.looked_at, found = excluded.found",
+                        [(normalise_company_name(c), c, now, found.get(c)) for c in companies])
+    con.close()
 
 
 def source_due(source: str, every_s: float) -> bool:

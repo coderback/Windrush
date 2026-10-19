@@ -20,7 +20,7 @@ from concurrent.futures import ProcessPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
 from datetime import datetime, timedelta, timezone
 
-from . import jobs_db, tracker
+from . import job_searcher, jobs_db, tracker
 
 logger = logging.getLogger("windrush.discovery")
 
@@ -71,20 +71,36 @@ def shutdown() -> None:
         _pool = None
 
 
-def _collect_in_process(queries: list[str], locations: list[str], web_search: bool) -> list[dict]:
+def _collect_in_process(queries: list[str], locations: list[str], web_search: bool,
+                        boards: dict[str, list[tuple[str, str]]]) -> list[dict]:
     """Worker-process entry point: run the async multi-source search on its own event loop."""
     from .job_searcher import collect_jobs
-    return asyncio.run(collect_jobs(queries, locations, web_search=web_search))
+    return asyncio.run(collect_jobs(queries, locations, web_search=web_search, boards=boards))
 
 
-async def _in_pool(queries: list[str], locations: list[str], web_search: bool) -> list[dict]:
+def _refresh_boards_in_process(lookups: list[str], checks: list[tuple[str, str]]) -> dict:
+    """Worker-process entry point: look employers' boards up and check known ones (big JSON, so not here)."""
+    from .job_searcher import refresh_boards
+    return asyncio.run(refresh_boards(lookups, checks))
+
+
+async def _run_in_pool(fn, *args):
     global _pool
     try:
-        return await asyncio.get_running_loop().run_in_executor(
-            _get_pool(), _collect_in_process, queries, locations, web_search)
+        return await asyncio.get_running_loop().run_in_executor(_get_pool(), fn, *args)
     except BrokenProcessPool:
         _pool = None  # a worker died (e.g. Chromium OOM) — start a fresh pool next time
         raise
+
+
+def _boards() -> dict[str, list[tuple[str, str]]]:
+    """The job boards to fetch: the listed ones and the ones found since, without any that have gone."""
+    return job_searcher._all_boards(jobs_db.found_boards(), jobs_db.gone_boards())
+
+
+async def _in_pool(queries: list[str], locations: list[str], web_search: bool) -> list[dict]:
+    boards = await asyncio.to_thread(_boards)
+    return await _run_in_pool(_collect_in_process, queries, locations, web_search, boards)
 
 
 async def search_jobs(query: str, locations: list[str], web_search: bool = True) -> list[dict]:
@@ -95,6 +111,38 @@ async def search_jobs(query: str, locations: list[str], web_search: bool = True)
 async def collect_jobs(queries: list[str], locations: list[str], web_search: bool = True) -> list[dict]:
     """Live search for several queries in one pass over the sources, executed in a worker process."""
     return await _in_pool(queries, locations, web_search)
+
+
+# ── Job boards ────────────────────────────────────────────────────────────────
+# Each collection looks a few employers up (ones the aggregators and the web search name, licensed
+# sponsors first) and checks a few known boards, so new boards are fetched from then on and a board
+# that has gone stops being asked for.
+
+_BOARD_LOOKUPS_PER_RUN = 20
+_BOARD_RETRY_DAYS = 30          # look an employer up again after this long: they may have opened a board
+_BOARD_CHECK_DAYS = 7
+_BOARD_CHECKS_PER_RUN = 40
+
+
+async def _board_refresh(lookups: list[str], checks: list[tuple[str, str]]) -> dict:
+    return await _run_in_pool(_refresh_boards_in_process, lookups, checks)
+
+
+async def refresh_boards() -> dict | None:
+    """Look up employers and check boards (see job_searcher.refresh_boards), and store what's learnt.
+    Returns its result, or None when there was nothing to do."""
+    listed = job_searcher.listed_boards()
+    have = listed + await asyncio.to_thread(jobs_db.found_boards)
+    lookups = await asyncio.to_thread(jobs_db.employers_to_look_up, _BOARD_LOOKUPS_PER_RUN, _BOARD_RETRY_DAYS, have)
+    checks = await asyncio.to_thread(jobs_db.boards_due_check, listed, _BOARD_CHECK_DAYS, _BOARD_CHECKS_PER_RUN)
+    if not lookups and not checks:
+        return None
+    result = await _board_refresh(lookups, checks)
+    await asyncio.to_thread(jobs_db.save_found_boards, result["found"])
+    await asyncio.to_thread(jobs_db.mark_looked_up, lookups,
+                            {company: f"{ats}/{slug}" for ats, slug, company, _ in result["found"]})
+    await asyncio.to_thread(jobs_db.record_board_checks, result["alive"], result["gone"], listed)
+    return result
 
 
 def _norm(text: str) -> str:
@@ -194,6 +242,10 @@ async def collect() -> dict | None:
     run_id = await asyncio.to_thread(jobs_db.start_collection, searches, locations)
     started_at, started = datetime.now(timezone.utc), time.monotonic()
     try:
+        try:
+            await refresh_boards()  # first, so a board found now is fetched in this collection
+        except Exception:
+            logger.exception("job board refresh failed; collecting with the boards already known")
         web = await _web_search_due()
         jobs = await collect_jobs(searches, locations, web_search=web)
         if web:

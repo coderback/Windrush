@@ -15,6 +15,12 @@ async def _empty(*args, **kwargs):
     return []
 
 
+@pytest.fixture(autouse=True)
+def no_workable_job_board(monkeypatch):
+    """Workable's job board is searched with Adzuna; tests that want it set their own."""
+    monkeypatch.setattr(job_searcher, "_search_level4_workable", _empty)
+
+
 def test_ats_level_gets_word_keywords_not_characters(monkeypatch):
     seen = {}
 
@@ -68,7 +74,7 @@ def test_same_role_in_two_locations_keeps_both_postings(monkeypatch):
     for name in LIVE_SOURCES[:3]:
         monkeypatch.setattr(job_searcher, name, _empty)
 
-    async def fake_ats(queries):
+    async def fake_ats(queries, boards=None):
         return [{"title": "Graduate Software Engineer", "company": "Sky", "url": "https://sky/1"}]
     monkeypatch.setattr(job_searcher, "_search_level2_ats_apis", fake_ats)
 
@@ -125,6 +131,135 @@ def test_a_failed_adzuna_call_never_logs_the_key(monkeypatch, caplog):
         assert asyncio.run(job_searcher._search_level4_adzuna("engineer", "London")) == []
     assert "HTTP 429" in caplog.text
     assert "the-secret-key" not in caplog.text and "the-app-id" not in caplog.text
+
+
+def _adzuna_params(monkeypatch, query, location):
+    seen = []
+
+    class FakeClient:
+        def __init__(self, *a, **k): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): pass
+        async def get(self, url, params=None):
+            seen.append(dict(params))
+            item = {"id": len(seen), "title": "Graduate Software Engineer", "company": {"display_name": "Acme"},
+                    "location": {"display_name": "London"}, "redirect_url": f"https://adzuna/{len(seen)}"}
+            return httpx.Response(200, json={"results": [item]}, request=httpx.Request("GET", url))
+
+    monkeypatch.setattr(job_searcher, "ADZUNA_APP_ID", "id")
+    monkeypatch.setattr(job_searcher, "ADZUNA_API_KEY", "key")
+    monkeypatch.setattr(job_searcher, "http_client", MagicMock(async_client=FakeClient))
+    jobs = asyncio.run(job_searcher._search_level4_adzuna(query, location))
+    return seen, jobs
+
+
+def test_adzuna_searches_the_role_uk_wide_and_in_its_graduate_category(monkeypatch):
+    seen, jobs = _adzuna_params(monkeypatch, "Graduate Software Engineer", "United Kingdom")
+    # Adzuna ANDs every word over the ad, so the seniority word goes; the UK index needs no `where`.
+    assert [(p["what"], p.get("where"), p.get("category"), p["results_per_page"]) for p in seen] == [
+        ("Software Engineer", None, None, 50), ("Software Engineer", None, "graduate-jobs", 50)]
+    assert len(jobs) == 1  # the same ad from both searches is one
+
+
+def test_adzuna_keeps_a_city_and_has_no_graduate_category_abroad(monkeypatch):
+    seen, _ = _adzuna_params(monkeypatch, "ML Engineer", "London")
+    assert [(p["what"], p["where"]) for p in seen] == [("ML Engineer", "London"), ("ML Engineer", "London")]
+    seen, _ = _adzuna_params(monkeypatch, "ML Engineer", "Toronto")
+    assert [p.get("category") for p in seen] == [None]
+
+
+@pytest.mark.parametrize("locations, areas", [
+    (["London", "United Kingdom"], ["United Kingdom"]),     # the UK-wide search covers London
+    (["UK", "Manchester", "Berlin"], ["UK", "Berlin"]),
+    (["London", "Manchester"], ["London", "Manchester"]),
+    (["London", "Toronto"], ["London", "Toronto"]),
+])
+def test_aggregator_areas(locations, areas):
+    assert job_searcher._aggregator_areas(locations) == areas
+
+
+def test_the_workable_job_board_is_searched_per_area(monkeypatch):
+    for name in ("_search_level1_playwright", "_search_level2_ats_apis", "_search_level3_websearch",
+                 "_search_level4_adzuna"):
+        monkeypatch.setattr(job_searcher, name, _empty)
+    calls = []
+
+    async def workable(query, location):
+        calls.append((query, location))
+        return [{"title": "Graduate Software Engineer", "company": "Wk", "location": "London, United Kingdom",
+                 "url": "https://w/1"}]
+    monkeypatch.setattr(job_searcher, "_search_level4_workable", workable)
+    jobs = asyncio.run(job_searcher.collect_jobs(["software engineer"], ["London", "United Kingdom"]))
+    assert calls == [("software engineer", "United Kingdom")] and [j["url"] for j in jobs] == ["https://w/1"]
+
+
+# ── Job boards ────────────────────────────────────────────────────────────────
+
+def test_found_boards_are_fetched_with_the_listed_ones_and_gone_ones_are_not():
+    listed = job_searcher.listed_boards()
+    gone_ats, gone_slug, _ = listed[0]
+    boards = job_searcher._all_boards(found=[("ashby", "newco", "NewCo"), (gone_ats, gone_slug.upper(), "Dup")],
+                                      gone={(gone_ats, gone_slug)})
+    flat = [(ats, slug) for ats, items in boards.items() for slug, _ in items]
+    assert ("ashby", "newco") in flat and (gone_ats, gone_slug) not in flat
+    assert len(flat) == len(listed)  # one gone (however its slug is cased) and one found
+
+
+@pytest.mark.parametrize("company, slugs", [
+    ("Squarepoint Capital LLP", ["squarepointcapital", "squarepoint-capital"]),
+    ("OpenAI", ["openai"]),
+    ("The Trade Desk (UK) Ltd", ["tradedesk", "trade-desk"]),
+    ("BP", []),                     # too short to be anyone's alone
+])
+def test_board_slugs(company, slugs):
+    assert job_searcher._board_slugs(company) == slugs
+
+
+class _Web:
+    """A fake httpx client: URL -> (status, json)."""
+    def __init__(self, pages):
+        self.pages, self.asked = pages, []
+
+    async def get(self, url, params=None):
+        self.asked.append(url)
+        status, body = self.pages.get(url, (404, {}))
+        return httpx.Response(status, json=body, request=httpx.Request("GET", url))
+
+
+GH = "https://boards-api.greenhouse.io/v1/boards/{}"
+ASHBY = "https://api.ashbyhq.com/posting-api/job-board/{}"
+
+
+def test_a_greenhouse_board_is_the_employers_only_if_it_has_their_name():
+    web = _Web({GH.format("squarepointcapital") + "/jobs": (200, {"jobs": [{"id": 1}, {"id": 2}]}),
+                GH.format("squarepointcapital"): (200, {"name": "Squarepoint Capital"})})
+    assert asyncio.run(job_searcher.find_board(web, "Squarepoint Capital LLP")) == ("greenhouse", "squarepointcapital", 2)
+    web = _Web({GH.format("london") + "/jobs": (200, {"jobs": [{"id": 1}]}),
+                GH.format("london"): (200, {"name": "London Stock Exchange Group"})})
+    assert asyncio.run(job_searcher.find_board(web, "London")) is None
+
+
+def test_an_ashby_board_is_the_employers_only_if_an_ad_names_them():
+    ads = [{"descriptionPlain": "At OpenAI we build safe AGI."}]
+    web = _Web({ASHBY.format("openai"): (200, {"jobs": ads})})
+    assert asyncio.run(job_searcher.find_board(web, "OpenAI")) == ("ashby", "openai", 1)
+    web = _Web({ASHBY.format("openai"): (200, {"jobs": [{"descriptionPlain": "Join our sales team."}]})})
+    assert asyncio.run(job_searcher.find_board(web, "OpenAI")) is None
+
+
+def test_names_that_are_not_employers_are_not_looked_up():
+    web = _Web({})
+    assert asyncio.run(job_searcher.find_board(web, "Unknown")) is None
+    assert asyncio.run(job_searcher.find_board(web, "Myworkdayjobs.com")) is None
+    assert web.asked == []
+
+
+def test_a_board_is_gone_only_on_a_404():
+    web = _Web({ASHBY.format("alive"): (200, {"jobs": [{}, {}]}), ASHBY.format("busy"): (503, {})})
+    assert asyncio.run(job_searcher.check_board(web, "ashby", "alive")) == 2
+    assert asyncio.run(job_searcher.check_board(web, "ashby", "gone")) is None
+    with pytest.raises(httpx.HTTPStatusError):
+        asyncio.run(job_searcher.check_board(web, "ashby", "busy"))
 
 
 # ── Title filter ──────────────────────────────────────────────────────────────
@@ -240,7 +375,7 @@ def test_every_match_in_the_searched_locations_is_kept(monkeypatch):
     for name in ("_search_level1_playwright", "_search_level3_websearch", "_search_level4_adzuna"):
         monkeypatch.setattr(job_searcher, name, _empty)
 
-    async def fake_ats(queries):
+    async def fake_ats(queries, boards=None):
         here = [{"title": f"Software Engineer {i}", "company": f"Co {i}", "location": "London, United Kingdom",
                  "url": f"https://x/{i}"} for i in range(100)]
         elsewhere = [{"title": f"Software Engineer {i}", "company": f"Far {i}", "location": "Austin, TX",
@@ -256,7 +391,7 @@ def test_a_posting_elsewhere_does_not_stand_in_for_the_one_here(monkeypatch):
     for name in ("_search_level1_playwright", "_search_level3_websearch", "_search_level4_adzuna"):
         monkeypatch.setattr(job_searcher, name, _empty)
 
-    async def fake_ats(queries):
+    async def fake_ats(queries, boards=None):
         return [{"title": "Software Engineer", "company": "Cloudflare", "location": "Austin, TX", "url": "https://x/1"},
                 {"title": "Software Engineer", "company": "Cloudflare", "location": "London, UK", "url": "https://x/2"}]
     monkeypatch.setattr(job_searcher, "_search_level2_ats_apis", fake_ats)
@@ -269,7 +404,7 @@ def test_nothing_in_the_searched_locations_is_not_the_fixture(monkeypatch):
     for name in ("_search_level1_playwright", "_search_level3_websearch", "_search_level4_adzuna"):
         monkeypatch.setattr(job_searcher, name, _empty)
 
-    async def fake_ats(queries):
+    async def fake_ats(queries, boards=None):
         return [{"title": "Software Engineer", "company": "Far", "location": "Austin, TX", "url": "https://x/1"}]
     monkeypatch.setattr(job_searcher, "_search_level2_ats_apis", fake_ats)
     assert asyncio.run(job_searcher.search_jobs_multi("software engineer", ["London"])) == []

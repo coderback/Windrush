@@ -23,6 +23,7 @@ import httpx
 from . import http_client
 from . import jobs_db
 from . import net_guard
+from .company_names import normalise_company_name
 from .risk_scorer import occupation_exposure
 
 logger = logging.getLogger("windrush.job_searcher")
@@ -622,25 +623,14 @@ _GREENHOUSE_COMPANIES: list[tuple[str, str]] = [
     ("humeai",           "Hume AI"),
     ("airtable",         "Airtable"),
     ("vercel",           "Vercel"),
-    ("temporal",         "Temporal"),
     ("arizeai",          "Arize AI"),
-    ("runpod",           "RunPod"),
     ("gleanwork",        "Glean"),
-    ("ada",              "Ada"),
-    ("thoughtmachine",   "Thought Machine"),
     ("monzo",            "Monzo"),
     ("deliveroo",        "Deliveroo"),
     ("gocardless",       "GoCardless"),
-    ("checkout",         "Checkout.com"),
-    ("revolut",          "Revolut"),
-    ("deezersa",         "Deezer"),
-    ("improbable",       "Improbable"),
     # added from portals.yml
-    ("skyscanner",       "Skyscanner"),
     ("wise",             "Wise"),
-    ("wayve",            "Wayve"),
     ("cleo",             "Cleo"),
-    ("factorial",        "Factorial"),
     # added from discovery
     ("twilio",           "Twilio"),
     ("dialpad",          "Dialpad"),
@@ -660,7 +650,6 @@ _GREENHOUSE_COMPANIES: list[tuple[str, str]] = [
     ("mw-tech-grad",     "Marshall Wace"),
     ("obsidiansecurity", "Obsidian Security"),
     ("rothesaygraduates", "Rothesay"),
-    ("towerpeak",        "Tower Peak Partners"),
     ("xantium",          "Xantium"),
     ("xpcampus",         "ExodusPoint"),
     # added from summer-internships.json
@@ -670,17 +659,14 @@ _GREENHOUSE_COMPANIES: list[tuple[str, str]] = [
     ("mangroup",         "Man Group"),
     ("tripadvisor",      "Viator"),
     ("schonfeld",        "Schonfeld"),
-    ("perplexityai",     "Perplexity"),
     ("emergingtalent",   "Maven Securities"),
     ("moloco",           "Moloco"),
     ("aquaticcapitalmanagement", "Aquatic Capital Management"),
     ("copperco",         "Copper.co"),
-    ("embed",            "GSA Capital"),
     ("point72",          "Point72"),
     ("mwinternshipprogram", "Marshall Wace"),
     ("xtxmarketstechnologies", "XTX Markets"),
     # added from slug validation
-    ("deepmind",          "DeepMind"),
     ("stripe",            "Stripe"),
     ("databricks",        "Databricks"),
     ("jumptrading",       "Jump Trading"),
@@ -688,6 +674,9 @@ _GREENHOUSE_COMPANIES: list[tuple[str, str]] = [
     ("datadog",           "Datadog"),
     ("elastic",           "Elastic"),
     ("mongodb",           "MongoDB"),
+    # moved from Lever (October 2026)
+    ("scaleai",          "Scale AI"),
+    ("togetherai",       "Together AI"),
 ]
 
 _ASHBY_COMPANIES: list[tuple[str, str]] = [
@@ -702,16 +691,11 @@ _ASHBY_COMPANIES: list[tuple[str, str]] = [
     ("zapier",      "Zapier"),
     ("cohere",      "Cohere"),
     ("langchain",   "LangChain"),
-    ("lindy",       "Lindy"),
-    ("qdrant",      "Qdrant"),
     ("weaviate",    "Weaviate"),
     # added from portals.yml
     ("pinecone",    "Pinecone"),
     ("attio",       "Attio"),
-    ("tinybird",    "Tinybird"),
     ("abound",      "Abound"),
-    ("babylon",     "Babylon Health"),
-    ("travelperk",  "TravelPerk"),
     # added from discovery
     ("openai",      "OpenAI"),
     ("talkdesk",    "Talkdesk"),
@@ -734,20 +718,19 @@ _ASHBY_COMPANIES: list[tuple[str, str]] = [
     ("perplexity",  "Perplexity AI"),
     ("modal",       "Modal"),
     ("cursor",      "Cursor"),
+    # moved from Greenhouse (October 2026)
+    ("wayve",       "Wayve"),
+    ("improbable",  "Improbable"),
+    ("temporal",    "Temporal"),
+    ("runpod",      "RunPod"),
 ]
 
 _LEVER_COMPANIES: list[tuple[str, str]] = [
-    ("scale-ai",    "Scale AI"),
-    ("wandb",       "Weights & Biases"),   # canonical slug (weights-biases also works)
-    ("together-ai", "Together AI"),
     ("palantir",    "Palantir"),
     ("mistral",     "Mistral AI"),
-    ("clarity-ai",  "Clarity AI"),
     # added from grad-programmes.json
-    ("frontier",    "Frontier Developments"),
     ("ion",         "ION"),
     # added from summer-internships.json
-    ("cirrus",      "Cirrus Logic"),
     ("spotify",     "Spotify"),
     ("gearset",     "Gearset"),
 ]
@@ -770,20 +753,9 @@ _WORKABLE_COMPANIES: list[tuple[str, str]] = [
 _SMARTRECRUITERS_COMPANIES: list[tuple[str, str]] = [
     # Confirmed working via API test (May 2026)
     ("PAConsulting",     "PA Consulting"),
-    ("Visa",             "Visa"),
     ("TTP1",             "TTP"),
     ("Vitol",            "Vitol"),
     ("LegalAndGeneral",  "Legal & General"),
-    # Additional candidates (200 OK, 0 jobs now but valid boards)
-    ("ni",               "Turner & Townsend"),
-    ("oneclick-ui",      "EDF Energy"),
-    ("GoldmanSachs",     "Goldman Sachs"),
-    ("HSBC",             "HSBC"),
-    ("Barclays",         "Barclays"),
-    ("JPMorgan",         "JPMorgan"),
-    ("Macquarie",        "Macquarie"),
-    ("Nomura",           "Nomura"),
-    ("CitadelSecurities","Citadel Securities"),
 ]
 
 async def _fetch_greenhouse(slug: str, company: str, keywords: list[str]) -> list[dict]:
@@ -970,26 +942,49 @@ async def _fetch_smartrecruiters(slug: str, company: str, keywords: list[str]) -
     except Exception:
         return []
 
-async def _search_level2_ats_apis(queries: list[str]) -> list[dict]:
+def listed_boards() -> list[tuple[str, str, str]]:
+    """(ats, slug, company) of every board listed in this module."""
+    lists = {"greenhouse": _GREENHOUSE_COMPANIES, "ashby": _ASHBY_COMPANIES, "lever": _LEVER_COMPANIES,
+             "workable": _WORKABLE_COMPANIES, "smartrecruiters": _SMARTRECRUITERS_COMPANIES}
+    return [(ats, slug, company) for ats, listed in lists.items() for slug, company in listed]
+
+
+def _all_boards(found: list[tuple[str, str, str]] = (), gone: set[tuple[str, str]] = frozenset()
+                ) -> dict[str, list[tuple[str, str]]]:
+    """{ats: [(slug, company)]}: the listed boards plus `found` ones ((ats, slug, company)), without the
+    `gone` ones ((ats, slug) a check found removed)."""
+    boards: dict[str, list[tuple[str, str]]] = {}
+    gone = {(ats, slug.lower()) for ats, slug in gone or ()}
+    seen: set[tuple[str, str]] = set()
+    for ats, slug, company in [*listed_boards(), *(found or ())]:
+        key = (ats, slug.lower())
+        if key in seen or key in gone:
+            continue
+        seen.add(key)
+        boards.setdefault(ats, []).append((slug, company))
+    return boards
+
+
+async def _search_level2_ats_apis(queries: list[str], boards: dict[str, list[tuple[str, str]]] | None = None
+                                  ) -> list[dict]:
     """
-    Concurrently fetch from Greenhouse, Ashby, Lever, and Workable public APIs.
-    Filters each company's listings by query keyword relevance in a single pass.
+    Concurrently fetch from Greenhouse, Ashby, Lever, Workable and SmartRecruiters public APIs: `boards`
+    ({ats: [(slug, company)]}, see _all_boards), by default the listed ones. Filters each company's
+    listings by query keyword relevance in a single pass.
     """
     all_keywords = []
     for q in queries:
         all_keywords.extend(_query_keywords(q))
-        
+
     keywords = list(set(all_keywords))
     if not keywords:
         return []
 
-    tasks = (
-        [_fetch_greenhouse(slug, name, keywords) for slug, name in _GREENHOUSE_COMPANIES]
-        + [_fetch_ashby(slug, name, keywords)         for slug, name in _ASHBY_COMPANIES]
-        + [_fetch_lever(slug, name, keywords)         for slug, name in _LEVER_COMPANIES]
-        + [_fetch_workable(slug, name, keywords)      for slug, name in _WORKABLE_COMPANIES]
-        + [_fetch_smartrecruiters(slug, name, keywords) for slug, name in _SMARTRECRUITERS_COMPANIES]
-    )
+    fetchers = {"greenhouse": _fetch_greenhouse, "ashby": _fetch_ashby, "lever": _fetch_lever,
+                "workable": _fetch_workable, "smartrecruiters": _fetch_smartrecruiters}
+    every = _all_boards() if boards is None else boards
+    tasks = [fetchers[ats](slug, name, keywords) for ats, listed in every.items() if ats in fetchers
+             for slug, name in listed]
 
     results = await asyncio.gather(*tasks, return_exceptions=True)
     jobs: list[dict] = []
@@ -997,14 +992,133 @@ async def _search_level2_ats_apis(queries: list[str]) -> list[dict]:
         if isinstance(r, list):
             jobs.extend(r)
 
-    total_companies = (
-        len(_GREENHOUSE_COMPANIES) + len(_ASHBY_COMPANIES)
-        + len(_LEVER_COMPANIES) + len(_WORKABLE_COMPANIES)
-        + len(_SMARTRECRUITERS_COMPANIES)
-    )
     logger.info("Level 2 (ATS APIs): %d jobs matched against %d keywords across %d companies",
-                len(jobs), len(keywords), total_companies)
+                len(jobs), len(keywords), len(tasks))
     return jobs
+
+
+# ── Finding job boards ────────────────────────────────────────────────────────
+# Listed boards go stale (26 of them had gone by October 2026, eight to another provider) and cover a
+# fraction of employers. find_board looks an employer up by name on the providers with public job APIs,
+# so an employer seen through the aggregators or the web search gets its full listings from then on;
+# check_board tells whether a known board is still there.
+
+_BOARD_API = {
+    "greenhouse": "https://boards-api.greenhouse.io/v1/boards/{slug}/jobs",
+    "ashby": "https://api.ashbyhq.com/posting-api/job-board/{slug}",
+    "lever": "https://api.lever.co/v0/postings/{slug}?mode=json",
+    "workable": "https://apply.workable.com/api/v1/widget/accounts/{slug}",
+    "smartrecruiters": "https://api.smartrecruiters.com/v1/companies/{slug}/postings?limit=100",
+}
+_FIND_ON = ("greenhouse", "ashby", "lever")
+_BOARD_NAME_DROP = re.compile(r"\b(?:ltd|limited|plc|llp|llc|inc|corp|corporation|uk|group|holdings|the)\b")
+_NOT_AN_EMPLOYER = re.compile(r"^(?:unknown|confidential|anonymous|undisclosed|recruit\w*|staffing|careers?|jobs?|"
+                              r"hiring|.*myworkdayjobs.*)$", re.I)
+
+
+def _board_slugs(company: str) -> list[str]:
+    """Slugs an employer's board is likely under: "Squarepoint Capital LLP" -> squarepointcapital,
+    squarepoint-capital. Never a single word of a longer name ("Squarepoint"): too many other boards."""
+    words = re.findall(r"[a-z0-9]+", _BOARD_NAME_DROP.sub(" ", re.sub(r"\(.*?\)", " ", company.lower())))
+    return [s for s in dict.fromkeys(["".join(words), "-".join(words)]) if len(s) >= 4]
+
+
+def _board_jobs(ats: str, data) -> list[dict]:
+    if ats == "lever":
+        return data if isinstance(data, list) else []
+    if ats == "smartrecruiters":
+        return data.get("content") or []
+    return data.get("jobs") or []
+
+
+def _names(company: str, text: str) -> bool:
+    """Whether `text` names the employer: its normalised name as whole words."""
+    name = normalise_company_name(company)
+    return bool(name) and re.search(rf"(?<![a-z0-9]){re.escape(name)}(?![a-z0-9])",
+                                    normalise_company_name(text)) is not None
+
+
+async def _board_is(client: httpx.AsyncClient, ats: str, slug: str, company: str) -> int | None:
+    """How many jobs `slug` on `ats` has if it is `company`'s board (with at least one job), else None.
+    A slug can be someone else's board: Greenhouse gives the board's name, which must be the employer's;
+    elsewhere one of its ads must name the employer."""
+    resp = await client.get(_BOARD_API[ats].format(slug=slug))
+    if resp.status_code != 200:
+        return None
+    jobs = _board_jobs(ats, resp.json())
+    if not jobs:
+        return None
+    if ats == "greenhouse":
+        board = await client.get(f"https://boards-api.greenhouse.io/v1/boards/{slug}")
+        name = board.json().get("name", "") if board.status_code == 200 else ""
+        if normalise_company_name(name) != normalise_company_name(company):
+            return None
+    else:
+        texts = [f"{j.get('descriptionPlain') or j.get('description') or ''} {j.get('additionalPlain') or ''}"
+                 for j in jobs[:5]]
+        if not any(_names(company, t) for t in texts):
+            return None
+    return len(jobs)
+
+
+async def find_board(client: httpx.AsyncClient, company: str) -> tuple[str, str, int] | None:
+    """(ats, slug, jobs) of the employer's job board on Greenhouse, Ashby or Lever, else None."""
+    if _NOT_AN_EMPLOYER.match((company or "").strip()) or len(normalise_company_name(company)) < 3:
+        return None
+    for slug in _board_slugs(company):
+        for ats in _FIND_ON:
+            try:
+                jobs = await _board_is(client, ats, slug, company)
+            except Exception as exc:
+                logger.debug("board lookup %s/%s failed: %s", ats, slug, type(exc).__name__)
+                continue
+            if jobs:
+                return ats, slug, jobs
+    return None
+
+
+async def check_board(client: httpx.AsyncClient, ats: str, slug: str) -> int | None:
+    """How many jobs a known board has now, or None when it's gone (404). Raises on anything else, so a
+    passing error never drops a board."""
+    resp = await client.get(_BOARD_API[ats].format(slug=slug))
+    if resp.status_code == 404:
+        return None
+    resp.raise_for_status()
+    return len(_board_jobs(ats, resp.json()))
+
+
+async def refresh_boards(lookups: list[str], checks: list[tuple[str, str]]) -> dict:
+    """Look `lookups` (employer names) up and check `checks` ((ats, slug)), a few at a time:
+    {"found": [(ats, slug, company, jobs)], "missed": [company], "alive": [(ats, slug, jobs)],
+    "gone": [(ats, slug)]}."""
+    gate = asyncio.Semaphore(4)
+    out: dict = {"found": [], "missed": [], "alive": [], "gone": []}
+    async with http_client.async_client(timeout=15.0) as client:
+        async def look(company: str) -> None:
+            async with gate:
+                hit = await find_board(client, company)
+            if hit:
+                out["found"].append((hit[0], hit[1], company, hit[2]))
+            else:
+                out["missed"].append(company)
+
+        async def check(ats: str, slug: str) -> None:
+            async with gate:
+                try:
+                    jobs = await check_board(client, ats, slug)
+                except Exception as exc:
+                    logger.debug("board check %s/%s failed: %s", ats, slug, type(exc).__name__)
+                    return
+            if jobs is None:
+                out["gone"].append((ats, slug))
+            else:
+                out["alive"].append((ats, slug, jobs))
+
+        await asyncio.gather(*[look(c) for c in lookups], *[check(a, s) for a, s in checks])
+    logger.info("Boards: %d of %d employers found (%s), %d of %d checked boards gone (%s)",
+                len(out["found"]), len(lookups), [f"{a}/{s}" for a, s, _, _ in out["found"]],
+                len(out["gone"]), len(checks), [f"{a}/{s}" for a, s in out["gone"]])
+    return out
 
 
 # ── Level 3: Brave Search with site: filters ──────────────────────────────────
@@ -1248,6 +1362,25 @@ async def _search_level4_workable(query: str, location: str) -> list[dict]:
 
 # ── Post-Processing ───────────────────────────────────────────────────────────
 
+_COUNTRY_NAMES = re.compile(r"^\s*(?:uk|u\.k\.|united kingdom|gb|great britain|britain|"
+                            r"us|usa|united states|australia|canada)\s*$", re.I)
+
+
+def _names_a_country(location: str) -> bool:
+    """A location that is a whole country the aggregators index by ("United Kingdom"), not a place in one."""
+    return bool(_COUNTRY_NAMES.match(location or ""))
+
+
+def _aggregator_areas(locations: list[str]) -> list[str]:
+    """The locations to run the per-location aggregators over: a UK city is left out when the UK itself
+    is searched (one UK-wide call covers it), so London + United Kingdom is one area, not two."""
+    uk_wide = any(_names_a_country(l) and jobs_db.in_locations("united kingdom", [l]) for l in locations)
+    if not uk_wide:
+        return list(locations)
+    uk = jobs_db._location_matcher("United Kingdom")[2]
+    return [l for l in locations if _names_a_country(l) or not uk(l.lower())]
+
+
 async def _search_level4_adzuna(query: str, location: str) -> list[dict]:
     if not (ADZUNA_APP_ID and ADZUNA_API_KEY):
         return []
@@ -1266,16 +1399,24 @@ async def _search_level4_adzuna(query: str, location: str) -> list[dict]:
         country = "us"
 
     base_url = f"https://api.adzuna.com/v1/api/jobs/{country}/search/1"
-    query = re.sub(r"\s+", " ", _BOOLEAN_OPS.sub(" ", query)).strip()
+    # Adzuna ANDs the words of `what` across the whole ad, so a seniority word cuts the results to almost
+    # nothing ("Graduate Software Engineer" in London: 2); its graduate category finds those roles
+    # instead (UK-wide: 347). A country isn't a `where` it knows ("United Kingdom": 0): its index is
+    # already that country.
+    what = re.sub(r"\s+", " ", _SENIORITY_WORDS.sub(" ", _BOOLEAN_OPS.sub(" ", query))).strip() or query.strip()
+    where = "" if _names_a_country(location) else location
+    searches = [{"what": what}]
+    if country == "gb":
+        searches.append({"what": what, "category": "graduate-jobs"})
 
-    async def _fetch(q: str) -> list[dict]:
+    async def _fetch(extra: dict) -> list[dict]:
         params = {
             "app_id": ADZUNA_APP_ID,
             "app_key": ADZUNA_API_KEY,
-            "what": q,
-            "where": location,
-            "results_per_page": 20,
+            "results_per_page": 50,
             "sort_by": "relevance",
+            **({"where": where} if where else {}),
+            **extra,
         }
         async with http_client.async_client(timeout=12.0) as client:
             resp = await client.get(base_url, params=params)
@@ -1298,13 +1439,11 @@ async def _search_level4_adzuna(query: str, location: str) -> list[dict]:
         return jobs
 
     try:
-        jobs = await _fetch(query)
-        if not jobs:
-            simplified = _SENIORITY_WORDS.sub("", query).strip()
-            if simplified and simplified != query:
-                logger.info("Adzuna (%s): 0 results for %r — retrying as %r", country, query, simplified)
-                jobs = await _fetch(simplified)
-        logger.info("Level 4 (Adzuna %s): %d jobs for %r in %r", country, len(jobs), query, location)
+        jobs = []
+        for extra in searches:  # one at a time: the API has a per-minute limit
+            jobs += await _fetch(extra)
+        jobs = _deduplicate(jobs)
+        logger.info("Level 4 (Adzuna %s): %d jobs for %r in %r", country, len(jobs), what, where or country)
         return jobs
     except httpx.HTTPStatusError as exc:
         # Not the exception's text: it carries the request URL, and with it app_id and app_key.
@@ -1336,9 +1475,10 @@ def _deduplicate(jobs: list[dict]) -> list[dict]:
 
 # ── Public interface ──────────────────────────────────────────────────────────
 
-async def search_jobs_multi(query: str, locations: list[str], web_search: bool = True) -> list[dict]:
+async def search_jobs_multi(query: str, locations: list[str], web_search: bool = True,
+                            boards: dict[str, list[tuple[str, str]]] | None = None) -> list[dict]:
     """One search over `locations` (see collect_jobs)."""
-    return await collect_jobs([query], locations, web_search=web_search)
+    return await collect_jobs([query], locations, web_search=web_search, boards=boards)
 
 
 async def _no_jobs() -> list[dict]:
@@ -1348,36 +1488,41 @@ async def _no_jobs() -> list[dict]:
 _ADZUNA_CONCURRENCY = 2
 
 
-async def collect_jobs(queries: list[str], locations: list[str], web_search: bool = True) -> list[dict]:
+async def collect_jobs(queries: list[str], locations: list[str], web_search: bool = True,
+                       boards: dict[str, list[tuple[str, str]]] | None = None) -> list[dict]:
     """
     Run every source once for all `queries`: the career pages, job boards and web search are fetched
-    once and matched against every query locally; only the aggregator (level 4), which searches
-    server-side, runs per (query, location). Keep the jobs in `locations`, deduplicate, apply the title
-    filter, sort seniority-boosted titles first, and return every match. `web_search=False` skips level
-    3: its site: searches don't depend on the queries, so callers run it once a day.
-    Falls back to fixture if all live sources return nothing.
+    once and matched against every query locally; only the aggregators (level 4: Adzuna and Workable's
+    job board), which search server-side, run per (query, location). Keep the jobs in `locations`,
+    deduplicate, apply the title filter, sort seniority-boosted titles first, and return every match.
+    `web_search=False` skips level 3: its site: searches don't depend on the queries, so callers run it
+    once a day. `boards` are the job boards to fetch ({ats: [(slug, company)]}, see _all_boards), by
+    default the listed ones. Falls back to fixture if all live sources return nothing.
     """
     queries = [q for q in dict.fromkeys((q or "").strip() for q in queries) if q]
     keywords = list(dict.fromkeys(k for q in queries for k in _query_keywords(q)))
-    pairs = [(q, location) for location in locations for q in queries]
-    # A collection makes one aggregator call per (query, location); all at once trips its rate limit (429).
+    pairs = [(q, area) for area in _aggregator_areas(locations) for q in queries]
+    # A collection makes Adzuna calls per (query, location); all at once trips its rate limit (429).
     gate = asyncio.Semaphore(_ADZUNA_CONCURRENCY)
 
-    async def adzuna(q: str, location: str) -> list[dict]:
-        async with gate:
-            return await _search_level4_adzuna(q, location)
+    async def aggregators(q: str, area: str) -> list[dict]:
+        async def adzuna() -> list[dict]:
+            async with gate:
+                return await _search_level4_adzuna(q, area)
+        found = await asyncio.gather(adzuna(), _search_level4_workable(q, area))
+        return [job for jobs in found for job in jobs]
 
-    # Only the aggregator (level 4) takes a location: run levels 1-3 once and fan level 4
+    # Only the aggregators (level 4) take a location: run levels 1-3 once and fan level 4
     # out over the locations, rather than repeating the whole search per location.
     l1, l2, l3, *l4_per_pair = await asyncio.gather(
         _search_level1_playwright(keywords),
-        _search_level2_ats_apis(queries),
+        _search_level2_ats_apis(queries, boards),
         _search_level3_websearch() if web_search else _no_jobs(),
-        *[adzuna(q, location) for q, location in pairs],
+        *[aggregators(q, area) for q, area in pairs],
     )
     l4_per_location: dict[str, list[dict]] = {}
-    for (_, location), jobs in zip(pairs, l4_per_pair):
-        l4_per_location.setdefault(location, []).extend(jobs)
+    for (_, area), jobs in zip(pairs, l4_per_pair):
+        l4_per_location.setdefault(area, []).extend(jobs)
     l4 = [job for jobs in l4_per_pair for job in jobs]
     found = len(l1) + len(l2) + len(l3) + len(l4)
 
