@@ -364,6 +364,37 @@ def _location_matcher(location: str):
     return sql, params, matches
 
 
+def _locations_clause(location: str | list[str], remote: bool = False) -> tuple[str, list, list, bool]:
+    """(sql, params, matchers, remote) for a location filter: one location or a list (any of them matches;
+    "remote" in it means remote jobs too). The SQL is a LIKE superset; `matchers` are the precise checks.
+    sql is "" when nothing is filtered."""
+    locations = [loc.strip() for loc in ([location] if isinstance(location, str) else location or [])
+                 if loc and loc.strip()]
+    if any(loc.lower() == "remote" for loc in locations):
+        remote = True
+        locations = [loc for loc in locations if loc.lower() != "remote"]
+    matchers = [_location_matcher(loc) for loc in locations]
+    remote_sql = "(" + " OR ".join("lower(location) LIKE ?" for _ in _REMOTE_TERMS) + ")"
+    remote_params = [f"%{t}%" for t in _REMOTE_TERMS]
+    if not matchers:
+        return (remote_sql, remote_params, matchers, remote) if remote else ("", [], matchers, remote)
+    loc_sql = "(" + " OR ".join(sql for sql, _, _ in matchers) + ")"
+    loc_params = [p for _, ps, _ in matchers for p in ps]
+    if remote:  # "in <location>, or remote"
+        return f"({loc_sql} OR {remote_sql})", loc_params + remote_params, matchers, remote
+    return loc_sql, loc_params, matchers, remote
+
+
+def in_locations(job_location: str, locations: list[str]) -> bool:
+    """Whether a job belongs to a search over `locations`: it's in one of them (as the feed's location
+    filter reads them), remote, or its source didn't say where."""
+    loc = (job_location or "").lower().strip()
+    wanted = [l for l in locations or [] if l and l.strip() and l.strip().lower() != "remote"]
+    if not loc or not wanted or any(t in loc for t in _REMOTE_TERMS):
+        return True
+    return any(matches(loc) for _, _, matches in map(_location_matcher, wanted))
+
+
 def _parse_tags(tags: list[str]) -> tuple[list[str], list[str], list[str]]:
     roles, domains, text = [], [], []
     for t in tags or []:
@@ -435,25 +466,10 @@ def get_jobs(
         where.append(sql)
         params += sql_params
 
-    locations = [loc.strip() for loc in ([location] if isinstance(location, str) else location or [])
-                 if loc and loc.strip()]
-    if any(loc.lower() == "remote" for loc in locations):
-        remote = True
-        locations = [loc for loc in locations if loc.lower() != "remote"]
-    matchers = [_location_matcher(loc) for loc in locations]
-    remote_sql = "(" + " OR ".join("lower(location) LIKE ?" for _ in _REMOTE_TERMS) + ")"
-    if remote and not matchers:
-        where.append(remote_sql)
-        params += [f"%{t}%" for t in _REMOTE_TERMS]
-    elif matchers:
-        loc_sql = "(" + " OR ".join(sql for sql, _, _ in matchers) + ")"
-        loc_params = [p for _, ps, _ in matchers for p in ps]
-        if remote:  # "in <location>, or remote"
-            where.append(f"({loc_sql} OR {remote_sql})")
-            params += loc_params + [f"%{t}%" for t in _REMOTE_TERMS]
-        else:
-            where.append(loc_sql)
-            params += loc_params
+    loc_sql, loc_params, matchers, remote = _locations_clause(location, remote)
+    if loc_sql:
+        where.append(loc_sql)
+        params += loc_params
 
     columns = "*" if persona_vector else (
         "id, job_id, title, company, normalized_company, location, description, url, salary_min, salary_max, "
@@ -610,16 +626,26 @@ def job_count() -> int:
 _MAX_ATTRIBUTE_TRIES = 3
 
 
-def jobs_needing_attributes(limit: int) -> list[dict]:
-    """Newest jobs not yet read by the current attribute extractor, skipping ones it has given up on."""
+def jobs_needing_attributes(limit: int, locations: list[str] | None = None) -> list[dict]:
+    """Newest jobs not yet read by the current attribute extractor, skipping ones it has given up on.
+    With `locations`, only jobs a feed over them could show (see get_jobs; "remote" in it adds remote
+    jobs): each read is an LLM call, so jobs elsewhere, or that don't say where, keep the regex
+    readings. The location check is the SQL superset only, so a job it lets through is never left at
+    the head of the queue."""
     if not _DB_PATH:
         init_db()
+    where = "coalesce(attributes_version, 0) < ? AND coalesce(attributes_tries, 0) < ?"
+    params: list = [ATTRIBUTES_VERSION, _MAX_ATTRIBUTE_TRIES]
+    if locations is not None:
+        loc_sql, loc_params, _, _ = _locations_clause(locations)
+        if loc_sql:
+            where += f" AND {loc_sql}"
+            params += loc_params
     con = sqlite3.connect(_DB_PATH)
     con.row_factory = sqlite3.Row
     rows = con.execute(
-        "SELECT id, title, company, description FROM jobs "
-        "WHERE coalesce(attributes_version, 0) < ? AND coalesce(attributes_tries, 0) < ? "
-        "ORDER BY created_at DESC LIMIT ?", (ATTRIBUTES_VERSION, _MAX_ATTRIBUTE_TRIES, limit)).fetchall()
+        f"SELECT id, title, company, description FROM jobs WHERE {where} "
+        "ORDER BY created_at DESC LIMIT ?", (*params, limit)).fetchall()
     con.close()
     return [dict(r) for r in rows]
 

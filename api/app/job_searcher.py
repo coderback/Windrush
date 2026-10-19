@@ -21,6 +21,7 @@ import json
 import httpx
 
 from . import http_client
+from . import jobs_db
 from . import net_guard
 from .risk_scorer import occupation_exposure
 
@@ -373,8 +374,12 @@ _POSITIVE_KW: list[str] = [
     "AI", "ML", "Machine Learning", "LLM", "Agent", "Agentic", "GenAI",
     "Generative AI", "NLP", "LLMOps", "MLOps", "Computer Vision", "Data Science",
     # Software Engineering
-    "Software Engineer", "Software Developer", "Backend Engineer",
-    "Full Stack", "Full-Stack", "Python Developer", "Python Engineer",
+    "Software Engineer", "Software Engineering", "Software Developer", "Backend Engineer",
+    "Backend", "Back End", "Back-End", "Frontend", "Front End", "Front-End",
+    "Full Stack", "Full-Stack", "Fullstack", "Python Developer", "Python Engineer", "Developer", "SWE",
+    # Data / research / quant
+    "Data Engineer", "Data Scientist", "Analytics Engineer", "Research Engineer", "Research Scientist",
+    "Applied Scientist", "Quant", "Quantitative",
     # DevOps / Infra
     "DevOps", "Platform Engineer", "Cloud Engineer", "Infrastructure Engineer",
     "Site Reliability", "SRE", "Kubernetes", "CI/CD",
@@ -383,21 +388,96 @@ _POSITIVE_KW: list[str] = [
 ]
 
 _NEGATIVE_KW: list[str] = [
-    "Intern", ".NET", "Java ", "iOS", "Android", "PHP", "Ruby",
+    "Intern", "Interns", "Internship", "Internships", ".NET", "Java", "iOS", "Android", "PHP", "Ruby",
     "Embedded", "Firmware", "FPGA", "ASIC", "Blockchain", "Web3",
-    "Salesforce Admin", "SAP ", "Oracle EBS", "Mainframe", "COBOL",
-    "Senior", "Staff", "Principal", "Lead", "Head of", "Director", "VP ",
+    "Salesforce Admin", "SAP", "Oracle EBS", "Mainframe", "COBOL",
+    "Senior", "Sr", "Staff", "Principal", "Lead", "Head of", "Director", "VP", "Manager",
 ]
 
 _SENIORITY_BOOST_KW: list[str] = ["Graduate", "Junior", "Entry Level", "Associate"]
 
 
-def _passes_title_filter(title: str) -> bool:
-    """At least 1 positive keyword must match AND 0 negative keywords must match."""
-    t = title.lower()
-    has_positive = any(kw.lower() in t for kw in _POSITIVE_KW)
-    has_negative = any(kw.lower() in t for kw in _NEGATIVE_KW)
-    return has_positive and not has_negative
+def _whole_words(words: list[str]) -> re.Pattern:
+    """Any of `words` as whole words: "Intern" isn't "International", "AI" isn't "email"."""
+    return re.compile(r"(?<![a-z0-9])(?:" + "|".join(re.escape(w.lower()) for w in words) + r")(?![a-z0-9])", re.I)
+
+
+_POSITIVE = _whole_words(_POSITIVE_KW)
+_NEGATIVE = _whole_words(_NEGATIVE_KW)
+_QUERY_STOP = {"a", "an", "the", "and", "or", "for", "in", "at", "of", "to", "with"}
+
+
+def _names_the_search(title: str, query: str) -> bool:
+    """Every word of the search is in the title, so a target title passes even when no listed role word does
+    ("Quant Developer" -> "Quantitative Developer"): words of 4+ letters may run on ("quant" -> "quantitative"),
+    shorter ones ("ML", "AI") must be whole words."""
+    words = [w for w in re.findall(r"[a-z0-9+#]+", (query or "").lower()) if w not in _QUERY_STOP]
+    return bool(words) and all(
+        re.search(rf"(?<![a-z0-9]){re.escape(w)}" + ("" if len(w) >= 4 else r"(?![a-z0-9])"), title, re.I)
+        for w in words)
+
+
+def _passes_title_filter(title: str, query: str = "") -> bool:
+    """A role we look for (a listed role word, or every word of the search itself) and none of the roles we
+    skip, all matched as whole words. Link text naming a page of jobs ("Engineering 26 open positions",
+    "Arm Job Search Results for Graduate") isn't a job."""
+    if _NEGATIVE.search(title) or _NOT_A_JOB.search(title):
+        return False
+    return bool(_POSITIVE.search(title)) or _names_the_search(title, query)
+
+
+_NOT_A_JOB = re.compile(
+    r"\bopen (?:positions|roles|jobs|vacancies)\b|\bjobs? search\b|\bsearch (?:for )?jobs\b|\bsearch results\b"
+    r"|\b\d+\s+(?:open\s+)?(?:positions|roles|jobs|vacancies|openings)\b"
+    r"|\b(?:view|see|browse) (?:all )?(?:jobs|roles|positions|openings)\b", re.I)
+
+
+# ── Locations ─────────────────────────────────────────────────────────────────
+# A job's location is the place it's in, with the work setting after it when the source gives one
+# ("London, United Kingdom (Hybrid)"), or "" when the source doesn't say: never a guessed "Remote".
+
+_SETTINGS = {"hybrid": "Hybrid", "remote": "Remote", "onsite": "On-site", "on-site": "On-site"}
+_NOT_A_PLACE = re.compile(r"^\s*(?:hybrid|remote|on-?site|in[- ]office|flexible|multiple locations|various(?: locations)?)\s*$",
+                          re.I)
+
+
+def _place_and_setting(places: list[str], setting: str = "") -> str:
+    """'London; Paris' + 'Hybrid' -> 'London; Paris (Hybrid)'; the setting alone when there's no place."""
+    place = "; ".join(dict.fromkeys(p.strip() for p in places if isinstance(p, str) and p.strip()))
+    setting = _SETTINGS.get((setting or "").strip().lower(), "")
+    if not setting or setting.lower() in place.lower():
+        return place
+    return f"{place} ({setting})" if place else setting
+
+
+def _greenhouse_location(item: dict) -> str:
+    """Some boards put a work setting in the location and the city in `offices` (Cloudflare: 331 of 433
+    jobs say just "Hybrid")."""
+    name = ((item.get("location") or {}).get("name") or "").strip()
+    if name and not _NOT_A_PLACE.match(name):
+        return name
+    offices = [o.get("location") or o.get("name") or "" for o in item.get("offices") or [] if isinstance(o, dict)]
+    return _place_and_setting(offices, name) or name
+
+
+def _ashby_location(item: dict) -> str:
+    """Ashby gives `location` as a string (older boards: {"locationName": ...}), extra places in
+    `secondaryLocations` and the setting in `workplaceType` / `isRemote`."""
+    primary = item.get("location") or item.get("locationName") or ""
+    if isinstance(primary, dict):
+        primary = primary.get("locationName") or ""
+    secondary = [(s.get("location") if isinstance(s, dict) else s) or "" for s in item.get("secondaryLocations") or []]
+    return _place_and_setting([primary, *secondary], item.get("workplaceType") or ("Remote" if item.get("isRemote") else ""))
+
+
+_URL_PLACE = re.compile(r"/job/([A-Za-z][A-Za-z-]{1,40})/[^/?#]+")
+
+
+def _location_from_url(url: str) -> str:
+    """Workday and some career sites put the place in the path: .../job/London-United-Kingdom/<title>_R123."""
+    m = _URL_PLACE.search(url or "")
+    place = m.group(1).replace("-", " ") if m else ""
+    return "" if not place or _POSITIVE.search(place) or place.lower() in ("details", "apply") else place
 
 
 def _seniority_score(title: str) -> int:
@@ -452,7 +532,7 @@ async def _scrape_one_page(page, url: str, company: str, keywords: list[str]) ->
                 "job_id": f"l1-{abs(hash(href)) % 10**8}",
                 "title": title,
                 "company": company,
-                "location": "See listing",
+                "location": "",
                 "description": "",
                 "url": href,
                 "salary_min": None,
@@ -727,12 +807,11 @@ def _greenhouse_jobs(raw: bytes, company: str, keywords: list[str]) -> list[dict
         title = item.get("title", "")
         if not _title_matches_query(title, keywords):
             continue
-        location = item.get("location", {}).get("name", "")
         jobs.append({
             "job_id": f"gh-{item.get('id', '')}",
             "title": title,
             "company": company,
-            "location": location or "Remote",
+            "location": _greenhouse_location(item),
             "description": _html_to_text(item.get("content") or "")[:_DESC_MAX],
             "url": item.get("absolute_url", ""),
             "salary_min": None,
@@ -754,11 +833,7 @@ async def _fetch_ashby(slug: str, company: str, keywords: list[str]) -> list[dic
             title = item.get("title", "")
             if not _title_matches_query(title, keywords):
                 continue
-            location = (
-                item.get("locationName")
-                or (item.get("location") or {}).get("locationName")
-                or "Remote"
-            )
+            location = _ashby_location(item)
             desc_raw = item.get("descriptionPlain") or item.get("description") or ""
             desc = re.sub(r"<[^>]+>", " ", desc_raw)[:_DESC_MAX]
             jobs.append({
@@ -789,13 +864,14 @@ async def _fetch_lever(slug: str, company: str, keywords: list[str]) -> list[dic
             title = item.get("text", "")
             if not _title_matches_query(title, keywords):
                 continue
-            loc = item.get("categories", {}).get("location", "") or item.get("country", "")
+            loc = _place_and_setting([(item.get("categories") or {}).get("location") or item.get("country") or ""],
+                                     item.get("workplaceType") or "")
             desc_raw = item.get("descriptionPlain") or ""
             jobs.append({
                 "job_id": f"lever-{item.get('id', '')}",
                 "title": title,
                 "company": company,
-                "location": loc or "Remote",
+                "location": loc,
                 "description": re.sub(r"<[^>]+>", " ", desc_raw)[:_DESC_MAX],
                 "url": item.get("hostedUrl", ""),
                 "salary_min": None,
@@ -828,7 +904,7 @@ async def _fetch_workable(slug: str, company: str, keywords: list[str]) -> list[
                 "job_id": f"workable-{item.get('shortcode', '')}",
                 "title": title,
                 "company": company,
-                "location": loc or "Remote",
+                "location": loc,
                 "description": re.sub(r"<[^>]+>", " ", desc_raw)[:_DESC_MAX],
                 "url": item.get("url", ""),
                 "salary_min": None,
@@ -879,7 +955,7 @@ async def _fetch_smartrecruiters(slug: str, company: str, keywords: list[str]) -
                         "job_id": f"sr-{item.get('uuid', item.get('id', ''))}",
                         "title": title,
                         "company": company,
-                        "location": loc or "See listing",
+                        "location": loc,
                         "description": "",
                         "url": apply_url,
                         "salary_min": None,
@@ -1087,7 +1163,7 @@ async def _brave_search_one(client: httpx.AsyncClient, query: str) -> list[dict]
                 "job_id": f"brave-{abs(hash(url)) % 10**8}",
                 "title": title,
                 "company": company,
-                "location": "See listing",
+                "location": _location_from_url(url),
                 "description": result.get("description", "")[:500],
                 "url": url,
                 "salary_min": None,
@@ -1149,7 +1225,7 @@ async def _search_level4_workable(query: str, location: str) -> list[dict]:
     for item in data.get("jobs", []):
         title = item.get("title", "")
         company_name = item.get("company", {}).get("title", "Unknown")
-        loc_str = ", ".join(item.get("locations", [])) or "Remote"
+        loc_str = ", ".join(item.get("locations", []))
         
         # Combine descriptions
         desc_raw = (item.get("description", "") + " " + item.get("requirementsSection", "")).strip()
@@ -1257,8 +1333,8 @@ def _deduplicate(jobs: list[dict]) -> list[dict]:
 
 async def search_jobs_multi(query: str, locations: list[str]) -> list[dict]:
     """
-    Run all 4 levels concurrently, apply title filter, deduplicate,
-    sort seniority-boosted titles first, and return up to 20 jobs per location.
+    Run all 4 levels concurrently, keep the jobs in `locations`, deduplicate, apply the title filter,
+    sort seniority-boosted titles first, and return every match.
     Falls back to fixture if all live sources return nothing.
     """
     keywords = _query_keywords(query)
@@ -1272,22 +1348,33 @@ async def search_jobs_multi(query: str, locations: list[str]) -> list[dict]:
         *[_search_level4_adzuna(query, location) for location in locations],
     )
     l4 = [job for jobs in l4_per_location for job in jobs]
+    found = len(l1) + len(l2) + len(l3) + len(l4)
+
+    # Only jobs in the searched locations (or remote, or whose source didn't say where) are kept: the
+    # feed shows only those, and every stored job is embedded and read by the attribute model (an LLM
+    # call each). This runs before deduplicating, so the same title at the same company elsewhere
+    # can't stand in for the posting here.
+    def here(jobs: list[dict]) -> list[dict]:
+        return [j for j in jobs if jobs_db.in_locations(j.get("location") or "", locations)]
 
     # The same title at the same company in two locations is two postings, so each location's
     # results are deduplicated against levels 1-3 and within themselves, but not against each
     # other. _deduplicate keeps order and `base` is already unique, so the slice is exactly
     # that location's new jobs.
-    base = _deduplicate(l1 + l2 + l3)
+    base = _deduplicate(here(l1 + l2 + l3))
     deduped = list(base)
     for jobs in l4_per_location:
-        deduped += _deduplicate(base + jobs)[len(base):]
+        deduped += _deduplicate(base + here(jobs))[len(base):]
 
+    if found and not deduped:
+        logger.info("Job discovery: none of the %d jobs found are in %s", found, locations)
+        return []
     if not deduped:
         logger.warning("All live sources returned 0 results — falling back to fixture")
         return [dict(j) for j in _FIXTURE]  # copies: callers mutate jobs
 
     # Apply title filter — fall back to unfiltered if filter removes everything
-    filtered = [j for j in deduped if _passes_title_filter(j["title"])]
+    filtered = [j for j in deduped if _passes_title_filter(j["title"], query)]
     if not filtered:
         logger.warning("Title filter removed all %d results — returning unfiltered", len(deduped))
         filtered = deduped
@@ -1296,7 +1383,7 @@ async def search_jobs_multi(query: str, locations: list[str]) -> list[dict]:
     filtered.sort(key=lambda j: _seniority_score(j["title"]), reverse=True)
 
     logger.info(
-        "Job discovery: L1=%d L2=%d L3=%d L4=%d → %d after dedup → %d after filter",
-        len(l1), len(l2), len(l3), len(l4), len(deduped), len(filtered),
+        "Job discovery: L1=%d L2=%d L3=%d L4=%d → %d in %s after dedup → %d after filter",
+        len(l1), len(l2), len(l3), len(l4), len(deduped), locations, len(filtered),
     )
-    return filtered[:20 * max(1, len(locations))]
+    return filtered

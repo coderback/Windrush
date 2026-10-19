@@ -5,7 +5,7 @@ import sqlite3
 import pytest
 from conftest import make_job
 
-from app import agent, job_attributes, jobs_db
+from app import agent, job_attributes, jobs_db, tracker
 from app.sponsorship import Signals
 
 AD = ("We're hiring a Graduate Engineer. You will need at least 1 year of Python. "
@@ -136,6 +136,24 @@ def test_a_job_the_model_keeps_failing_on_is_left_after_three_tries(stored, monk
         asyncio.run(job_attributes.extract_pending())
     assert len(calls) == 3
     assert jobs_db.get_job(stored)["sponsorship"] == "not_offered"        # the regex reading stands
+
+
+def test_only_jobs_some_feed_shows_are_read(db, ollama, monkeypatch):
+    uid = tracker.create_user("where@x.com", "h")
+    tracker.update_user_persona(uid, {"preferences": {"preferred_locations": ["London", "United Kingdom"]}})
+    jobs_db.add_jobs([make_job(1, "Engineer UK", location="Cambridge, UK"),
+                      make_job(2, "Engineer US", location="Austin, TX"),
+                      make_job(3, "Engineer remote", location="Remote - US"),
+                      make_job(4, "Engineer somewhere", location="")])
+    calls = _fake_extract(monkeypatch, [_answer()] * 4)
+    assert asyncio.run(job_attributes.extract_pending()) == (1, 1) and calls == ["Engineer UK"]
+
+    # A user who wants remote work, or who has no preferred locations, widens it.
+    tracker.update_user_persona(uid, {"preferences": {"preferred_locations": ["London", "Remote"]}})
+    assert asyncio.run(job_attributes.extract_pending()) == (1, 1) and calls[-1] == "Engineer remote"
+    tracker.create_user("anywhere@x.com", "h")
+    assert asyncio.run(job_attributes.extract_pending()) == (2, 2)
+    assert sorted(calls[2:]) == ["Engineer US", "Engineer somewhere"]
 
 
 def test_a_fetched_full_ad_is_read_again(stored, monkeypatch):

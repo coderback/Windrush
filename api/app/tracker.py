@@ -227,6 +227,26 @@ def get_user_persona(user_id: str) -> dict:
     return {}
 
 
+def feed_locations() -> list[str] | None:
+    """Every user's preferred locations together: the places some feed can show jobs from. None when a
+    user has none, since their feed isn't limited to a place."""
+    con = sqlite3.connect(_DB_PATH)
+    rows = con.execute("SELECT persona FROM users").fetchall()
+    con.close()
+    out: list[str] = []
+    for (raw,) in rows:
+        try:
+            persona = json.loads(raw or "{}")
+        except json.JSONDecodeError:
+            persona = {}
+        places = [str(p).strip() for p in ((persona.get("preferences") or {}).get("preferred_locations") or [])
+                  if str(p or "").strip()] if isinstance(persona, dict) else []
+        if not places:
+            return None
+        out += [p for p in places if p.lower() not in {o.lower() for o in out}]
+    return out or None
+
+
 def _strip_job_password(persona: dict) -> str:
     """Remove core_info.job_password from a persona dict in place; return what was there."""
     core = persona.get("core_info")
