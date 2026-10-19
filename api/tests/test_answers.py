@@ -415,6 +415,19 @@ def test_an_answer_saved_for_one_employer_is_not_reused_for_another(model):
     assert reused[0]["source"] == "saved"
 
 
+def test_a_plain_field_is_answered_only_by_a_saved_answer_to_it(model):
+    # DV Trading's School: the agent fills plain fields itself; one it couldn't takes the user's saved answer, and
+    # without one it's left for them: no draft, no profile reading, no model call.
+    fake = model(read={})
+    options = ["University of Bristol", "Other"]
+    bank = [answers_entry("School", "Other", company="Harbourline")]
+    got = ask([{"question": "School", "options": options, "saved_only": True}], bank=bank)
+    assert (got[0]["source"], got[0]["answer"]) == ("saved", "Other")
+    got = ask([{"question": "School", "options": options, "saved_only": True}], bank=[])
+    assert (got[0]["source"], got[0]["answer"]) == ("needs_you", "")
+    assert fake.seen == []
+
+
 def test_a_question_is_read_with_what_the_form_says_with_it(model):
     # Catapult's bare "GDPR Statement" was answered from the saved consent on some runs and left on others: the
     # statement under it, which says what it asks, never reached the model.

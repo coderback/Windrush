@@ -82,6 +82,10 @@ def _clean_questions(questions) -> list[dict]:
         details = " ".join(str(raw.get("details") or "").split())[:_MAX_DETAILS]
         if details:
             question["details"] = details
+        # A plain form field ("School") rather than a question: only the user's own answer to that very
+        # field fills it, never the model.
+        if raw.get("saved_only"):
+            question["saved_only"] = True
         out.append(question)
     return out
 
@@ -862,6 +866,9 @@ async def answer_questions(questions, persona: dict, bank: list[dict], job: dict
             if answer:
                 results[i] = _result(q, entry["kind"], "saved", answer, f"Saved answer to “{entry['question']}”",
                                      entry["id"])
+    for i, q in enumerate(questions):
+        if results[i] is None and q.get("saved_only"):
+            results[i] = _result(q, "fact", "needs_you", "", "No saved answer to this field")
 
     pending = [i for i, r in enumerate(results) if r is None]
     if not pending:

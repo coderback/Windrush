@@ -816,12 +816,14 @@ class AsksNothingLLM(GreenhouseLLM):
 def test_required_questions_the_agent_never_asked_about_are_asked_after_it(ba, site, monkeypatch):
     """On some runs the agent left Catapult's demographic-data consent without giving it to answer_questions: no saved
     answer could fill it and the review didn't list it. Once the agent stops, each required question still empty
-    that it never asked about goes through the answerer; a plain field like School stays the agent's."""
+    that it never asked about goes through the answerer; a plain field like School is only looked up among the
+    saved answers (saved_only), and without one it's left alone."""
     monkeypatch.setattr(ba, "_make_browser_llm", lambda: AsksNothingLLM())
-    asked = []
+    asked, plain = [], []
 
     async def answerer(questions):
-        asked.extend(q["question"] for q in questions)
+        for q in questions:
+            (plain if q.get("saved_only") else asked).append(q["question"])
         return [{"question": q["question"], "options": q["options"], "kind": "fact",
                  "source": "profile" if q["options"] == ["Yes", "No"] else "needs_you",
                  "answer": "No" if q["options"] == ["Yes", "No"] else "", "because": "", "bank_id": "", "flags": []}
@@ -835,8 +837,32 @@ def test_required_questions_the_agent_never_asked_about_are_asked_after_it(ba, s
     visa = "Do you now or in the future require visa sponsorship to work in the UK?"
     assert asked == ["What university are you currently studying at or have most recently graduated from?", visa,
                      "Why are you applying to this role?"]
+    assert "School" in plain
     assert [(q["question"], q["answer"]) for q in final["questions"]][1] == (visa, "No")
-    assert visa not in final["empty"] and "School" in final["empty"]          # filled; the plain field left alone
+    assert visa not in final["empty"] and "School" in final["empty"]          # filled; nothing saved for School
+    assert "School" not in [q["question"] for q in final["questions"]]
+    assert_no_chromium_left()
+
+
+def test_a_plain_required_field_the_agent_left_empty_takes_the_users_saved_answer(ba, site, monkeypatch):
+    """DV Trading's School list has no UWE, so the agent couldn't fill it; the user's saved answer for School
+    (company-scoped "Other" there) now fills it after the agent stops."""
+    monkeypatch.setattr(ba, "_make_browser_llm", lambda: AsksNothingLLM())
+
+    async def answerer(questions):
+        return [{"question": q["question"], "options": q["options"], "kind": "fact",
+                 "source": "saved" if q.get("saved_only") and q["question"] == "School" else "needs_you",
+                 "answer": "Bath Spa University" if q.get("saved_only") and q["question"] == "School" else "",
+                 "because": "Saved answer to “School”", "bank_id": "b1", "flags": []}
+                for q in questions]
+
+    async def flow():
+        return [event async for event in ba.apply_with_browser(
+            f"{site}/greenhouse.html", {"core_info": {"first_name": "Ada"}}, "", asyncio.Queue(), answerer=answerer,
+            decide=lambda filled: asyncio.sleep(0, result=False))]
+    final = asyncio.run(flow())[-1]
+    assert "School" not in final["empty"]
+    assert ("School", "Bath Spa University", "saved") in [(q["question"], q["answer"], q["source"]) for q in final["questions"]]
     assert_no_chromium_left()
 
 
