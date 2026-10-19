@@ -114,6 +114,38 @@ def resolve(question, reading, options=(), location="London, UK"):
     return answers.resolve_fact({"question": question, "options": list(options)}, reading, FACTS, location)
 
 
+VISA = {**PERSONA, "core_info": {**PERSONA["core_info"], "visa_type": "Graduate visa", "visa_expiry": "11/2027",
+                                 "visa_status": "I hold a UK Graduate visa, valid until 11/2027. It allows me to work "
+                                                "full-time for any employer without sponsorship until then."}}
+VISA_FACTS = {f.id: f for f in answers.profile_facts(VISA)}
+
+
+def test_the_visa_is_three_facts_its_name_its_end_and_the_details():
+    assert (VISA_FACTS["visa_type"].value, VISA_FACTS["visa_expiry"].value) == ("Graduate visa", "11/2027")
+    assert "name only" in VISA_FACTS["visa_type"].label and "in full" in VISA_FACTS["visa_status"].label
+    assert "expiry" in VISA_FACTS["visa_expiry"].label
+
+
+@pytest.mark.parametrize("question, ids, said, expected", [
+    ("Visa details", ["visa_status"], "", VISA["core_info"]["visa_status"]),
+    ("When does your visa expire?", ["visa_expiry"], "11/2027", "11/2027"),
+    ("If you hold a visa, please give its type and expiry date", ["visa_type", "visa_expiry"],
+     "Graduate visa, expires 11/2027", "Graduate visa, expires 11/2027"),
+    ("If you hold a visa, please give its type and expiry date", ["visa_type", "visa_expiry"],
+     "Graduate visa, valid until 11/2027", "Graduate visa, valid until 11/2027"),
+])
+def test_visa_questions_take_the_fact_they_ask_for(question, ids, said, expected):
+    got = answers.resolve_fact({"question": question, "options": []}, {"fact_ids": ids, "answer": said}, VISA_FACTS,
+                               "London, UK")
+    assert got and got[0] == expected
+
+
+def test_a_visa_answer_cannot_add_what_the_facts_dont_say():
+    reading = {"fact_ids": ["visa_type", "visa_expiry"], "answer": "Graduate visa until 11/2027, extendable to 2030"}
+    assert answers.resolve_fact({"question": "Give your visa type and expiry date", "options": []}, reading,
+                                VISA_FACTS, "London, UK") is None
+
+
 def test_an_answer_must_rest_on_a_known_fact():
     assert resolve("Do you hold a full UK driving licence?", fact()) is None
     assert resolve("Do you hold a full UK driving licence?", fact("driving_licence", answer="Yes")) is None

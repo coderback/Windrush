@@ -168,8 +168,11 @@ export interface CoreInfo {
   twitter: string;
   portfolio: string;
   website: string;
+  /** The visa in the user's own words: what it is, when it ends, what it allows, sponsorship needed later. */
   visa_status: string;
   visa_type: string;
+  /** Month/year it ends, e.g. "11/2027". */
+  visa_expiry?: string;
   right_to_work_uk: YesNo;
   require_sponsorship: YesNo;
   security_clearance: string;
