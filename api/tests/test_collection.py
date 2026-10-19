@@ -10,6 +10,26 @@ from conftest import make_job
 from app import discovery, job_searcher, jobs_db, tracker
 
 
+NO_BOARD_CHANGES = {"found": [], "missed": [], "alive": [], "gone": []}
+
+
+@pytest.fixture(autouse=True)
+def no_live_board_lookups(monkeypatch):
+    """A collection looks employers' boards up first; that's faked here (tests that want it set their own)."""
+    calls = []
+
+    async def fake(lookups, checks):
+        calls.append((lookups, checks))
+        return NO_BOARD_CHANGES
+    monkeypatch.setattr(discovery, "_board_refresh", fake)
+    monkeypatch.setattr(job_searcher, "_search_level4_workable", lambda *a: _no_jobs())
+    return calls
+
+
+async def _no_jobs():
+    return []
+
+
 @pytest.fixture
 def user(db):
     uid = tracker.create_user("collect@x.com", "h")
@@ -52,7 +72,7 @@ def test_every_board_is_fetched_once_for_all_titles(monkeypatch):
         calls.append(("l1", sorted(keywords)))
         return []
 
-    async def l2(queries):
+    async def l2(queries, boards=None):
         calls.append(("l2", queries))
         return [{"title": "Graduate Software Engineer", "company": "A", "location": "London", "url": "https://a/1"},
                 {"title": "Quantitative Developer", "company": "B", "location": "London", "url": "https://b/1"},
@@ -178,3 +198,45 @@ def test_collection_can_be_turned_off(monkeypatch, collected):
     monkeypatch.setattr(discovery, "_COLLECT_EVERY_S", 0)
     asyncio.run(asyncio.wait_for(discovery.keep_collecting(), timeout=1))
     assert collected == []
+
+
+# ── Finding and checking job boards ───────────────────────────────────────────
+
+@pytest.fixture
+def employers(db, ollama):
+    jobs_db.replace_sponsors({"squarepoint capital": ("Squarepoint Capital LLP", "London")}, "test")
+    jobs_db.add_jobs([make_job("a1", "Quant Developer", "Other Co"), make_job("a2", "Data Engineer", "Other Co"),
+                      make_job("a3", "Quant Researcher", "Squarepoint Capital"),
+                      make_job("gh-9", "Software Engineer", "BoardCo")])  # already from its own board
+
+
+def test_employers_seen_elsewhere_are_looked_up_sponsors_first_and_their_boards_fetched(employers, monkeypatch):
+    listed = job_searcher.listed_boards()
+    asked = []
+
+    async def refresh(lookups, checks):
+        asked.append((lookups, checks))
+        return {"found": [("greenhouse", "squarepointcapital", "Squarepoint Capital", 92)], "missed": ["Other Co"],
+                "alive": [(a, s, 5) for a, s in checks[1:]], "gone": [checks[0]]}
+    monkeypatch.setattr(discovery, "_board_refresh", refresh)
+
+    asyncio.run(discovery.refresh_boards())
+    lookups, checks = asked[0]
+    assert lookups == ["Squarepoint Capital", "Other Co"]       # a licensed sponsor first; BoardCo has its board
+    assert len(checks) == discovery._BOARD_CHECKS_PER_RUN and checks[0] == listed[0][:2]
+
+    boards = [(ats, slug) for ats, items in discovery._boards().items() for slug, _ in items]
+    assert ("greenhouse", "squarepointcapital") in boards and listed[0][:2] not in boards
+
+    # Next time: nobody is looked up again, and the boards already checked wait their week.
+    asyncio.run(discovery.refresh_boards())
+    lookups, checks = asked[1]
+    assert lookups == [] and not set(checks) & set(asked[0][1])
+
+
+def test_a_failed_board_refresh_does_not_stop_the_collection(user, ollama, collected, monkeypatch):
+    async def broken(lookups, checks):
+        raise RuntimeError("worker died")
+    monkeypatch.setattr(discovery, "_board_refresh", broken)
+    run = asyncio.run(discovery.collect())
+    assert run["error"] is None and run["found"] == 2
