@@ -668,72 +668,10 @@ def get_jobs(
     doesn't say (or hasn't been read yet, see job_attributes.py) is kept.
     Returns (jobs, has_more). Blocking: call via asyncio.to_thread() from async code.
     """
-    if not _DB_PATH:
-        init_db()
-
-    roles, domains, text_terms = _parse_tags(list(tags or []) + ([category] if category else []))
-    groups = [g for term in text_terms for g in (search_groups(term) or [(term,)])] + search_groups(query)
-    groups = list(dict.fromkeys(groups))
-
-    where = ["(expires_at IS NULL OR expires_at > ?)"]
-    params: list = [_now()]
-
-    if level:
-        where.append("lower(level) = ?")
-        params.append(level.lower())
-
-    # Every searched word (or one of its other forms) somewhere in the job, as a word: LIKE narrows
-    # the rows cheaply, then words_match checks word boundaries ("ML" isn't the end of "HTML").
-    for group in groups:
-        likes = " OR ".join(f"lower({field}) LIKE ? ESCAPE '\\'" for _ in group for field in _SEARCHED_FIELDS)
-        where.append(f"(({likes}) AND words_match(?, {_SEARCHED_TEXT}))")
-        params += [_like(_first_word(form)) for form in group for _ in _SEARCHED_FIELDS] + [_group_pattern(group)]
-    if roles:
-        where.append("(" + " OR ".join("tags LIKE ?" for _ in roles) + ")")
-        params += [f'%"{r}"%' for r in roles]
-    for d in domains:
-        where.append("tags LIKE ?")
-        params.append(f'%"{d}"%')
-    if max_years is not None:
-        where.append("(years_min IS NULL OR years_min <= ?)")
-        params.append(max_years)
-    if no_degree:
-        where.append("coalesce(degree, '') != 'required'")
-    if sponsorship in SPONSORSHIP_FILTERS and sponsorship != "any":
-        sql, sql_params = _sponsorship_filter(sponsorship, marks or {})
-        where.append(sql)
-        params += sql_params
-
-    loc_sql, loc_params, matchers, remote = _locations_clause(location, remote)
-    if loc_sql:
-        where.append(loc_sql)
-        params += loc_params
-
-    columns = "*" if persona_vector else (
-        "id, job_id, title, company, normalized_company, location, description, url, salary_min, salary_max, "
-        "exposure_score, level, source, tags, created_at, updated_at, expires_at, sponsorship, sponsorship_evidence, "
-        "clearance, sponsor_key, years_min, degree")
-    sql = (f"SELECT {columns}, {_LICENSED} AS licensed_sponsor FROM jobs WHERE {' AND '.join(where)} "
-           f"ORDER BY coalesce(updated_at, created_at) DESC LIMIT {_CANDIDATE_POOL}")
-
-    con = sqlite3.connect(_DB_PATH)
-    con.row_factory = sqlite3.Row
-    con.create_function("words_match", 2, _words_match, deterministic=True)
-    rows = [dict(r) for r in con.execute(sql, params).fetchall()]
-    con.close()
-    for job in rows:
-        job["licensed_sponsor"] = bool(job["licensed_sponsor"])
-
-    exclude = exclude or set()
-    candidates = []
-    for job in rows:
-        if exclude and ((job.get("company") or "").lower(), (job.get("title") or "").lower()) in exclude:
-            continue
-        loc = (job.get("location") or "").lower()
-        if matchers and not any(matches(loc) for _, _, matches in matchers):
-            if not (remote and any(t in loc for t in _REMOTE_TERMS)):
-                continue
-        candidates.append(job)
+    candidates, groups = _matching(
+        "*" if persona_vector else _ROW_COLUMNS, query=query, location=location, level=level, category=category,
+        remote=remote, tags=tags, exclude=exclude, sponsorship=sponsorship, marks=marks, max_years=max_years,
+        no_degree=no_degree)
 
     if persona_vector:
         _rank_semantically(candidates, persona_vector)
@@ -863,6 +801,93 @@ def _boost(job: dict, ctx: _RankContext) -> float:
     if age_days is not None:
         boost += next((b for days, b in _FRESH_BOOST if age_days <= days), 0.0)
     return boost
+
+
+_ROW_COLUMNS = (
+    "id, job_id, title, company, normalized_company, location, description, url, salary_min, salary_max, "
+    "exposure_score, level, source, tags, created_at, updated_at, expires_at, sponsorship, sponsorship_evidence, "
+    "clearance, sponsor_key, years_min, degree")
+_COUNT_COLUMNS = "id, title, company, location"  # what the checks after SQL read
+
+
+def count_jobs(query: str = "", location: str | list[str] = "", level: str = "", category: str = "",
+               remote: bool = False, tags: list[str] = None, exclude: set[tuple[str, str]] | None = None,
+               sponsorship: str = "", marks: dict[str, str] | None = None, max_years: int | None = None,
+               no_degree: bool = False) -> int:
+    """How many jobs get_jobs would find with these filters (up to its candidate pool), without
+    loading or ranking them. Blocking: call via asyncio.to_thread() from async code."""
+    return len(_matching(_COUNT_COLUMNS, query=query, location=location, level=level, category=category,
+                         remote=remote, tags=tags, exclude=exclude, sponsorship=sponsorship, marks=marks,
+                         max_years=max_years, no_degree=no_degree)[0])
+
+
+def _matching(columns: str, *, query, location, level, category, remote, tags, exclude, sponsorship, marks,
+              max_years, no_degree) -> tuple[list[dict], list[tuple[str, ...]]]:
+    """(the jobs passing every filter, newest first, up to _CANDIDATE_POOL; the searched word groups)."""
+    if not _DB_PATH:
+        init_db()
+
+    roles, domains, text_terms = _parse_tags(list(tags or []) + ([category] if category else []))
+    groups = [g for term in text_terms for g in (search_groups(term) or [(term,)])] + search_groups(query)
+    groups = list(dict.fromkeys(groups))
+
+    where = ["(expires_at IS NULL OR expires_at > ?)"]
+    params: list = [_now()]
+
+    if level:
+        where.append("lower(level) = ?")
+        params.append(level.lower())
+
+    # Every searched word (or one of its other forms) somewhere in the job, as a word: LIKE narrows
+    # the rows cheaply, then words_match checks word boundaries ("ML" isn't the end of "HTML").
+    for group in groups:
+        likes = " OR ".join(f"lower({field}) LIKE ? ESCAPE '\\'" for _ in group for field in _SEARCHED_FIELDS)
+        where.append(f"(({likes}) AND words_match(?, {_SEARCHED_TEXT}))")
+        params += [_like(_first_word(form)) for form in group for _ in _SEARCHED_FIELDS] + [_group_pattern(group)]
+    if roles:
+        where.append("(" + " OR ".join("tags LIKE ?" for _ in roles) + ")")
+        params += [f'%"{r}"%' for r in roles]
+    for d in domains:
+        where.append("tags LIKE ?")
+        params.append(f'%"{d}"%')
+    if max_years is not None:
+        where.append("(years_min IS NULL OR years_min <= ?)")
+        params.append(max_years)
+    if no_degree:
+        where.append("coalesce(degree, '') != 'required'")
+    if sponsorship in SPONSORSHIP_FILTERS and sponsorship != "any":
+        sql, sql_params = _sponsorship_filter(sponsorship, marks or {})
+        where.append(sql)
+        params += sql_params
+
+    loc_sql, loc_params, matchers, remote = _locations_clause(location, remote)
+    if loc_sql:
+        where.append(loc_sql)
+        params += loc_params
+
+    sql = (f"SELECT {columns}, {_LICENSED} AS licensed_sponsor FROM jobs WHERE {' AND '.join(where)} "
+           f"ORDER BY coalesce(updated_at, created_at) DESC LIMIT {_CANDIDATE_POOL}")
+
+    con = sqlite3.connect(_DB_PATH)
+    con.row_factory = sqlite3.Row
+    con.create_function("words_match", 2, _words_match, deterministic=True)
+    rows = [dict(r) for r in con.execute(sql, params).fetchall()]
+    con.close()
+    for job in rows:
+        job["licensed_sponsor"] = bool(job["licensed_sponsor"])
+
+    exclude = exclude or set()
+    candidates = []
+    for job in rows:
+        if exclude and ((job.get("company") or "").lower(), (job.get("title") or "").lower()) in exclude:
+            continue
+        loc = (job.get("location") or "").lower()
+        if matchers and not any(matches(loc) for _, _, matches in matchers):
+            if not (remote and any(t in loc for t in _REMOTE_TERMS)):
+                continue
+        candidates.append(job)
+
+    return candidates, groups
 
 
 def _rank_semantically(jobs: list[dict], persona_vector: list[float]) -> None:

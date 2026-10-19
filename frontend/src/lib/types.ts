@@ -359,3 +359,22 @@ export interface ProfileSuggestions {
   reading: "" | "github" | "website";
   sources: Record<SuggestionSource, SourceRead>;
 }
+
+/** The last job collection, as GET /jobs reports it on page 1. */
+export interface FeedCollection {
+  running: boolean;
+  started_at?: string;
+  finished_at?: string | null;
+  found?: number | null;
+  added?: number | null;
+  failed?: boolean;
+  /** When the next scheduled one is due; null when collection is off. */
+  next_at?: string | null;
+}
+
+/** What GET /jobs adds on page 1: how many match, what the filters hide, and when the feed was refreshed. */
+export interface FeedSummary {
+  total: number;
+  hidden: { sponsorship: number; dealt_with: number };
+  collection: FeedCollection | null;
+}

@@ -116,6 +116,37 @@ test("the feed shows each job's badges and sends the filters to the API", async 
   api.expectAllMocked();
 });
 
+test("the feed says how many match, what the filters hide and when it was refreshed", async ({ page }) => {
+  await signIn(page);
+  const finished = new Date(Date.now() - 23 * 60_000).toISOString();
+  const api = await mockApi(page, {
+    ...SHELL,
+    "GET /api/jobs": (request) => {
+      const any = new URL(request.url()).searchParams.get("sponsorship") === "any";
+      return { jobs: JOBS, has_more: false, discovering: false, sponsorship: any ? "any" : "possible",
+               total: any ? 14 : 2, hidden: { sponsorship: any ? 0 : 12, dealt_with: 3 },
+               collection: { running: false, started_at: finished, finished_at: finished, found: 40, added: 6,
+                             failed: false, next_at: finished } };
+    },
+    "POST /api/jobs/refresh": { status: 429, json: { detail: "The feed was refreshed 23 min ago. You can refresh again in 7 min." } },
+  });
+  await page.goto("/jobs");
+
+  await expect(page.getByText("2 jobs")).toBeVisible();
+  await expect(page.getByText("updated 23 min ago")).toBeVisible();
+  await expect(page.getByText(/12 more roles are hidden by the sponsorship filter/)).toBeVisible();
+  await expect(page.getByText(/3 roles you've applied to or discarded aren't shown/)).toBeVisible();
+
+  await page.getByRole("button", { name: "Refresh" }).click();
+  await expect(page.getByRole("status").filter({ hasText: "You can refresh again in 7 min." })).toBeVisible();
+
+  await page.getByRole("button", { name: "Show them" }).click();
+  await expect.poll(() => api.params("/api/jobs").at(-1)?.get("sponsorship")).toBe("any");
+  await expect(page.getByText("14 jobs")).toBeVisible();
+  await expect(page.getByText(/hidden by the sponsorship filter/)).toHaveCount(0);
+  api.expectAllMocked();
+});
+
 test("an expired session sends you back to the login page", async ({ page }) => {
   const expired = { status: 401, json: { detail: "Could not validate credentials" } };
   const api = await mockApi(page, {
