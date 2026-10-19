@@ -935,6 +935,14 @@ def _answer_line(n: int, result: dict) -> str:
     return f'{n}. "{question}": {verb} "{result["answer"]}"'
 
 
+def _is_helper_text(label: str, info: dict) -> bool:
+    """Whether `label` is the text the form shows with the field rather than its label: DV Trading's agent gave
+    "Undergrad Discipline(s)" as "If you have multiple disciplines, please select all that apply." A few words at
+    least, so a short label doesn't match any field that happens to mention it."""
+    key = _question_key(label)
+    return len(key.split()) >= 4 and key in _question_key(info.get("details") or "")
+
+
 async def _field_at(browser_session, index: int | None, label: str):
     """((field, description), "") for the field labelled `label`: the element at `index` when that is it, else
     the one field on the page with that label. (None, why) when there's neither."""
@@ -948,7 +956,7 @@ async def _field_at(browser_session, index: int | None, label: str):
                 field = await form_widgets.Field(browser_session, node).open()
                 info = await field.describe()
                 shown = info.get("group") or info.get("label") or ""
-                if form_widgets.same_question(shown, label):
+                if form_widgets.same_question(shown, label) or _is_helper_text(label, info):
                     return (field, info), ""
                 why = f"element {index} is labelled “{shown[:80]}”, not “{label[:80]}”"
             except Exception as exc:
@@ -965,8 +973,11 @@ async def _field_at(browser_session, index: int | None, label: str):
     return None, why
 
 
-def _add_fill_fields(tools, browser_session, asked: dict[str, dict], filled: set[str]) -> None:
-    """Register fill_fields, which fills several fields at once and checks each took (form_widgets.fill)."""
+def _add_fill_fields(tools, browser_session, asked: dict[str, dict], filled: set[str],
+                     tried: dict[str, str] | None = None) -> None:
+    """Register fill_fields, which fills several fields at once and checks each took (form_widgets.fill). The value
+    it was given for each field goes into `tried`, by the field's label."""
+    tried = tried if tried is not None else {}
     @tools.action(
         "Fill several of the form's fields in one step and check each one took: text boxes, dropdowns (searchable "
         "ones too: it opens them, searches and picks the option), checkboxes and radio buttons. Give each field's "
@@ -994,6 +1005,9 @@ def _add_fill_fields(tools, browser_session, asked: dict[str, dict], filled: set
                              f"declaration): get its answer with answer_questions, never fill it yourself.")
                 continue
             ok, detail = await form_widgets.fill_field(found[0], item.value)
+            tried[shown or item.label] = item.value
+            # The label and whether it took, never the value: the run logs don't keep tool results otherwise.
+            logger.info("fill_fields: %r %s", (shown or item.label)[:80], "filled" if ok else "not filled")
             if ok:
                 filled.update({item.label, shown})
             line = (f"- “{item.label}”: filled with “{detail}”. Done; leave it." if ok
@@ -1058,7 +1072,8 @@ def _add_fill_answer(tools, browser_session, numbered: dict[int, dict], filled: 
 
 
 def _apply_tools(cover_letter: str, browser_session, answerer: Answerer | None = None,
-                 asked: dict[str, dict] | None = None, filled: set[str] | None = None) -> "Tools":
+                 asked: dict[str, dict] | None = None, filled: set[str] | None = None,
+                 tried: dict[str, str] | None = None) -> "Tools":
     """The fill agent's tools: the password-scoped set, answer_questions and fill_answer (recording what
     was answered in `asked`, by question), fill_fields, and paste_cover_letter when there's a letter. The
     labels of the fields these tools filled go into `filled`; anything else on the form the agent did itself."""
@@ -1066,6 +1081,7 @@ def _apply_tools(cover_letter: str, browser_session, answerer: Answerer | None =
     answerer = answerer or _no_answers
     asked = asked if asked is not None else {}
     filled = filled if filled is not None else set()
+    tried = tried if tried is not None else {}
     numbered: dict[int, dict] = {}
 
     @tools.action(
@@ -1085,7 +1101,12 @@ def _apply_tools(cover_letter: str, browser_session, answerer: Answerer | None =
             # until it's opened), so the answer is one of them; the answer is then put on the form here.
             found = (await _field_at(browser_session, q.index, q.question))[0]
             if found:
-                fields[_question_key(q.question)] = found
+                # Asked as the form labels it when the agent gave the text under the label instead ("If you have
+                # multiple disciplines…" reads as a case the facts don't show); that text goes with it as details.
+                shown = (found[1].get("group") or found[1].get("label") or "").replace("*", "").strip()
+                if shown and _is_helper_text(q.question, found[1]):
+                    question["question"] = shown
+                fields[_question_key(question["question"])] = found
                 if not question.get("max_length") and found[1].get("maxLength"):
                     question["max_length"] = found[1]["maxLength"]
                 if found[1].get("details"):
@@ -1140,7 +1161,7 @@ def _apply_tools(cover_letter: str, browser_session, answerer: Answerer | None =
         return ActionResult(extracted_content=text, long_term_memory=text)
 
     _add_fill_answer(tools, browser_session, numbered, filled)
-    _add_fill_fields(tools, browser_session, asked, filled)
+    _add_fill_fields(tools, browser_session, asked, filled, tried)
     if not cover_letter.strip():
         return tools
 
@@ -1283,6 +1304,32 @@ async def _submit_button_shown(browser_session) -> bool:
     except Exception as exc:
         logger.debug("submit-button check failed: %s", exc)
         return False
+
+
+async def _fill_again(browser_session, tried: dict[str, str], filled: set[str], empty: list[str]) -> bool:
+    """
+    One more try at each required field still empty once the agent stops that it gave fill_fields a value for: DV
+    Trading's Discipline ended up empty on one run though the agent had filled it. A value no option takes (School,
+    without the user's university) fails again, harmlessly. True when one took.
+    """
+    took = False
+    for label in empty:
+        value = next((v for t, v in tried.items() if _question_key(t) == _question_key(label)), None)
+        if value is None:
+            continue
+        try:
+            field = await form_widgets.find_by_label(browser_session, label)
+            if not field:
+                continue
+            ok, _ = await form_widgets.fill_field(await field.open(), value)
+        except Exception as exc:
+            logger.debug("filling %r again failed: %s", label[:60], exc)
+            continue
+        logger.info("filled again after the agent: %r %s", label[:80], "took" if ok else "didn't take")
+        if ok:
+            filled.add(label)
+            took = True
+    return took
 
 
 def _asks_something(label: str) -> bool:
@@ -1481,6 +1528,7 @@ async def apply_with_browser(
     upload_dir = ""
     asked: dict[str, dict] = {}   # question key → its latest answer, filled in by answer_questions
     tool_filled: set[str] = set()  # labels of the fields our tools filled
+    tool_tried: dict[str, str] = {}  # label → the value fill_fields was given for it
     _register_secret(job_password)  # masked in logs until the finally below
     try:
         # Named copies for the upload, removed in the finally below.
@@ -1495,7 +1543,7 @@ async def apply_with_browser(
             register_new_step_callback=on_step,
             use_vision=False,
             available_file_paths=[path for path in (cv_upload, letter_upload) if path],
-            tools=_apply_tools(cover_letter, browser_session, answerer, asked, tool_filled),
+            tools=_apply_tools(cover_letter, browser_session, answerer, asked, tool_filled, tool_tried),
             sensitive_data=sensitive_data,
             # The judge LLM call grades the run from the RAW step history, which browser-use does not
             # redact — e.g. an evaluate() that reads the form back carries the typed password. We
@@ -1540,6 +1588,8 @@ async def apply_with_browser(
 
         summary = notes
         empty = await _empty_required_fields(browser_session)
+        if await _fill_again(browser_session, tool_tried, tool_filled, empty):
+            empty = await _empty_required_fields(browser_session)
         if await _ask_left_over(browser_session, answerer or _no_answers, asked, tool_filled, empty):
             empty = await _empty_required_fields(browser_session)
         questions = list(asked.values())
