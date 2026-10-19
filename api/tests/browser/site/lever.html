@@ -1,0 +1,39 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Lever-style application</title></head>
+<body>
+<!-- Lever's markup (jobs.lever.co/…/apply): a custom question's text is in <div class="application-label">, and each
+     option has its own <label> around it, so no <label> names the question itself. -->
+<form>
+  <ul>
+    <li class="application-question">
+      <label><div class="application-label">Full name<span class="required">&#x2731;</span></div>
+        <div class="application-field"><input type="text" id="name" name="name" required></div></label>
+    </li>
+  </ul>
+  <div class="section application-form">
+    <h4>Supplementary Questions</h4>
+    <ul>
+      <li class="application-question custom-question"><div>
+        <div class="application-label full-width multiple-select"><div class="text">Language Skill(s) (Check all that apply)<span class="required">&#x2731;</span></div></div>
+        <div class="application-field full-width required-field"><ul data-qa="checkboxes">
+          <li><label><input type="checkbox" id="lang-eng" name="cards[c1][field0]" value="English (ENG)" required><span class="application-answer-alternative">English (ENG)</span></label></li>
+          <li><label><input type="checkbox" name="cards[c1][field0]" value="Spanish (SPA)" required><span class="application-answer-alternative">Spanish (SPA)</span></label></li>
+        </ul></div>
+      </div></li>
+      <li class="application-question custom-question"><div>
+        <div class="application-label"><div class="text">Do you have any, or anticipate any upcoming offer deadlines?<span class="required">&#x2731;</span></div></div>
+        <div class="application-field required-field"><ul data-qa="multiple-choice">
+          <li><label><input type="radio" id="deadline-yes" name="cards[c1][field1]" value="Yes" required><span class="application-answer-alternative">Yes</span></label></li>
+          <li><label><input type="radio" name="cards[c1][field1]" value="No" required><span class="application-answer-alternative">No</span></label></li>
+        </ul></div>
+      </div></li>
+      <li class="application-question custom-question"><div>
+        <div class="application-label"><div class="text">What is the hardest technical challenge you've faced?<span class="required">&#x2731;</span></div></div>
+        <div class="application-field required-field"><textarea id="challenge" name="cards[c1][field2]" required></textarea></div>
+      </div></li>
+    </ul>
+  </div>
+</form>
+</body>
+</html>

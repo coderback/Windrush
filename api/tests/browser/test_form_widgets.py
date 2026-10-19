@@ -202,3 +202,41 @@ def test_text_typed_into_a_searchable_dropdown_but_not_picked_counts_as_empty(ba
 
     assert "School" in asyncio.run(run())
     assert_no_chromium_left()
+
+
+def test_a_lever_question_is_named_by_its_heading_not_its_options(ba, site):
+    """Palantir's Lever form: the question is in <div class="application-label"> and each option has its own <label>,
+    so a checkbox group read as its first option ("English (ENG)"), a Yes/No question as "Yes" and a text box as its
+    input name ("cards[…][field2]"). Each is named by its heading now, and found by it."""
+    from browser_use import BrowserSession
+    from app.answers import question_key
+
+    async def run():
+        session = BrowserSession(browser_profile=ba._browser_profile())
+        await session.start()
+        try:
+            await session.navigate_to(f"{site}/lever.html")
+            await asyncio.sleep(1.0)
+            await session.get_browser_state_summary(include_screenshot=False)
+            described = {}
+            for element_id in ("lang-eng", "deadline-yes", "challenge"):
+                node = await session.get_element_by_index(await session.get_index_by_id(element_id))
+                info = await (await form_widgets.Field(session, node).open()).describe()
+                described[element_id] = (question_key(info["group"] or info["label"]), info["options"], info["details"])
+            found = {}
+            for question in ("Language Skill(s) (Check all that apply)", "What is the hardest technical challenge you've faced?"):
+                field = await form_widgets.find_by_label(session, question)
+                found[question] = field is not None and (await (await field.open()).describe())["kind"]
+            return described, found
+        finally:
+            await session.kill()
+
+    described, found = asyncio.run(run())
+    assert described["lang-eng"] == (question_key("Language Skill(s) (Check all that apply)"),
+                                     ["English (ENG)", "Spanish (SPA)"], "")
+    assert described["deadline-yes"][:2] == (question_key("Do you have any, or anticipate any upcoming offer deadlines?"),
+                                             ["Yes", "No"])
+    assert described["challenge"] == (question_key("What is the hardest technical challenge you've faced?"), [], "")
+    assert found == {"Language Skill(s) (Check all that apply)": "checkbox",
+                     "What is the hardest technical challenge you've faced?": "text"}
+    assert_no_chromium_left()
