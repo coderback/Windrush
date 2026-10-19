@@ -269,6 +269,37 @@ def test_an_expected_graduation_question_is_answered_from_having_graduated(model
     assert "graduated: Has already graduated (finished their studies, last in 06/2025): Yes" in fake.prompts()
 
 
+@pytest.mark.parametrize("degree, subject", [
+    ("BSc (Hons) Computer Science", "Computer Science"),
+    ("Bachelor of Science in Physics", "Physics"),
+    ("Master's Degree in Data Science", "Data Science"),
+    ("B.Sc. Mathematics and Statistics", "Mathematics and Statistics"),
+    ("MA History of Art", "History of Art"),
+    ("Biomedical Sciences BSc (Hons)", "Biomedical Sciences"),
+    # No qualification named, or nothing but one: the subject can't be told apart.
+    ("Computer Science", ""),
+    ("PhD", ""),
+    ("Bachelor's degree", ""),
+])
+def test_a_degrees_subject_is_read_off_its_qualification(degree, subject):
+    assert answers.degree_subject(degree) == subject
+
+
+def test_a_discipline_question_is_answered_from_the_degrees_subject(model):
+    # DV Trading's "Undergrad Discipline(s)", read with the rest of the page, was left blank about one time in five
+    # with every option in front of the model: the subject was only inside the education line, a summary fact.
+    subject = next(f for f in answers.profile_facts(PERSONA) if f.id == "education_1_subject")
+    assert (subject.value, subject.summary) == ("Computer Science", False)
+    question = "Undergrad Discipline(s)"
+    disciplines = ["Mathematics", "Statistics", "Computer Science", "Software Engineering", "Other"]
+    fake = model(read={question: fact("education_1_subject", answer="Computer Science")})
+    got = ask([{"question": question, "options": disciplines}])
+    assert (got[0]["source"], got[0]["answer"]) == ("profile", "Computer Science")
+    assert "education_1_subject: Subject / discipline / major of their BSc (Hons) Computer Science" in fake.prompts()
+    # The rule against answering a question for a case the facts don't show no longer uses a discipline example.
+    assert "multiple disciplines" not in answers._READ_SYSTEM
+
+
 def test_how_they_heard_about_a_job_is_left_for_the_user():
     assert not [f for f in answers.profile_facts(PERSONA) if "heard" in f.label.lower()]
 
