@@ -153,6 +153,23 @@ _DECLINE = "Prefer not to say"
 _END_YEAR = re.compile(r"(?<!\d)(?:19|20)\d{2}(?!\d)")
 _PRESENT_WORD = re.compile(r"\b(?:present|current(?:ly)?|now|ongoing|today|(?:to|till|until)\s+date)\b", re.I)
 
+# A degree's qualification, around its subject: "BSc (Hons) Computer Science", "Bachelor of Science in Physics",
+# "Economics BA", "MEng Mechanical Engineering".
+_QUALIFICATION = (r"(?:[BM]\.?(?:Sc|A|Eng|Ed|Arch|Phil|Res|Math|Comp|Mus|Des)\.?|Ph\.?D\.?|D\.?Phil|LL\.?[BM]\.?|MBA|BBA|"
+                  r"HN[CD]|(?:Integrated\s+)?(?:Bachelor|Master|Doctor)(?:'?s)?(?:\s+of\s+(?:Science|Arts|Engineering|"
+                  r"Philosophy|Laws|Education|Music))?(?:\s+degree)?|Foundation\s+degree|Hons|Honours)")
+_QUALIFICATION_AT = re.compile(rf"^\s*{_QUALIFICATION}(?![\w.])\.?\s*(?:(?:in|of)\s+)?|\s+{_QUALIFICATION}\.?\s*$", re.I)
+
+
+def degree_subject(degree: str) -> str:
+    """The subject a degree is in ("Computer Science" from "BSc (Hons) Computer Science"); "" when the degree
+    doesn't name its qualification, so the subject can't be told from it."""
+    whole = " ".join(re.sub(r"\([^)]*\)", " ", degree or "").split())
+    subject = whole
+    while (shorter := _QUALIFICATION_AT.sub("", subject, count=1).strip(" ,-–")) != subject:
+        subject = shorter
+    return subject if subject != whole else ""
+
 
 def _has_ended(end_date) -> bool:
     end = str(end_date or "")
@@ -278,6 +295,10 @@ def profile_facts(persona: dict, today: date | None = None) -> list[Fact]:
         grade = f", {edu['grade']}" if edu.get("grade") else ""
         add(f"education_{i + 1}", "Education", f"{edu.get('degree', '')} at {edu.get('institution', '')}"
             + _dates(edu, "start_date", "end_date", "is_currently_enrolled") + grade, summary=True)
+        # On its own, as a form asks for it ("Undergrad Discipline(s)", "Subject", "Major"): the education line
+        # names it only inside the degree, and the model didn't always take it from there.
+        add(f"education_{i + 1}_subject", f"Subject / discipline / major of their {edu.get('degree', '')} at "
+            f"{edu.get('institution', '')}", degree_subject(edu.get("degree", "")))
     skills = [s for group in persona.get("skills") or [] for s in group.get("skills") or []]
     add("skills", "Skills", ", ".join(dict.fromkeys(skills)), summary=True)
     certs = [f"{c.get('name', '')} ({c.get('issuing_organization', '')})".replace(" ()", "")
@@ -598,7 +619,7 @@ _READ_SYSTEM = (
     "- Answer just what is asked, taken from the fact: the year from a degree's dates, not the whole degree "
     "line; 'Immediately' for a start date when the candidate can start immediately, never 'Yes'.\n"
     "- When the question asks for more than the facts state (a visa's type and its expiry date, when only the "
-    "type is known), or only applies in a case the facts don't show ('If you have multiple disciplines…'), "
+    "type is known), or only applies in a case the facts don't show ('If you hold a US visa…'), "
     "fact_ids is [].\n"
     "- Never choose 'Other' or 'None of the above': no fact states one.\n"
     "- A declaration or consent (a privacy notice, that the information is accurate, background or reference "
