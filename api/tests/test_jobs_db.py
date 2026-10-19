@@ -150,6 +150,20 @@ def test_in_locations(job_location, locations, expected):
     assert jobs_db.in_locations(job_location, locations) is expected
 
 
+@pytest.mark.parametrize("job_location, expected", [
+    ("Melbourn", True), ("Cambridge (Hybrid)", True), ("Oxford", True), ("Canary Wharf, London", True),
+    ("Belfast, Northern Ireland", True), ("London, on-site", True), ("London, UK; Boston, MA", True),
+    ("London or Remote (US)", True),
+    # The other one: a US state, province or country beside it.
+    ("Cambridge, MA", False), ("Cambridge, MA 02139", False), ("Birmingham, AL", False), ("Manchester, NH", False),
+    ("Reading, PA", False), ("Sydney, New South Wales", False), ("Dublin, Ireland", False),
+    # Names left out because the bigger place is abroad.
+    ("Washington, D.C. (Hybrid)", False), ("Boston", False), ("Greenwich", False), ("Stamford/New York", False),
+])
+def test_a_uk_town_on_its_own_is_the_uk_but_not_beside_somewhere_abroad(job_location, expected):
+    assert jobs_db.in_locations(job_location, ["United Kingdom"]) is expected
+
+
 def test_exclusions_apply_before_pagination(seeded):
     seen, page, more = [], 0, True
     while more:

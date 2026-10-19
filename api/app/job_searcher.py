@@ -430,7 +430,9 @@ def _passes_title_filter(title: str, *queries: str) -> bool:
 _NOT_A_JOB = re.compile(
     r"\bopen (?:positions|roles|jobs|vacancies)\b|\bjobs? search\b|\bsearch (?:for )?jobs\b|\bsearch results\b"
     r"|\b\d+\s+(?:open\s+)?(?:positions|roles|jobs|vacancies|openings)\b"
-    r"|\b(?:view|see|browse) (?:all )?(?:jobs|roles|positions|openings)\b", re.I)
+    r"|\b(?:view|see|browse) (?:all )?(?:jobs|roles|positions|openings)\b"
+    # a job board's page of them: "Data Scientist Jobs in London", "IT graduate jobs & schemes", "... Vacancies"
+    r"|\bjobs\s*(?:$|in\b|for\b|&|\|)|\bvacancies\b|\bhiring for\b|\bsalary and equity\b", re.I)
 
 
 # ── Locations ─────────────────────────────────────────────────────────────────
@@ -1248,6 +1250,95 @@ def _parse_search_title(raw_title: str) -> tuple[str, str]:
     return raw_title.strip(), "Unknown"
 
 
+# A web search result's page title ends in whatever the site appends: on a careers site or job board
+# that's the site ("Myworkdayjobs.com", "Wellfound"), a date ("Updated Daily") or a place ("Edinburgh"),
+# rarely the employer. The page's address says who the employer is on most of them, and on job boards
+# whether the page is one posting or a page of them.
+
+# Workday tenants searched in _SEARCH_QUERIES (<tenant>.wd<n>.myworkdayjobs.com).
+_WORKDAY_TENANTS = {
+    "barclays": "Barclays", "lbg": "Lloyds Banking Group", "rbs": "NatWest Group", "citi": "Citi",
+    "mufgub": "MUFG", "td": "TD Securities", "capitalone": "Capital One", "blackstone": "Blackstone",
+    "pimco": "PIMCO", "hl": "Houlihan Lokey", "juliusbaer": "Julius Baer", "mgpru": "M&G", "pru": "Prudential",
+    "lseg": "LSEG", "abrdn": "abrdn", "bailliegifford": "Baillie Gifford", "fca": "Financial Conduct Authority",
+    "frontiereconomics": "Frontier Economics", "nasdaq": "Nasdaq", "dowjones": "Dow Jones", "nvidia": "NVIDIA",
+    "autodesk": "Autodesk", "salesforce": "Salesforce", "snyk": "Snyk", "crowdstrike": "CrowdStrike",
+    "aveva": "AVEVA", "factset": "FactSet", "cadence": "Cadence", "kla": "KLA", "rollsroyce": "Rolls-Royce",
+    "ag": "Airbus", "mbda": "MBDA", "shell": "Shell", "thales": "Thales", "motorolasolutions": "Motorola Solutions",
+    "kbr": "KBR", "centrica": "Centrica", "expedia": "Expedia", "relx": "RELX", "ing": "ING",
+    "libertyglobal": "Liberty Global", "quilter": "Quilter", "tencent": "Tencent", "hiscox": "Hiscox",
+    "gresearch": "G-Research",
+}
+# Careers sites that are one employer's.
+_CAREER_SITES = {
+    "careers.arm.com": "Arm", "careers.mastercard.com": "Mastercard", "jobs.pwc.co.uk": "PwC",
+    "jobsearch.baesystems.com": "BAE Systems", "capgemini.com": "Capgemini", "lifeattiktok.com": "TikTok",
+    "careers.arup.com": "Arup", "kkr.com": "KKR", "wise.jobs": "Wise", "jobs.bendingspoons.com": "Bending Spoons",
+    "janestreet.com": "Jane Street", "blackrock.tal.net": "BlackRock", "jefferies.tal.net": "Jefferies",
+    "tfl.taleo.net": "Transport for London",
+}
+# Job boards: the address of one posting (anything else on them is a search, a list or an article),
+# and where it names the employer.
+_BOARD_POSTINGS = {
+    "gradcracker.com": re.compile(r"/hub/\d+/[a-z0-9-]+/[a-z-]+/\d+"),
+    "targetjobs.co.uk": re.compile(r"^/jobs/[a-z0-9-]+-\d+/?$"),
+    "totaljobs.com": re.compile(r"^/job/"),
+    "reed.co.uk": re.compile(r"^/jobs/[a-z0-9-]+/\d+"),
+    "wellfound.com": re.compile(r"^/jobs/\d+"),
+}
+_BOARD_EMPLOYER = {
+    "gradcracker.com": re.compile(r"/hub/\d+/([a-z0-9-]+)/"),
+    "totaljobs.com": re.compile(r"^/job/[^/]+/([a-z0-9-]+?)-job\d+"),
+}
+_NOT_A_NAME = re.compile(r"myworkdayjobs|workday|wellfound|gradcracker|targetjobs|totaljobs|reed\.co|\bcareers?\b|"
+                         r"\bjobs?\b|\bupdated\b|\b(?:19|20)\d\d\b|\bstart\b|\bfull-time\b|^unknown$", re.I)
+_MONTHS = r"(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*"
+
+
+def _site(url: str) -> tuple[str, str]:
+    """(host without www., path) of a URL."""
+    from urllib.parse import urlparse
+    parsed = urlparse(url or "")
+    return (parsed.hostname or "").removeprefix("www."), parsed.path or ""
+
+
+def _is_a_posting(url: str) -> bool:
+    """False for a job board's or careers site's search, list or article pages (one posting has an
+    address of its own); True elsewhere."""
+    host, path = _site(url)
+    for board, posting in _BOARD_POSTINGS.items():
+        if host == board or host.endswith("." + board):
+            return bool(posting.search(path))
+    if host.endswith(".myworkdayjobs.com") or host == "careers.arm.com":
+        return "/job/" in path or "/details/" in path
+    return True
+
+
+def _employer_and_place(tail: str, url: str) -> tuple[str, str]:
+    """(employer, place) for a web search result: the employer from the address where it says, else the
+    title's tail unless that names the site, a date or a place; a place it names is the job's location."""
+    host, path = _site(url)
+    tail = (tail or "").strip()
+    m = re.match(r"([a-z0-9-]+)\.wd\d+\.myworkdayjobs\.com$", host)
+    if m:
+        return _WORKDAY_TENANTS.get(m.group(1), m.group(1).title()), ""
+    for site, name in _CAREER_SITES.items():
+        if host == site or host.endswith("." + site):
+            return name, ""
+    for board, employer in _BOARD_EMPLOYER.items():
+        if host == board or host.endswith("." + board):
+            m = employer.search(path)
+            if m:
+                return m.group(1).replace("-", " ").title(), ""
+    # "Data Science & AI Graduate Scheme - Edinburgh": the tail is where, not who.
+    uk = jobs_db._location_matcher("United Kingdom")[2]
+    if tail and uk(tail.lower()):
+        return "Unknown", tail
+    if not tail or _NOT_A_NAME.search(tail) or re.search(_MONTHS + r"\b", tail, re.I) and re.search(r"\d", tail):
+        return "Unknown", ""
+    return tail, ""
+
+
 async def _brave_search_one(client: httpx.AsyncClient, query: str) -> list[dict]:
     """Execute a single Brave Search query and parse results into job dicts."""
     try:
@@ -1269,15 +1360,18 @@ async def _brave_search_one(client: httpx.AsyncClient, query: str) -> list[dict]
             url = result.get("url", "")
             if not raw_title or not url:
                 continue
-            title, company = _parse_search_title(raw_title)
+            title, tail = _parse_search_title(raw_title)
             # Skip obvious non-job pages (pagination, homepages, etc.)
             if len(title) < 5 or title.lower() in {"jobs", "careers", "open positions"}:
                 continue
+            if not _is_a_posting(url):
+                continue
+            company, place = _employer_and_place(tail, url)
             jobs.append({
                 "job_id": f"brave-{abs(hash(url)) % 10**8}",
                 "title": title,
                 "company": company,
-                "location": _location_from_url(url),
+                "location": _location_from_url(url) or place,
                 "description": result.get("description", "")[:500],
                 "url": url,
                 "salary_min": None,
@@ -1458,11 +1552,14 @@ async def _search_level4_adzuna(query: str, location: str) -> list[dict]:
 # ── Deduplication ─────────────────────────────────────────────────────────────
 
 def _deduplicate(jobs: list[dict]) -> list[dict]:
+    """The first of each posting: same title and employer (legal suffixes aside, so an aggregator's
+    "Squarepoint Capital LLP" is the board's "Squarepoint Capital"), or same URL. Callers put the employers'
+    own boards before the aggregators, so the copy that can be applied to is the one kept."""
     seen_keys: set[tuple] = set()
     seen_urls: set[str] = set()
     out = []
     for job in jobs:
-        key = (job.get("title", "").lower()[:40], job.get("company", "").lower()[:30])
+        key = (job.get("title", "").lower()[:40], normalise_company_name(job.get("company", ""))[:30])
         url = job.get("url", "")
         if key in seen_keys or (url and url in seen_urls):
             continue

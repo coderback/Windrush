@@ -200,6 +200,7 @@ def test_discovery_state_is_per_query_and_location(db, monkeypatch):
         async def settle():
             while any(not t.done() for t in discovery._running.values()):
                 await asyncio.sleep(0.01)
+            await asyncio.sleep(0)  # a finished run's done-callback releases its pairs on the next turn
 
         assert discovery.ensure("Data Analyst", ["London", "london ", "Manchester"]) is True
         await asyncio.sleep(0)

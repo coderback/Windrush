@@ -279,11 +279,40 @@ _CANDIDATE_POOL = 2000
 
 # Country-level location aliases. SQL uses them as a LIKE superset; the precise check is a
 # word-boundary regex in Python (so 'us' matches "Austin, TX, US" but not "Australia").
+# UK towns an ad may name on its own ("Cambridge", "Melbourn" for Cambridge Consultants), beyond the
+# cities in the alias. Left out: names a bigger place abroad has (Boston, Washington, Richmond, Greenwich,
+# Perth, Portland, Kingston, York as in New York). A place counts as the UK only where nothing beside it
+# says it's abroad (_ABROAD: "Cambridge, MA" isn't).
+_UK_TOWNS = [
+    "cambridge", "oxford", "reading", "bath", "guildford", "milton keynes", "harwell", "didcot", "abingdon",
+    "melbourn", "bracknell", "slough", "basingstoke", "swindon", "nottingham", "sheffield", "liverpool",
+    "newcastle", "sunderland", "southampton", "portsmouth", "brighton", "coventry", "leicester", "derby",
+    "exeter", "plymouth", "norwich", "ipswich", "colchester", "chelmsford", "peterborough", "aberdeen", "dundee",
+    "stirling", "inverness", "swansea", "warwick", "leamington spa", "cheltenham", "gloucester", "stevenage",
+    "hatfield", "watford", "st albans", "crawley", "farnborough", "woking", "maidenhead", "luton", "northampton",
+    "solihull", "wolverhampton", "stoke-on-trent", "loughborough", "durham", "lancaster", "preston", "bolton",
+    "hull", "bradford", "huddersfield", "salford", "stockport", "chester", "bournemouth", "poole", "canary wharf",
+    "lincoln", "worcester", "telford", "warrington", "wakefield", "middlesbrough", "darlington", "harrogate",
+]
 _LOCATION_ALIASES = {
     "uk": ["uk", "united kingdom", "england", "scotland", "wales", "northern ireland", "london", "bristol",
-           "manchester", "birmingham", "leeds", "edinburgh", "glasgow", "cardiff", "belfast"],
+           "manchester", "birmingham", "leeds", "edinburgh", "glasgow", "cardiff", "belfast", *_UK_TOWNS],
     "us": ["us", "usa", "united states", "new york", "san francisco", "california", "seattle"],
 }
+_UK_TERMS = frozenset(_LOCATION_ALIASES["uk"])
+# Beside a UK place name, these mean it's the other one: a country, a US state / Canadian province /
+# Australian state (named, or as a code after a comma: "Cambridge, MA 02139", not "London, on-site").
+_STATE_CODES = ("al|ak|az|ar|ca|co|ct|dc|de|fl|ga|hi|ia|id|il|in|ks|ky|la|ma|md|me|mi|mn|mo|ms|mt|nc|nd|ne|nh|nj|"
+                "nm|nv|ny|oh|ok|or|pa|ri|sc|sd|tn|tx|ut|va|vt|wa|wi|wv|wy|on|bc|qc|ab|nsw|vic|qld")
+_ABROAD = re.compile(
+    r"\b(?:usa|u\.s\.a?\.?|united states|america|canada|australia|new zealand|india|singapore|hong kong|"
+    r"germany|france|netherlands|spain|italy|switzerland|poland|portugal|sweden|denmark|norway|finland|belgium|"
+    r"austria|japan|china|brazil|mexico|uae|dubai|israel|(?<!northern )ireland|new south wales|ontario|"
+    r"massachusetts|connecticut|new hampshire|new jersey|pennsylvania|virginia|texas|maryland|north carolina|"
+    r"mississippi|alabama|ohio|washington,? ?d\.?c\.?)\b"
+    rf"|,\s*(?:{_STATE_CODES})(?=\s*(?:$|[,;)/|(]|\d))", re.I)
+# One location string may list several places: "London, UK; Boston, MA", "Stamford/New York".
+_LOCATION_PARTS = re.compile(r";|\||/|\bor\b|&", re.I)
 _LOCATION_ALIAS_KEYS = {"uk": "uk", "united kingdom": "uk", "gb": "uk", "great britain": "uk",
                         "us": "us", "usa": "us", "united states": "us", "america": "us"}
 _REMOTE_TERMS = ["remote", "anywhere", "telecommute"]
@@ -587,10 +616,20 @@ def _location_matcher(location: str):
         # pool and push UK jobs out, while another location (e.g. Toronto) may still want Ontario.
         sql = f"({sql} AND lower(location) NOT LIKE '%ontario%' AND lower(location) NOT LIKE '%new london%')"
 
+    # The UK or a place in it: each listed place is checked on its own, and one that also names somewhere
+    # abroad doesn't count ("Cambridge, MA", "Sydney, New South Wales").
+    uk_place = all(t in _UK_TERMS for t in terms)
+
     def matches(job_location: str) -> bool:
-        if not regex.search(job_location):
-            return False
-        return not (exclude_other_londons and ("ontario" in job_location or "new london" in job_location))
+        for part in (_LOCATION_PARTS.split(job_location) if uk_place else [job_location]):
+            if not regex.search(part):
+                continue
+            if exclude_other_londons and ("ontario" in part or "new london" in part):
+                continue
+            if uk_place and _ABROAD.search(part):
+                continue
+            return True
+        return False
     return sql, params, matches
 
 
