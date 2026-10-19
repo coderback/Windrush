@@ -508,6 +508,40 @@ def _parts(value: str) -> list[str]:
     return [p for p in re.split(r"[,;]|\sat\s", re.sub(r"\([^)]*\)", " ", value)) if _norm(p)]
 
 
+# A degree's level, as a form's options name it ("Bachelor's Degree") and as a degree line does ("BSc (Hons)").
+_LEVELS = (
+    (re.compile(r"\bbachelor", re.I), re.compile(r"\b(?:B\.?(?:Sc|A|Eng|Ed|Arch|Mus|Des)\.?|Bachelor)\b", re.I)),
+    (re.compile(r"\bmaster", re.I), re.compile(r"\b(?:M\.?(?:Sc|A|Eng|Res|Phil|Math|Comp)\.?|MBA|Master)\b", re.I)),
+    (re.compile(r"\b(?:doctor|ph\.?d)", re.I), re.compile(r"\b(?:Ph\.?D|D\.?Phil|Doctor)\b", re.I)),
+)
+
+
+def _names_option(option: str, cited: list[Fact], options: list[str]) -> bool:
+    """
+    Whether the cited facts name this option. A summary fact (a degree, a role, the skills) only does when the option
+    is in it word for word ("Computer Science", "2025"), one of its parts picks it from the form's options ("The
+    University of the West of England" is "Bristol, UWE"), or it's the degree's level. On DV Trading the model chose
+    "University of Bristol" for a degree at the University of the West of England, Bristol: every word of it is in
+    the education line.
+    """
+    wanted = f" {_norm(option)} "
+    for fact in cited:
+        if not fact.summary:
+            return True
+        if wanted.strip() and wanted in f" {_norm(fact.value)} ":
+            return True
+        # Neighbouring parts together too: the institution is "The University of the West of England, Bristol".
+        # Each run holds a part of two words or more, so "Bristol" alone never picks an option.
+        parts = _parts(fact.value)
+        runs = [", ".join(parts[i:j]) for i in range(len(parts)) for j in range(i + 1, len(parts) + 1)
+                if any(len(_norm(p).split()) >= 2 for p in parts[i:j])]
+        if any(pick_option(run, options) == option for run in runs):
+            return True
+        if any(level.search(option) and degree.search(fact.value) for level, degree in _LEVELS):
+            return True
+    return False
+
+
 def _says_yes_or_no(answer: str, cited: list[Fact], question: str) -> bool:
     """
     Whether the cited facts can give this answer's yes or no. A yes/no fact or a saved answer can. A list of
@@ -561,6 +595,8 @@ def resolve_fact(question: dict, reading: dict, facts: dict[str, Fact], job_loca
             answer = pick_option(first.value, options)
         # "Other" says no option states the fact; a saved answer may still have chosen it.
         if answer is None or (_NONE_FITS.search(answer) and not any(f.source == "saved" for f in cited)):
+            return None
+        if _polarity(answer) is None and not _names_option(answer, cited, options):
             return None
     elif said:
         answer = said
