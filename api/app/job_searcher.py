@@ -709,6 +709,7 @@ _GREENHOUSE_COMPANIES: list[tuple[str, str]] = [
     ("ndagroupgraduate", "NDA Group"),
     ("alphafmcrolesearlycareers", "Alpha FMC"),
     ("2ilimited",        "2i"),                   # nFocus's group
+    ("towerresearchcapital", "Tower Research Capital"),
 ]
 
 _ASHBY_COMPANIES: list[tuple[str, str]] = [
