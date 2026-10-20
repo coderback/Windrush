@@ -289,10 +289,46 @@ def _pdf(doc_id: str) -> str:
     return path if path and os.path.exists(path) else ""
 
 
+def _earlier_documents(user_id: str, job: dict) -> dict | None:
+    """The CV and cover letter the last run for this job wrote, when both PDFs are still there."""
+    docs = tracker.autopilot_documents(user_id, str(job.get("id", "")))
+    return docs if docs and _pdf(docs["cv_doc_id"]) and _pdf(docs["letter_doc_id"]) else None
+
+
+async def _write_documents(state: _Run, job: dict, persona: dict) -> dict:
+    """A tailored CV and cover letter for the job, rendered: {cv, template_id, letter, research, cv_doc_id,
+    letter_doc_id}."""
+    state.step = "Writing the tailored CV"
+    cv_result = await agent.execute_tool("generate_tailored_cv", {"job": job, "persona": persona})
+    cv, template_id = cv_result.get("cv"), cv_result.get("template_id")
+    if not cv:
+        raise _Stop("Couldn't write the tailored CV.")
+    state.step = "Writing the cover letter"
+    letter_result = await agent.execute_tool("generate_cover_letter", {"job": job, "persona": persona})
+    letter = letter_result.get("letter") or {}
+    if not letter.get("paragraphs"):
+        raise _Stop("Couldn't write the cover letter.")
+    return {"cv": cv, "template_id": template_id, "letter": letter, "research": letter_result.get("research") or "",
+            "cv_doc_id": await doc_render.render_pdf("cv", cv, template_id),
+            "letter_doc_id": await doc_render.render_pdf("cover_letter", letter, template_id)}
+
+
+def _keep_documents(run_id: str, user_id: str, docs: dict) -> None:
+    tracker.update_autopilot_run(run_id, user_id=user_id, cv_doc_id=docs["cv_doc_id"],
+                                 letter_doc_id=docs["letter_doc_id"],
+                                 documents={k: docs.get(k) for k in ("cv", "template_id", "letter", "research")})
+
+
 async def _apply(state: _Run, user_id: str, job: dict, verdict: dict, cfg: dict, persona: dict) -> str:
     """Try one job: documents, then the form, then send or hold. Returns the run's outcome."""
     live = cfg["live"]
+    # A live send uses the CV and cover letter the last run for this job wrote (the practice run the user looked
+    # at), so what goes out is what they saw. Read before start_autopilot_run replaces that run; practice always
+    # writes them afresh.
+    earlier = _earlier_documents(user_id, job) if live else None
     run_id = tracker.start_autopilot_run(user_id, job, practice=not live, fit_score=verdict.get("fit_score"))
+    if earlier:
+        _keep_documents(run_id, user_id, earlier)   # at once, so a retry after a failure still has them
     run = tracker.get_autopilot_run(user_id, run_id)
     state.job = f"{job.get('title', '')} at {job.get('company', '')}"
     held: list[str] = []
@@ -300,20 +336,15 @@ async def _apply(state: _Run, user_id: str, job: dict, verdict: dict, cfg: dict,
     questions: list[dict] = []
     try:
         job = await jobs_db.ensure_full_description(job)
-        state.step = "Writing the tailored CV"
-        cv_result = await agent.execute_tool("generate_tailored_cv", {"job": job, "persona": persona})
-        cv, template_id = cv_result.get("cv"), cv_result.get("template_id")
-        if not cv:
-            raise _Stop("Couldn't write the tailored CV.")
-        state.step = "Writing the cover letter"
-        letter_result = await agent.execute_tool("generate_cover_letter", {"job": job, "persona": persona})
-        letter = letter_result.get("letter") or {}
-        if not letter.get("paragraphs"):
-            raise _Stop("Couldn't write the cover letter.")
-        problems = document_problems(cv, letter, persona, job, letter_result.get("research") or "")
-        cv_doc_id = await doc_render.render_pdf("cv", cv, template_id)
-        letter_doc_id = await doc_render.render_pdf("cover_letter", letter, template_id)
-        tracker.update_autopilot_run(run_id, user_id=user_id, cv_doc_id=cv_doc_id, letter_doc_id=letter_doc_id)
+        if earlier:
+            state.step = "Using the CV and cover letter from the last run"
+            docs = earlier
+        else:
+            docs = await _write_documents(state, job, persona)
+            _keep_documents(run_id, user_id, docs)
+        cv, letter = docs["cv"], docs["letter"]
+        cv_doc_id, letter_doc_id = docs["cv_doc_id"], docs["letter_doc_id"]
+        problems = document_problems(cv, letter, persona, job, docs.get("research") or "")
 
         text = letter_text(letter)
         answer_job = {"title": job.get("title", ""), "company": job.get("company", ""),
@@ -380,8 +411,10 @@ async def _apply(state: _Run, user_id: str, job: dict, verdict: dict, cfg: dict,
                     "needs_you": "Autopilot filled this in and held it for you."}[outcome]
             tracker.update_status(app_id, status, note, user_id=user_id)
             tracker.set_application_questions(app_id, questions, user_id=user_id)
+    reused = (f"Used the CV and cover letter from the {'practice ' if earlier['practice'] else ''}run of "
+              f"{earlier['updated_at'][:10]}. " if earlier else "")
     tracker.update_autopilot_run(run_id, user_id=user_id, outcome=outcome, reasons=reasons, questions=questions,
-                                 notes=str(final.get("notes") or "")[:2000], application_id=app_id)
+                                 notes=(reused + str(final.get("notes") or ""))[:2000], application_id=app_id)
     logger.info("autopilot: %s -> %s (%d reasons)", state.job, outcome, len(reasons))
     return outcome
 

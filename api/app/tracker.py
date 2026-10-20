@@ -119,6 +119,7 @@ CREATE TABLE IF NOT EXISTS autopilot_runs (
     cv_doc_id      TEXT,
     letter_doc_id  TEXT,
     application_id TEXT,
+    documents      TEXT,
     created_at     TEXT NOT NULL,
     updated_at     TEXT NOT NULL
 );
@@ -162,6 +163,8 @@ def init_db(db_path: str = "") -> None:
             "ALTER TABLE users ADD COLUMN job_password_enc TEXT",
             # The questions the agent met on the application's form, with each answer and its source.
             "ALTER TABLE applications ADD COLUMN questions TEXT",
+            # The CV and cover letter a run wrote, so a live send uses the ones the practice run showed.
+            "ALTER TABLE autopilot_runs ADD COLUMN documents TEXT",
         ]:
             try:
                 con.execute(stmt)
@@ -676,6 +679,7 @@ def _autopilot_run(row: sqlite3.Row) -> dict:
     run["practice"] = bool(run["practice"])
     run["reasons"] = json.loads(run["reasons"] or "[]")
     run["questions"] = json.loads(run["questions"] or "[]")
+    run.pop("documents", None)   # the documents' content: autopilot_documents reads it
     return run
 
 
@@ -699,7 +703,7 @@ def start_autopilot_run(user_id: str, job: dict, outcome: str = "running", *, pr
 
 
 _RUN_FIELDS = {"outcome", "practice", "fit_score", "reasons", "questions", "notes", "cv_doc_id", "letter_doc_id",
-               "application_id"}
+               "application_id", "documents"}
 
 
 def update_autopilot_run(run_id: str, *, user_id: str, **fields) -> bool:
@@ -711,6 +715,8 @@ def update_autopilot_run(run_id: str, *, user_id: str, **fields) -> bool:
     for name in ("reasons", "questions"):
         if name in fields:
             fields[name] = json.dumps(list(fields[name]), ensure_ascii=False)
+    if "documents" in fields:
+        fields["documents"] = json.dumps(dict(fields["documents"]), ensure_ascii=False)
     if "practice" in fields:
         fields["practice"] = int(bool(fields["practice"]))
     fields["updated_at"] = _now()
@@ -728,6 +734,24 @@ def get_autopilot_run(user_id: str, run_id: str) -> dict | None:
     row = con.execute("SELECT * FROM autopilot_runs WHERE id=? AND user_id=?", (run_id, user_id)).fetchone()
     con.close()
     return _autopilot_run(row) if row else None
+
+
+def autopilot_documents(user_id: str, job_id: str) -> dict | None:
+    """The CV and cover letter the last run for this job wrote: {cv, template_id, letter, research, cv_doc_id,
+    letter_doc_id, practice, updated_at}, or None when it kept none."""
+    con = sqlite3.connect(_DB_PATH)
+    con.row_factory = sqlite3.Row
+    row = con.execute("SELECT documents, cv_doc_id, letter_doc_id, practice, updated_at FROM autopilot_runs "
+                      "WHERE user_id=? AND job_id=?", (user_id, str(job_id))).fetchone()
+    con.close()
+    try:
+        docs = json.loads(row["documents"]) if row and row["documents"] else None
+    except ValueError:
+        docs = None
+    if not isinstance(docs, dict) or not docs.get("cv") or not (docs.get("letter") or {}).get("paragraphs"):
+        return None
+    return {**docs, "cv_doc_id": row["cv_doc_id"] or "", "letter_doc_id": row["letter_doc_id"] or "",
+            "practice": bool(row["practice"]), "updated_at": row["updated_at"]}
 
 
 def list_autopilot_runs(user_id: str, limit: int = 200) -> list[dict]:

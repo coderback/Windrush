@@ -1,6 +1,7 @@
 """Autopilot: which jobs it tries, when it sends a form and when it holds it for the user."""
 import asyncio
 import base64
+import json
 import os
 import uuid
 
@@ -138,6 +139,7 @@ class World:
         self.filled: list[str] = []      # companies whose form was filled
         self.decided: dict[str, bool] = {}
         self.cv_paths: list[str] = []
+        self.written: list[str] = []     # the documents written, as "cv" / "letter"
 
 
 @pytest.fixture
@@ -150,8 +152,10 @@ def world(db, ollama, monkeypatch):
                                      "level_match": w.fit[j["company"]][1], "reasoning": "why"}
                                     for j in tool_input["jobs"]]}
         if name == "generate_tailored_cv":
-            return {"cv": {"summary": "Engineer"}, "template_id": "classic"}
+            w.written.append("cv")
+            return {"cv": {"summary": f"Engineer, draft {len(w.written)}"}, "template_id": "classic"}
         if name == "generate_cover_letter":
+            w.written.append("letter")
             return {"letter": {"salutation": "Dear Hiring Manager,", "paragraphs": ["I'd like to join."],
                                "signoff": "Yours faithfully,", "candidate_name": "Ada Lovelace"}, "research": ""}
         raise AssertionError(name)
@@ -286,6 +290,42 @@ def test_each_job_is_tried_once_but_practice_runs_dont_count_once_live(ada, worl
     assert len(world.filled) == 6
     _run(ada)                                       # and then not again
     assert len(world.filled) == 6
+
+
+def test_a_live_send_uses_the_documents_the_practice_run_showed(ada, world):
+    _run(ada)                                       # practice: writes and keeps a CV and letter per job
+    practice = _runs(ada)
+    assert len(world.written) == 6 and "documents" not in practice["alpha"]   # listings stay small
+    _run(ada, live=True)
+    live = _runs(ada)
+    assert len(world.written) == 6                  # nothing rewritten: what the user saw is what went up
+    assert sorted(world.cv_paths[3:]) == sorted(world.cv_paths[:3])
+    for name in ("alpha", "beta", "gamma"):
+        assert (live[name]["cv_doc_id"], live[name]["letter_doc_id"]) == \
+            (practice[name]["cv_doc_id"], practice[name]["letter_doc_id"])
+        assert live[name]["notes"].startswith("Used the CV and cover letter from the practice run of ")
+    sent_cv = {a["company"]: a["tailored_cv"] for a in tracker.list_applications(ada)}["alpha"]
+    assert json.loads(sent_cv) == tracker.autopilot_documents(ada, practice["alpha"]["job_id"])["cv"]
+
+
+def test_a_practice_run_writes_new_documents_each_time(ada, world):
+    _run(ada)
+    first = _runs(ada)["alpha"]
+    asyncio.run(autopilot.run(ada, first["job_id"]))   # a practice retry of one job
+    again = _runs(ada)["alpha"]
+    assert len(world.written) == 8 and again["cv_doc_id"] != first["cv_doc_id"]
+    assert tracker.autopilot_documents(ada, first["job_id"])["cv"]["summary"] == "Engineer, draft 7"
+
+
+def test_a_live_send_writes_documents_when_the_earlier_ones_are_gone(ada, world):
+    _run(ada)
+    alpha = _runs(ada)["alpha"]
+    os.remove(pdf_generator.get_pdf_path(alpha["letter_doc_id"]))
+    _run(ada, live=True)
+    live = _runs(ada)
+    assert len(world.written) == 8                  # alpha's pair again; beta's and gamma's kept
+    assert live["alpha"]["cv_doc_id"] != alpha["cv_doc_id"] and not live["alpha"]["notes"].startswith("Used")
+    assert live["beta"]["notes"].startswith("Used the CV and cover letter")
 
 
 def test_jobs_already_in_the_tracker_are_left_alone(ada, world):
