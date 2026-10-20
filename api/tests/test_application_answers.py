@@ -172,7 +172,7 @@ def test_nationality_answers_are_stated_with_their_details():
     ({}, "CV", "CV.pdf"),
 ])
 def test_uploads_are_named_after_the_candidate(core, kind, name):
-    assert ba._upload_name({"core_info": core}, kind) == name
+    assert ba.upload_name({"core_info": core}, kind) == name
 
 
 def test_the_agent_pastes_the_letter_and_is_offered_its_pdf():

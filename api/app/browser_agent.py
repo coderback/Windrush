@@ -822,7 +822,7 @@ async def _submit_with_agent(llm, browser_session, sensitive_data: dict | None,
 
 # ── Documents, the cover-letter box and the empty-field check ───────────────
 
-def _upload_name(persona: dict, kind: str) -> str:
+def upload_name(persona: dict, kind: str) -> str:
     """'Ada_Lovelace_CV.pdf': the name an employer sees on an uploaded document (stored files are
     named by id). ASCII only, since some applicant-tracking systems mangle anything else."""
     core = persona.get("core_info") or {}
@@ -1613,8 +1613,8 @@ async def apply_with_browser(
     try:
         # Named copies for the upload, removed in the finally below.
         upload_dir = tempfile.mkdtemp(prefix="windrush-apply-")
-        cv_upload = _named_copy(cv_path, upload_dir, _upload_name(cv_profile, "CV"))
-        letter_upload = _named_copy(cover_letter_path, upload_dir, _upload_name(cv_profile, "Cover Letter"))
+        cv_upload = _named_copy(cv_path, upload_dir, upload_name(cv_profile, "CV"))
+        letter_upload = _named_copy(cover_letter_path, upload_dir, upload_name(cv_profile, "Cover Letter"))
         task = _build_task(job_url, cv_profile, cover_letter, job_email, job_password, cv_upload, letter_upload)
         agent = Agent(
             task=task,

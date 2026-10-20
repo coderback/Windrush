@@ -468,7 +468,8 @@ test("autopilot: practice runs, the queue, answering a held question and turning
     created_at: new Date().toISOString(), updated_at: new Date().toISOString(), ...extra,
   });
   const runs = [
-    run("1", "needs_you", { reasons: ["1 question only you can answer: “Do you hold SC clearance?”"], questions: [blank] }),
+    run("1", "needs_you", { reasons: ["1 question only you can answer: “Do you hold SC clearance?”"], questions: [blank],
+                            cv_doc_id: "c".repeat(32), letter_doc_id: "d".repeat(32) }),
     run("2", "ready", { practice: true }),
     run("3", "skipped", { reasons: ["Fit 60 is under your threshold of 75."] }),
   ];
@@ -497,6 +498,15 @@ test("autopilot: practice runs, the queue, answering a held question and turning
   const queue = page.getByRole("tabpanel");
   await expect(queue).toContainText("Graduate Engineer 1");
   await expect(queue).toContainText("only you can answer");
+
+  // Applying yourself: the handover pack downloads under the name the API gives it. A ZIP isn't JSON, so this
+  // route sits on top of mockApi's (Playwright tries the last-registered route first).
+  await page.route("**/api/autopilot/runs/1/pack", (route) => route.fulfill({
+    status: 200, body: "PK", headers: { "content-type": "application/zip",
+      "content-disposition": 'attachment; filename="Windrush - Company 1 - Graduate Engineer 1.zip"' } }));
+  const download = page.waitForEvent("download");
+  await queue.getByRole("button", { name: "Handover pack" }).click();
+  expect((await download).suggestedFilename()).toBe("Windrush - Company 1 - Graduate Engineer 1.zip");
 
   await queue.getByLabel(blank.question).selectOption("No");
   await queue.getByRole("button", { name: "Save answer" }).click();

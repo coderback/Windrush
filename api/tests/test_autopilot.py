@@ -1,9 +1,11 @@
 """Autopilot: which jobs it tries, when it sends a form and when it holds it for the user."""
 import asyncio
 import base64
+import io
 import json
 import os
 import uuid
+import zipfile
 
 import pytest
 from conftest import make_job
@@ -382,12 +384,38 @@ def test_status_settings_and_runs_endpoints(ada, world, client_for):
     assert tracker.get_autopilot_run(ada, runs["alpha"]["id"])["outcome"] == "dismissed"
 
 
+def test_a_handover_pack_holds_what_applying_by_hand_needs(ada, world, client_for):
+    world.forms["alpha"]["questions"] = [CLEAN, _answer("Do you hold SC clearance?", "needs_you")]
+    asyncio.run(autopilot.run(ada))
+    run = _runs(ada)["alpha"]
+    reply = client_for(ada).get(f"/autopilot/runs/{run['id']}/pack")
+    assert reply.status_code == 200 and reply.headers["content-type"] == "application/zip"
+    assert reply.headers["content-disposition"] == 'attachment; filename="Windrush - alpha - Graduate Engineer alpha.zip"'
+    with zipfile.ZipFile(io.BytesIO(reply.content)) as pack:
+        assert sorted(pack.namelist()) == ["Ada_Lovelace_CV.pdf", "Ada_Lovelace_Cover_Letter.pdf", "alpha - answers.txt"]
+        assert pack.read("Ada_Lovelace_CV.pdf") == open(pdf_generator.get_pdf_path(run["cv_doc_id"]), "rb").read()
+        sheet = pack.read("alpha - answers.txt").decode()
+    assert sheet.startswith(f"Graduate Engineer alpha at alpha\n{URLS['alpha']}\n")
+    assert "Held because:\n- 1 question only you can answer" in sheet
+    assert "Q: Do you have the right to work in the UK?\nA: Yes" in sheet
+    assert "Q: Do you hold SC clearance?\nA: (left for you to answer)" in sheet
+    assert "for a form that wants it pasted:\n\nDear Hiring Manager,\n\nI'd like to join." in sheet
+
+
+def test_a_handover_pack_needs_the_runs_documents(ada, world, client_for):
+    asyncio.run(autopilot.run(ada))
+    run = _runs(ada)["alpha"]
+    os.remove(pdf_generator.get_pdf_path(run["letter_doc_id"]))
+    reply = client_for(ada).get(f"/autopilot/runs/{run['id']}/pack")
+    assert reply.status_code == 404 and "aren't there any more" in reply.json()["detail"]
+
+
 def test_another_users_runs_are_out_of_reach(ada, world, client_for, make_user):
     asyncio.run(autopilot.run(ada))
     run_id = tracker.list_autopilot_runs(ada)[0]["id"]
     other = client_for(make_user("eve@example.com"))
     assert other.get("/autopilot/runs").json() == []
-    for path in (f"/autopilot/runs/{run_id}/screenshots/form",):
+    for path in (f"/autopilot/runs/{run_id}/screenshots/form", f"/autopilot/runs/{run_id}/pack"):
         assert other.get(path).status_code == 404
     assert other.post(f"/autopilot/runs/{run_id}/dismiss").status_code == 404
     assert other.post(f"/autopilot/runs/{run_id}/retry").status_code == 404
