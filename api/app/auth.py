@@ -48,10 +48,9 @@ def get_password_hash(password: str):
 
 def create_access_token(data: dict, expires_delta: timedelta | None = None):
     to_encode = data.copy()
-    if expires_delta:
-        expire = datetime.now(timezone.utc) + expires_delta
-    else:
-        expire = datetime.now(timezone.utc) + timedelta(minutes=15)
+    # A login lasts ACCESS_TOKEN_EXPIRE_MINUTES. The default was 15 minutes, which /login used, so the browser was
+    # logged out a quarter of an hour after every sign-in (api.ts drops the token on the first 401).
+    expire = datetime.now(timezone.utc) + (expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
     to_encode.update({"exp": expire})
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
