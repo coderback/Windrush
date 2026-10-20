@@ -39,13 +39,25 @@ export async function screenshotUrl(id: string, which: "form" | "confirm"): Prom
   return URL.createObjectURL(await res.blob());
 }
 
-export async function downloadDocument(docId: string, filename: string) {
-  const res = await authFetch(`/api/documents/${docId}/download`);
-  if (!res.ok) throw new Error("That document isn't available any more.");
-  const url = URL.createObjectURL(await res.blob());
+function save(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
   a.download = filename;
   a.click();
   URL.revokeObjectURL(url);
+}
+
+export async function downloadDocument(docId: string, filename: string) {
+  const res = await authFetch(`/api/documents/${docId}/download`);
+  if (!res.ok) throw new Error("That document isn't available any more.");
+  save(await res.blob(), filename);
+}
+
+/** A run's handover pack: its CV and cover letter as autopilot uploads them, and the form's answers, as a ZIP. */
+export async function downloadPack(id: string) {
+  const res = await authFetch(`${RUNS_URL}/${encodeURIComponent(id)}/pack`);
+  if (!res.ok) throw new Error("This run's CV and cover letter aren't there any more.");
+  const named = /filename="([^"]+)"/.exec(res.headers.get("Content-Disposition") ?? "");
+  save(await res.blob(), named?.[1] ?? "Windrush handover pack.zip");
 }

@@ -15,10 +15,12 @@ form that asks is clean. A sent form keeps two screenshots: the filled form, and
 """
 import asyncio
 import base64
+import io
 import json
 import logging
 import os
 import re
+import zipfile
 from contextlib import aclosing
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -311,6 +313,40 @@ async def _write_documents(state: _Run, job: dict, persona: dict) -> dict:
     return {"cv": cv, "template_id": template_id, "letter": letter, "research": letter_result.get("research") or "",
             "cv_doc_id": await doc_render.render_pdf("cv", cv, template_id),
             "letter_doc_id": await doc_render.render_pdf("cover_letter", letter, template_id)}
+
+
+def handover_pack(user_id: str, run: dict, persona: dict) -> tuple[str, bytes]:
+    """
+    (file name, ZIP) for applying to the run's job yourself: its CV and cover letter under the names autopilot
+    uploads them as, and a sheet with the job's link, why it was held, each question the form asked with its
+    answer, and the letter as text for a form that wants it pasted. Raises LookupError when the PDFs are gone.
+    """
+    cv, letter = _pdf(run.get("cv_doc_id") or ""), _pdf(run.get("letter_doc_id") or "")
+    if not cv or not letter:
+        raise LookupError("This run's CV and cover letter aren't there any more.")
+    cv_name = browser_agent.upload_name(persona, "CV")
+    letter_name = browser_agent.upload_name(persona, "Cover Letter")
+    plain = lambda text: " ".join(re.sub(r"[^A-Za-z0-9 .&-]+", " ", str(text or "")).split())[:60]  # noqa: E731
+    company = plain(run.get("company")) or "Job"
+
+    lines = [f"{run.get('job_title') or ''} at {run.get('company') or ''}", run.get("job_url") or "", ""]
+    if run.get("reasons"):
+        lines += ["Held because:", *[f"- {reason}" for reason in run["reasons"]], ""]
+    lines += ["Upload:", f"- CV: {cv_name}", f"- Cover letter: {letter_name}", ""]
+    if run.get("questions"):
+        lines += ["The form's questions and your answers:", ""]
+        for q in run["questions"]:
+            lines += [f"Q: {q.get('question') or ''}", f"A: {q.get('answer') or '(left for you to answer)'}", ""]
+    written = (tracker.autopilot_documents(user_id, run.get("job_id") or "") or {}).get("letter")
+    if written:
+        lines += ["The cover letter as text, for a form that wants it pasted:", "", letter_text(written), ""]
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as pack:
+        pack.write(cv, cv_name)
+        pack.write(letter, letter_name)
+        pack.writestr(f"{company} - answers.txt", "\n".join(lines))
+    return f"Windrush - {company} - {plain(run.get('job_title')) or 'application'}.zip", buf.getvalue()
 
 
 def _keep_documents(run_id: str, user_id: str, docs: dict) -> None:

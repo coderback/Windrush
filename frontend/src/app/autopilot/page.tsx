@@ -14,7 +14,7 @@ import { load, useResource } from "@/lib/store";
 import { jobKey, longAgo } from "@/lib/format";
 import { jobHref, rememberJob } from "@/lib/jobs";
 import {
-  dismissRun, downloadDocument, retryRun, RUNS_URL, runNow, saveSettings, screenshotUrl, STATUS_URL,
+  dismissRun, downloadDocument, downloadPack, retryRun, RUNS_URL, runNow, saveSettings, screenshotUrl, STATUS_URL,
 } from "@/lib/autopilot";
 import type { AutopilotOutcome, AutopilotRun, AutopilotSettings, AutopilotStatus, Job } from "@/lib/types";
 
@@ -221,6 +221,8 @@ function RunRow({ run, running }: { run: AutopilotRun; running: boolean }) {
     `${run.company}_${kind}.pdf`.replace(/[^A-Za-z0-9_.-]+/g, "_");
   const download = (docId: string, kind: string) =>
     downloadDocument(docId, fileName(kind)).catch((e) => setError(e instanceof Error ? e.message : "Couldn't download it."));
+  const downloadHandover = () =>
+    downloadPack(run.id).catch((e) => setError(e instanceof Error ? e.message : "Couldn't download it."));
 
   return (
     <li className="flex flex-col gap-3 py-4 border-t border-track first:border-t-0 first:pt-0">
@@ -270,6 +272,12 @@ function RunRow({ run, running }: { run: AutopilotRun; running: boolean }) {
           <Link href={jobHref(jobKey(job))} onClick={() => rememberJob(job)} className={buttonClass("secondary", "xs")}>
             <Icon name="arrowRight" size={13} />Apply myself
           </Link>
+        )}
+        {run.cv_doc_id && run.letter_doc_id && (
+          <button type="button" onClick={downloadHandover} className={buttonClass("secondary", "xs")}
+            title="The CV and cover letter as autopilot uploads them, and the form's questions with your answers">
+            <Icon name="download" size={13} />Handover pack
+          </button>
         )}
         {run.cv_doc_id && (
           <button type="button" onClick={() => download(run.cv_doc_id!, "CV")} className={buttonClass("quiet", "xs")}>

@@ -10,7 +10,7 @@ from typing import Optional, Annotated
 
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Query, Depends, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import RedirectResponse, StreamingResponse
+from fastapi.responses import RedirectResponse, Response, StreamingResponse
 from fastapi.security import OAuth2PasswordRequestForm
 
 from .cv_parser import extract_text, extract_links, profile_links
@@ -1050,6 +1050,19 @@ async def autopilot_dismiss(run_id: str, current_user: Annotated[auth.User, Depe
         raise HTTPException(status_code=400, detail=f"A run that is {run['outcome']} can't be dismissed")
     tracker.update_autopilot_run(run_id, user_id=current_user.id, outcome="dismissed")
     return {"dismissed": run_id}
+
+
+@app.get("/autopilot/runs/{run_id}/pack")
+async def autopilot_pack(run_id: str, current_user: Annotated[auth.User, Depends(auth.get_current_user)]):
+    """A run's handover pack, for applying yourself: a ZIP of its CV and cover letter under the names autopilot
+    uploads them as, and a sheet of the form's questions with your answers."""
+    run = _own_run(current_user.id, run_id)
+    try:
+        name, data = autopilot.handover_pack(current_user.id, run, tracker.get_user_persona(current_user.id))
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    return Response(content=data, media_type="application/zip",
+                    headers={"Content-Disposition": f'attachment; filename="{name}"'})
 
 
 @app.get("/autopilot/runs/{run_id}/screenshots/{which}")
