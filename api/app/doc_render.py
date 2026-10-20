@@ -38,6 +38,9 @@ _env = Environment(
     trim_blocks=True,
     lstrip_blocks=True,
 )
+# A word joiner between plus signs keeps "C++" on one line; WeasyPrint otherwise breaks it as "C+ / +". A filter,
+# not the data: the fallback PDF writes latin-1, which has no word joiner.
+_env.filters["unbroken"] = lambda text: str(text).replace("++", "+⁠+")
 
 # ── Length limits ────────────────────────────────────────────────────────────────
 # These bound what any doc can put on the page; fitting a CV to its page target is _fitted_cv_html's job.
@@ -285,17 +288,15 @@ def build_cv_template_data(cv: dict, fit: tuple[str, ...] = ()) -> dict:
 
 
 def _letter_contact_lines(contact: dict) -> list[dict]:
-    """Vertical contact block for a cover letter: address, city+postcode, phone, email."""
+    """Contact block for a cover letter, as the candidate's own letter has it: town and postcode, phone, email.
+    No street address: the persona asks for it only where a form requires one."""
     if not isinstance(contact, dict):
         return []
     lines: list[dict] = []
-    addr = (contact.get("address_line_1") or "").strip()
     city = (contact.get("city") or contact.get("location") or "").strip()
     postcode = (contact.get("postcode") or "").strip()
     phone = (contact.get("phone") or "").strip()
     email = (contact.get("email") or "").strip()
-    if addr:
-        lines.append({"text": addr + ","})
     city_line = " ".join(x for x in [city, postcode] if x).strip()
     if city_line:
         lines.append({"text": city_line + "."})
@@ -312,20 +313,38 @@ def build_letter_template_data(letter: dict, fit: tuple[str, ...] = ()) -> dict:
     # Every paragraph is kept (the model may write five, the editor can add more); fitting the
     # letter to one page is _fitted_html's job, which only ever tightens the layout.
     paragraphs = [p.strip() for p in (letter.get("paragraphs") or []) if p and p.strip()]
+    name = (letter.get("candidate_name") or "").strip().rstrip(".")
+    first_names, _, last_name = name.rpartition(" ") if " " in name else (name, "", "")
+    company = (letter.get("company") or "").strip()
+    company_location = (letter.get("company_location") or "").strip()
     return {
         "page_target": 1,
         "body_class": " ".join(fit),
-        "candidate_name": (letter.get("candidate_name") or "").strip(),
+        "candidate_name": name,
+        # The name heading sets the surname apart (in the accent colour), as the candidate's letter does.
+        "first_names": first_names,
+        "last_name": last_name,
         "headline": (letter.get("headline") or "").strip(),
-        "company": (letter.get("company") or "").strip(),
+        "company": company,
         "job_title": (letter.get("job_title") or "").strip(),
-        "company_location": (letter.get("company_location") or "").strip(),
+        "company_location": company_location,
         "date": (letter.get("date") or "").strip(),
         "contact_lines": _letter_contact_lines(letter.get("contact", {})),
-        "salutation": (letter.get("salutation") or "Dear Hiring Manager,").strip(),
+        "recipient_lines": _letter_recipient_lines(company, company_location),
+        # A heading in the letter, so no trailing comma ("Dear Hiring Manager").
+        "salutation": (letter.get("salutation") or "Dear Hiring Manager").strip().rstrip(","),
         "paragraphs": paragraphs,
-        "signoff": (letter.get("signoff") or "Yours faithfully,").strip(),
+        "signoff": (letter.get("signoff") or "Kind Regards,").strip(),
     }
+
+
+def _letter_recipient_lines(company: str, location: str) -> list[str]:
+    """Who the letter is to, under the contact block: "Recruitment Team," / "Acme," / "London." The town is the
+    first part of the job's location, without a work setting ("London, UK (Hybrid)" -> "London")."""
+    if not company:
+        return []
+    town = re.sub(r"\s*\([^)]*\)", "", re.split(r"[,;/]", location or "")[0]).strip()
+    return ["Recruitment Team,", f"{company}{',' if town else '.'}"] + ([f"{town}."] if town else [])
 
 
 # ── HTML rendering ───────────────────────────────────────────────────────────────
@@ -396,12 +415,10 @@ def _fallback_pdf(doc_type: str, doc: dict) -> str:
     """Legacy fpdf2 path used only if WeasyPrint is unavailable/errors."""
     if doc_type == "cover_letter":
         data = build_letter_template_data(doc)
-        # fpdf2 prints the name as the heading; the date, employer and role open the text.
+        # fpdf2 prints the name as the heading; who it's to opens the text, as in the letter's left column.
         head = ([data["headline"]] if data["headline"] else []) + [c["text"] for c in data["contact_lines"]]
-        recipient = "\n".join(x for x in (data["company"], data["company_location"]) if x)
-        subject = f"Re: {data['job_title']}" if data["job_title"] else ""
-        body = [x for x in (data["date"], recipient, subject) if x]
-        body += [data["salutation"], *data["paragraphs"], data["signoff"], data["candidate_name"]]
+        body = ["\n".join(data["recipient_lines"])] if data["recipient_lines"] else []
+        body += [data["salutation"], *data["paragraphs"], data["signoff"], data["candidate_name"] + "."]
         text = "\n".join(head) + "\n\n" + "\n\n".join(body)
         return pdf_generator.generate_pdf("cover_letter", text, {"name": data["candidate_name"]})
     data = build_cv_template_data(doc)

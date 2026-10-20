@@ -78,7 +78,7 @@ body.cv {
 .cv-muted { font-size: 9pt; color: #595959; }
 
 /* ── Fit to page ────────────────────────────────────────────────────── */
-/* Classes doc_render puts on the body element when a CV or letter runs past its page target:
+/* Classes doc_render puts on the body element when a CV runs past its page target (letter.css has the letter's):
    "tight" closes up the spacing, "small" then brings the body type down to 10pt, the floor. */
 body.cv.tight { line-height: 1.12; }
 body.cv.tight .cv-section h2 { margin-top: 4pt; }
@@ -86,33 +86,3 @@ body.cv.tight .cv-entry { margin-top: 2pt; }
 body.cv.small { font-size: 10pt; }
 body.cv.small .cv-section h2 { font-size: 12pt; }
 body.cv.small .cv-name { font-size: 22pt; }
-/* The same two steps for a cover letter. */
-body.tight .letter-head { margin-bottom: 8pt; }
-body.tight .letter-contact-block { margin-top: 6pt; }
-body.tight .letter-meta { margin: 8pt 0; }
-body.tight .letter-meta .letter-date { margin-bottom: 5pt; }
-body.tight .letter-meta .letter-subject { margin-top: 6pt; }
-body.tight .letter-body p { margin-bottom: 6pt; line-height: 1.32; }
-body.tight .letter-signoff { margin-top: 8pt; }
-body.small .letter-body p { font-size: 10pt; }
-body.small .letter-name { font-size: 16pt; }
-
-/* ── Cover letter ───────────────────────────────────────────────────── */
-.letter-head { margin-bottom: 14pt; }
-.letter-name { font-size: 18pt; font-weight: 700; margin: 0; }
-.letter-headline { font-size: 11pt; color: #333; font-weight: 600; margin: 1pt 0 0; }
-.letter-contact-block { margin-top: 10pt; }
-.letter-contact-label {
-  font-weight: 700; font-size: 10pt; text-transform: uppercase;
-  letter-spacing: 0.6pt; margin: 0 0 2pt;
-}
-.letter-contact-line { font-size: 10pt; margin: 0; line-height: 1.35; }
-.letter-contact-line a { color: inherit; text-decoration: underline; }
-.letter-meta { margin: 12pt 0; font-size: 10pt; color: #444; }
-.letter-meta p { margin: 0; line-height: 1.35; }
-.letter-meta .letter-date { margin-bottom: 8pt; }
-.letter-meta .letter-subject { margin-top: 10pt; font-weight: 700; color: #1a1a1a; }
-.letter-body p { margin: 0 0 9pt; font-size: 10.5pt; line-height: 1.4; }
-.letter-signoff { margin-top: 14pt; }
-.letter-signoff p { margin: 0; }
-.letter-signoff .sig-name { font-weight: 700; }

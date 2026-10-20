@@ -663,12 +663,27 @@ _CV_RUBRIC = (
 )
 
 _LETTER_RUBRIC = (
-    "1. SPECIFIC TO THEM: the 'why them' paragraph passes the swap test — if another employer's name could "
-    "replace theirs and it still reads fine, it fails. 2. EVIDENCE: two or three requirements named in the ad "
-    "are each proved by a named project or role from the candidate data, with a real result. 3. OPENING: a "
-    "specific hook tied to this employer, never 'I am writing to apply'. 4. ENDING: short and concrete; no perks "
-    "or salary. 5. LANGUAGE: active, confident, no hedging ('I believe', 'I feel'), no clichés or filler."
+    "The letter follows the candidate's own structure; judge each part against it, never reshape it into another. "
+    "1. HOOK: opens on a specific challenge from one of the candidate's own projects and what it shows about how "
+    "they work, tied to the exact role and one concrete fact about this employer; it passes the swap test (another "
+    "employer's name couldn't replace theirs); never 'I am writing to apply'. 2. EVIDENCE: two named projects, the "
+    "first in precise detail with a real number matched to a requirement in the ad, the second a judgement call, "
+    "joined by the discipline both show. 3. HONEST GAP: one real requirement from the ad the candidate is lighter "
+    "on, stated plainly with what they do have and how they'd close it; no invented weakness, no self-deprecation "
+    "(or, if nothing is missing, a third piece of evidence). 4. CLOSE: short; no perks or salary. 5. VOICE: first "
+    "person, direct and specific, no hedging filler or clichés."
 )
+
+# How the candidate ends every letter.
+_CLOSING_LINE = "Thank you for your time and consideration and I hope to hear from you soon."
+
+
+def _with_closing_line(paragraphs: list[str]) -> list[str]:
+    """The letter's last paragraph ending on the candidate's closing line, in place of the thanks the model wrote."""
+    if not paragraphs or _CLOSING_LINE in paragraphs[-1]:
+        return paragraphs
+    last = re.sub(r"(\s*(?:Thank you|I hope|I look forward)\b[^.!]*[.!])+\s*$", "", paragraphs[-1].strip())
+    return paragraphs[:-1] + [f"{last} {_CLOSING_LINE}".strip()]
 
 
 async def _critique_cv_text(cv: dict, candidate: dict, job: dict) -> tuple[dict | None, list[str]]:
@@ -1190,47 +1205,52 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
                 "email": core.get("email", ""),
                 "phone": core.get("phone", ""),
             },
-            "salutation": "Dear Hiring Manager,",
+            "salutation": "Dear Hiring Manager",
             "paragraphs": [],
-            "signoff": "Yours faithfully,",
+            "signoff": "Kind Regards,",
             "archetype": archetype,
         }
 
+        # The structure and voice of the candidate's own letters (their Jump Trading letter): a hook story from one
+        # of their projects, two projects as evidence, an honest gap, a short close. Described, not quoted: a
+        # sample letter's facts would leak into other letters.
         system = (
-            f"Write a {tone}, authentically human, UK-English cover letter for a {level} candidate, framed "
-            "around the EMPLOYER'S needs (not a list of your own achievements). "
+            f"Write a UK-English cover letter in the candidate's own voice for a {level} candidate. "
             f"Archetype: {archetype}. {archetype_guidance} "
             'Return ONLY a JSON object (no prose, no code fences) with this shape: '
             '{"headline":str,"salutation":str,"paragraphs":[str,...],"signoff":str}. '
             "'headline' = the candidate's concise professional identity in 2-4 words "
             "(e.g. 'Computer Science Graduate'); do NOT put the role being applied for. "
-            "Write EXACTLY 4 short paragraphs, one page total (~300-380 words), in this order: "
-            "(1) INTRODUCTION ~60 words — name the EXACT role and open with a specific hook about YOU that ties to "
-            "this employer (e.g. why you chose your specialism / what draws you to their problem), then a one-line "
-            "summary of what you bring. NEVER begin with 'I am writing to apply for'. "
-            "(2) WHY THEM ~80 words — give specific, researched reasons for wanting THIS company/sector/role, drawn "
-            "from the COMPANY RESEARCH and job description, and explain WHY those facts connect to YOU (your "
-            "experience, goals or values). Do NOT restate their website or tell them what they already know. It "
-            "MUST fail the 'swap-the-company-name' test: if another employer's name could replace theirs and the "
-            "paragraph still reads fine, it is too generic — rewrite it. "
-            "(3) WHY ME ~140 words — choose 2-3 skills/requirements taken DIRECTLY from the job's requirements / "
-            "person specification and prove EACH with a concrete, quantified example, leading with the most "
-            "domain-relevant NAMED project or internship. Mirror the employer's EXACT terminology from the posting "
-            "(their tool, framework and skill names). Link each example forward to how it lets you deliver in THIS "
-            "role. "
-            "(4) ENDING ~40 words — short and specific; reiterate interest by referencing a concrete point you "
-            "made, and state availability if requested. Do NOT mention or praise perks, benefits, salary, "
-            "holiday, working hours or well-being; avoid generic lines like 'it would be a privilege'. "
-            "LANGUAGE (employers judge your writing here): active voice; sound confident — NO hedging qualifiers "
-            "('I feel that', 'I believe I could', 'I think'); NO vague quantity words (various, some, many, "
-            "several, lots); quantify ONLY with real numbers present in the candidate data — never invent, "
-            "estimate or round; frame any skill gap positively (how you would build it) — never 'lacking' or "
-            "'unfortunately'; no slang or abbreviations (write 'undergraduate', not 'undergrad'); no clichés or "
-            "buzzwords. Do NOT use any of these words: delve, testament, tapestry, landscape, foster, underscore, "
-            "beacon, synergy, pivotal, intricate, unleash, elevate, seamless, robust, leverage. Do NOT cluster "
-            "'Furthermore/Moreover/Additionally'. No placeholders, no invented facts. "
-            "Salutation: 'Dear Hiring Manager,' unless a named contact is provided. "
-            "Sign-off: 'Yours faithfully,' when no name is known, 'Yours sincerely,' when it is (UK convention)."
+            "Write EXACTLY 4 paragraphs, one page total (~320-380 words), in this order: "
+            "(1) HOOK ~90 words — open on a specific moment from ONE of the candidate's own projects: the hardest "
+            "technical challenge in it and what actually made it hard (the shape 'the hardest challenge wasn't X, "
+            "but Y'), told only from what that project's data says. Say what it shows about how the candidate works "
+            "(an instinct or habit), then tie that same instinct to the EXACT role and ONE concrete, specific fact "
+            "about this employer from the COMPANY RESEARCH or the ad (what they build, or how they work), ending on "
+            "why this is the place to start their career. NEVER begin with 'I am writing'. It MUST fail the "
+            "'swap-the-company-name' test: if another employer's name could replace theirs, it is too generic. "
+            "(2) EVIDENCE ~110 words — start 'Two projects demonstrate the <quality this role needs> I'd bring to "
+            "your <team/work>.' First, one named project in precise technical detail with a real number from the "
+            "candidate data, matched to a requirement in the ad (use the ad's own terms). Then 'Separately, ...' a "
+            "second named project that shows a judgement call (a trade-off chosen, and why). End with one sentence "
+            "naming the discipline both show. "
+            "(3) HONEST GAP ~90 words — pick ONE requirement the ad names that the candidate data shows least of (a "
+            "technology, tool or domain). State it plainly and briefly ('My <X> experience is limited so far'), say "
+            "exactly what related experience the data DOES show, say candidly that closing that gap is the stretch "
+            "they want ('I'll be upfront: ...'), then the strengths from the data that let them close it quickly. "
+            "Never invent a weakness the ad doesn't ask about; never apologise or run the candidate down. If the "
+            "data covers every requirement, use this paragraph for a third piece of evidence instead. "
+            "(4) CLOSE ~35 words — 'I'd welcome the opportunity to discuss how <the approach the letter showed> "
+            f"could contribute to your <team>.' then end with this sentence, word for word: '{_CLOSING_LINE}' No "
+            "perks, benefits, salary or working hours. "
+            "VOICE: first person, direct and specific, like an engineer explaining their own work; semicolons and "
+            "colons are fine; contractions are fine (I'd, I'll); British spelling; active voice; no hedging filler "
+            "('I feel that', 'I believe I could'). Quantify ONLY with numbers present in the candidate data, the ad "
+            "or the company research — never invent, estimate or round. No clichés or buzzwords. Do NOT use any of "
+            "these words: delve, testament, tapestry, landscape, foster, underscore, beacon, synergy, pivotal, "
+            "intricate, unleash, elevate, seamless, robust, leverage. No placeholders, no invented facts. "
+            "Salutation: 'Dear Hiring Manager' (no comma) unless a named contact is provided. Sign-off: "
+            "'Kind Regards,'."
             + (f"\n\nDirectives from user: {directives}" if directives else "")
         )
         data = await _llm_json(
@@ -1239,10 +1259,10 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
                 f"CANDIDATE PERSONA (JSON): {json.dumps(_llm_persona(persona))}\n\n"
                 f"JOB: {job.get('title')} at {job.get('company')}\n"
                 f"DESCRIPTION: {job.get('description', '')[:2500]}"
-                + (f"\n\nMOST DOMAIN-RELEVANT PROJECTS for this role (use the best fit as your main 'Why me' "
-                   f"evidence, in priority order): {', '.join(top_project_names)}" if top_project_names else "")
-                + (f"\n\nCOMPANY RESEARCH (ground your 'Why them' in this; explain why it connects to you — do "
-                   f"NOT restate it):\n{company_research}" if company_research else "")
+                + (f"\n\nMOST DOMAIN-RELEVANT PROJECTS for this role (draw the hook and the evidence from these, "
+                   f"in priority order): {', '.join(top_project_names)}" if top_project_names else "")
+                + (f"\n\nCOMPANY RESEARCH (take the hook's fact about the employer from this and tie it to the "
+                   f"candidate — do NOT restate it):\n{company_research}" if company_research else "")
             ),
             max_tokens=1024,
             label="cover_letter",
@@ -1265,18 +1285,6 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
                 persona.get("summary", "")
                 or f"I am writing to apply for the {job.get('title', '')} role at {job.get('company', '')}."
             ]
-
-        # Deterministic UK sign-off guard: 'Yours faithfully' for a generic salutation,
-        # 'Yours sincerely' only when a specific person is named. The model gets this wrong
-        # intermittently (e.g. 'Dear Hiring Manager,' + 'Yours sincerely,').
-        _salu = letter.get("salutation", "").lower()
-        _generic_salutation = (not _salu) or any(
-            g in _salu for g in (
-                "hiring manager", "madam", "sir", "to whom it may concern",
-                "team", "recruiter", "recruitment",
-            )
-        )
-        letter["signoff"] = "Yours faithfully," if _generic_salutation else "Yours sincerely,"
 
         # Critique and revise against the rubric; kept only if it adds no unsupported claim and
         # stays about the same length.
@@ -1306,6 +1314,13 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
                     revision = f"{len(findings)}->{len(after)} {'kept' if kept else 'rejected'}"
                     if kept:
                         letter = revised
+
+        # The candidate's own sign-off and closing line, whatever the model or a revision wrote, and the salutation
+        # as a heading (no comma).
+        letter["signoff"] = "Kind Regards,"
+        letter["salutation"] = (letter.get("salutation") or "Dear Hiring Manager").strip().rstrip(",")
+        if data:
+            letter["paragraphs"] = _with_closing_line(letter["paragraphs"])
 
         (logger.warning if data is None else logger.info)(
             "cover_letter: llm_used=%s, paragraphs=%d, archetype=%s, level=%s, critique=%d issues %s, revision=%s "
