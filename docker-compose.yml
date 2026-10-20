@@ -1,14 +1,18 @@
 services:
   nginx:
     image: nginx:alpine
+    restart: unless-stopped
     ports:
-      - "80:80"
+      # Only this computer by default: on shared Wi-Fi, other devices can't reach the app. Set WINDRUSH_BIND=0.0.0.0
+      # in .env to open it to your network (e.g. your phone on home Wi-Fi).
+      - "${WINDRUSH_BIND:-127.0.0.1}:80:80"
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
     depends_on: [frontend, api]
 
   frontend:
     build: ./frontend
+    restart: unless-stopped
     expose: ["3000"]
     environment:
       - NEXT_PUBLIC_API_URL=/api
@@ -16,6 +20,8 @@ services:
 
   api:
     build: ./api
+    # Comes back after a reboot or a Docker restart, so scheduled collections and autopilot runs keep going.
+    restart: unless-stopped
     expose: ["8000"]
     environment:
       - GROQ_API_KEY=${GROQ_API_KEY}
@@ -61,6 +67,7 @@ services:
 
   ollama:
     image: ollama/ollama:latest
+    restart: unless-stopped
     volumes:
       - ollama_data:/root/.ollama
     expose: ["11434"]

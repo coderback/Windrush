@@ -92,7 +92,7 @@ data/task_penetration.csv  — O*NET task-level AI penetration scores (~18 000 r
 docker compose up --build
 ```
 
-Open [http://localhost](http://localhost), create an account, and complete onboarding. The API collects jobs for every user's target titles and preferred locations every 6 hours (`JOB_COLLECT_HOURS`, `0` turns it off); to collect now, run `docker compose exec api python -m app.job_sync`.
+Open [http://localhost](http://localhost), create an account, and complete onboarding. The containers restart on their own after a reboot (as long as Docker starts with your computer), so scheduled collections and autopilot runs keep going. The app answers only on this computer; set `WINDRUSH_BIND=0.0.0.0` in `.env` to reach it from other devices on your network. The API collects jobs for every user's target titles and preferred locations every 6 hours (`JOB_COLLECT_HOURS`, `0` turns it off); to collect now, run `docker compose exec api python -m app.job_sync`.
 
 Local (non-Docker) dev:
 
