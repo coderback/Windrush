@@ -1,5 +1,6 @@
 """Live multi-source search: correct inputs per source, fixture handling, Adzuna routing."""
 import asyncio
+import re
 from unittest.mock import MagicMock
 
 import httpx
@@ -424,7 +425,7 @@ def test_a_workday_board_is_searched_and_only_postings_that_may_be_here_are_read
 def test_a_workday_site_refusing_calls_is_waited_out_once_then_left(monkeypatch):
     site = _Workday(status=429)
     monkeypatch.setattr(job_searcher, "http_client", MagicMock(async_client=site))
-    monkeypatch.setattr(job_searcher, "_WORKDAY_BACKOFF_S", 0)
+    monkeypatch.setattr(job_searcher, "_BACKOFF_S", 0)
     assert asyncio.run(job_searcher._fetch_workday("t/wd3/Site", "T", ["software"], ["Software"], ["London"])) == []
     assert len(site.calls) == 2                     # the call and its one retry; nothing more this collection
 
@@ -456,6 +457,120 @@ def test_full_descriptions_come_from_workday_and_levers_eu_instance(monkeypatch)
     assert (workday, lever) == ("Workday ad.", "Lever EU ad.")
     assert asked == ["https://lbg.wd3.myworkdayjobs.com/wday/cxs/lbg/Graduate_careers/job/London/Software-Engineer_163384-2",
                      "https://api.eu.lever.co/v0/postings/coretechsecurity/0a1b2c3d-1111-2222-3333-444455556666"]
+
+
+class _Site:
+    """A fake careers site: `answer(method, url, params)` gives (status, json body or text). Calls are kept."""
+
+    def __init__(self, answer):
+        self.answer, self.calls = answer, []
+
+    def __call__(self, *a, **k):   # as http_client.async_client
+        return self
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *a):
+        pass
+
+    async def request(self, method, url, params=None, **kwargs):
+        self.calls.append((method, url, dict(params or {})))
+        status, body = self.answer(method, url, params or {})
+        req = httpx.Request(method, url)
+        if isinstance(body, str):
+            return httpx.Response(status, text=body, request=req)
+        return httpx.Response(status, json=body, request=req)
+
+    async def get(self, url, params=None, **kwargs):
+        return await self.request("GET", url, params=params)
+
+
+def _oracle_posting(pid, title, place, *elsewhere):
+    return {"Id": pid, "Title": title, "PrimaryLocation": place, "WorkplaceType": "",
+            "secondaryLocations": [{"Name": p} for p in elsewhere]}
+
+
+def test_an_oracle_board_is_searched_and_only_postings_that_may_be_here_are_read(monkeypatch):
+    listed = [_oracle_posting("1", "Graduate Software Engineer", "London, England, United Kingdom"),
+              _oracle_posting("2", "Graduate Software Engineer", "Dallas, TX, United States"),
+              _oracle_posting("3", "Software Engineer", "Pittsburgh, PA, United States", "London, United Kingdom"),
+              _oracle_posting("4", "Account Manager", "London, United Kingdom")]
+
+    def answer(method, url, params):
+        if "recruitingCEJobRequisitions?" in url:
+            return 200, {"items": [{"TotalJobsCount": 4, "requisitionList": listed}]}
+        pid = re.search(r"Id%3D%22(\d+)%22|Id=\"(\d+)\"", url)
+        return 200, {"items": [{"ExternalDescriptionStr": f"<p>About {pid.group(1) or pid.group(2)}.</p>",
+                                "ExternalQualificationsStr": "<p>Python.</p>"}]}
+    site = _Site(answer)
+    monkeypatch.setattr(job_searcher, "http_client", MagicMock(async_client=site))
+    jobs = asyncio.run(job_searcher._fetch_oracle("h.fa.em3.oraclecloud.com/CX_1", "Co", ["graduate", "software", "engineer"],
+                                                  ["Graduate Software Engineer"], ["London", "United Kingdom"]))
+    searches = [url for _, url, _ in site.calls if "recruitingCEJobRequisitions?" in url]
+    assert len(searches) == 1 and "keyword=Graduate%20Software%20Engineer,sortBy=RELEVANCY" in searches[0]
+    assert [(j["job_id"], j["location"], " ".join(j["description"].split()), j["url"]) for j in jobs] == [
+        ("oracle-h-1", "London, England, United Kingdom", "About 1. Python.",
+         "https://h.fa.em3.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1/job/1"),
+        ("oracle-h-3", "Pittsburgh, PA, United States; London, United Kingdom", "About 3. Python.",
+         "https://h.fa.em3.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1/job/3"),
+    ]
+
+
+def test_an_oracle_search_drops_the_finders_own_separators():
+    url = job_searcher._oracle_search_url("h", "CX_1", "C++, Java; dev=ops")
+    assert "keyword=C%2B%2B%20Java%20dev%20ops" in url and "siteNumber=CX_1,limit=25,offset=0" in url
+
+
+def test_an_eightfold_board_is_searched_in_each_location_and_read_once(monkeypatch):
+    def answer(method, url, params):
+        if url.endswith("/search"):
+            here = params.get("location")
+            return 200, {"data": {"count": 2, "positions": [
+                {"id": 11, "displayJobId": "R11", "name": "Graduate Software Engineer",
+                 "standardizedLocations": ["London, England, GB"], "workLocationOption": "hybrid"},
+                {"id": 12, "displayJobId": "R12", "name": "Software Engineer",
+                 "standardizedLocations": ["Roy, UT, US"] if here == "London" else ["Roy, UT, US"]},
+            ]}}
+        return 200, {"data": {"jobDescription": f"<p>Job {params['position_id']}.</p>",
+                              "publicUrl": f"https://jobs.example.com/careers/job/{params['position_id']}"}}
+    site = _Site(answer)
+    monkeypatch.setattr(job_searcher, "http_client", MagicMock(async_client=site))
+    jobs = asyncio.run(job_searcher._fetch_eightfold("ngc/ngc.com", "NG", ["software", "engineer"],
+                                                     ["Software Engineer"], ["London", "United Kingdom"]))
+    searched = [(p["query"], p.get("location"), p["domain"]) for _, url, p in site.calls if url.endswith("/search")]
+    assert searched == [("Software Engineer", "London", "ngc.com"), ("Software Engineer", "United Kingdom", "ngc.com")]
+    assert [p["position_id"] for _, url, p in site.calls if url.endswith("/position_details")] == [11]
+    assert [(j["job_id"], j["location"], j["description"], j["url"]) for j in jobs] == [
+        ("eightfold-ngc-R11", "London, England, GB (Hybrid)", "Job 11.", "https://jobs.example.com/careers/job/11")]
+
+
+TEAMTAILOR_RSS = """<?xml version="1.0"?><rss xmlns:tt="https://teamtailor.com/locations"><channel>
+<item><title>Graduate Software Engineer</title>
+<description>&lt;p&gt;Build &amp;amp; ship.&lt;/p&gt;</description>
+<link>https://careers.example.com/jobs/1-graduate-software-engineer</link><guid>tt-1</guid>
+<remoteStatus>hybrid</remoteStatus>
+<tt:locations><tt:location><tt:name>HQ</tt:name><tt:city>London</tt:city><tt:country>United Kingdom</tt:country></tt:location>
+<tt:location><tt:city>Lisbon</tt:city><tt:country>Portugal</tt:country></tt:location></tt:locations></item>
+<item><title><![CDATA[Account Executive]]></title><description>Sell.</description><link>https://careers.example.com/jobs/2</link></item>
+</channel></rss>"""
+
+
+def test_a_teamtailor_board_is_read_from_its_feed():
+    jobs = job_searcher._teamtailor_jobs(TEAMTAILOR_RSS, "Co", ["software", "engineer"])
+    assert [(j["job_id"], j["title"], j["location"], j["description"], j["url"]) for j in jobs] == [
+        ("teamtailor-tt-1", "Graduate Software Engineer", "London, United Kingdom; Lisbon, Portugal (Hybrid)",
+         "Build & ship.", "https://careers.example.com/jobs/1-graduate-software-engineer")]
+
+
+@pytest.mark.parametrize("ats, slug, body, expected", [
+    ("oracle", "h.fa.em3.oraclecloud.com/CX_1", {"items": [{"TotalJobsCount": 132}]}, 132),
+    ("eightfold", "ngc/ngc.com", {"data": {"count": 26, "positions": []}}, 26),
+    ("teamtailor", "careers.example.com", TEAMTAILOR_RSS, 2),
+])
+def test_searched_and_feed_boards_are_checked(ats, slug, body, expected):
+    assert asyncio.run(job_searcher.check_board(_Site(lambda m, u, p: (200, body)), ats, slug)) == expected
+    assert asyncio.run(job_searcher.check_board(_Site(lambda m, u, p: (404, {})), ats, slug)) is None
 
 
 def test_no_board_is_listed_twice():

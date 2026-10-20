@@ -17,6 +17,7 @@ import os
 import re
 import pathlib
 import json
+from urllib.parse import quote
 
 import httpx
 
@@ -834,6 +835,34 @@ _WORKDAY_BOARDS: list[tuple[str, str]] = [
     ("alfa/wd3/Alfa",                                 "Alfa"),
 ]
 
+# Oracle Recruiting (Candidate Experience) sites, as "<host>/<site number>" (the oraclecloud.com host behind the
+# site, also when it shows on the employer's own domain): graduate employers' careers sites (October 2026).
+_ORACLE_BOARDS: list[tuple[str, str]] = [
+    ("egug.fa.us2.oraclecloud.com/CX_1",              "American Express"),
+    ("eofe.fa.us2.oraclecloud.com/BNY-Careers",       "BNY"),
+    ("eedu.fa.em3.oraclecloud.com/CX_1003",           "WTW"),
+    ("ebet.fa.em3.oraclecloud.com/MK",                "Compare the Market"),
+    ("eicg.fa.em2.oraclecloud.com/MorrisonsJobs",     "Morrisons"),
+    ("fa-evzn-saasfaukgovprod1.fa.ocs.oraclecloud.com/UKRI-Careers", "UKRI"),
+    ("fa-emqh-saasfaprod1.fa.ocs.oraclecloud.com/CX_1001", "Kent"),
+]
+
+# Eightfold careers sites, as "<tenant>/<domain>" (<tenant>.eightfold.ai, searched for <domain>'s postings):
+# graduate employers' careers sites (October 2026).
+_EIGHTFOLD_BOARDS: list[tuple[str, str]] = [
+    ("ngc/ngc.com",                                   "Northrop Grumman"),
+]
+
+# Teamtailor careers sites, by host (<company>.teamtailor.com, or the employer's own domain): each publishes every
+# posting in /jobs.rss. Graduate employers' careers sites (October 2026).
+_TEAMTAILOR_BOARDS: list[tuple[str, str]] = [
+    ("careers.isio.com",                              "Isio"),
+    ("careers.tekever.com",                           "Tekever"),
+    ("73strings.teamtailor.com",                      "73 Strings"),
+    ("careers.dare.global",                           "Dare"),
+    ("bre-1729757562.teamtailor.com",                 "BRE"),
+]
+
 async def _fetch_greenhouse(slug: str, company: str, keywords: list[str]) -> list[dict]:
     try:
         # content=true is required — without it the API omits the JD entirely.
@@ -1019,30 +1048,31 @@ async def _fetch_smartrecruiters(slug: str, company: str, keywords: list[str]) -
     except Exception:
         return []
 
-# ── Workday ───────────────────────────────────────────────────────────────────
-# A Workday careers site searches through a public JSON service, the one its own pages call: POST
-# .../wday/cxs/<tenant>/<site>/jobs lists postings (20 a call at most, no description) and GET
-# .../wday/cxs/<tenant>/<site><externalPath> is one posting. Boards are big and worldwide (Citi lists 2000+), so
-# each is searched with the collection's queries rather than read whole, and only postings whose title matches and
-# that may be in the searched locations are read in full.
+# ── Searched boards: Workday, Oracle, Eightfold ──────────────────────────────
+# These careers sites search through a public JSON service, the one their own pages call. Their boards are big and
+# worldwide (Citi lists 2000+), so each is searched with the collection's queries rather than read whole, and only
+# postings whose title matches and that may be in the searched locations are read in full.
 
-_WORKDAY_PAGE = 20           # postings a search call returns (Workday's most)
-_WORKDAY_PAGES = 2           # search calls per query and board: its 40 best matches
-_WORKDAY_READS = 25          # postings read in full per board and collection
-_WORKDAY_CONCURRENCY = 4     # Workday calls at once, across every board
-_WORKDAY_BACKOFF_S = 3.0     # wait before the one retry of a call a site refused as too many (429)
+_SEARCH_DEPTH = 40           # best matches taken per search (query, and location where the service takes one)
+_READS_PER_BOARD = 25        # postings read in full per board and collection
+_SEARCH_CONCURRENCY = 4      # calls at once, across every searched board
+_BACKOFF_S = 3.0             # wait before the one retry of a call a site refused as too many (429)
 _MULTI_PLACE = re.compile(r"^\s*\d+\s+locations?\s*$", re.I)   # "2 Locations": the posting says which
 
+# Workday: POST .../wday/cxs/<tenant>/<site>/jobs lists postings (no description) and GET
+# .../wday/cxs/<tenant>/<site><externalPath> is one posting.
+_WORKDAY_PAGE = 20           # postings a search call returns (Workday's most)
 
-async def _workday_call(client: httpx.AsyncClient, gate: asyncio.Semaphore, method: str, url: str,
-                        **kwargs) -> httpx.Response:
+
+async def _paced_call(client: httpx.AsyncClient, gate: asyncio.Semaphore, method: str, url: str,
+                      **kwargs) -> httpx.Response:
     """One call, under `gate`; a 429 is waited out once before it's given up."""
     for attempt in range(2):
         async with gate:
             resp = await client.request(method, url, **kwargs)
         if resp.status_code != 429 or attempt:
             return resp
-        await asyncio.sleep(_WORKDAY_BACKOFF_S)
+        await asyncio.sleep(_BACKOFF_S)
     return resp
 
 
@@ -1051,19 +1081,19 @@ async def _fetch_workday(slug: str, company: str, keywords: list[str], queries: 
     """
     A Workday board ("<tenant>/wd<n>/<site>"), searched with each of `queries`: each posting whose title matches
     `keywords` and that may be in `locations` (its place is one of them, or it lists several) is read in full, at
-    most _WORKDAY_READS. A site still refusing calls (429) after a wait keeps what was read before.
+    most _READS_PER_BOARD. A site still refusing calls (429) after a wait keeps what was read before.
     """
     tenant, wd, site = slug.split("/")
     host = f"https://{tenant}.{wd}.myworkdayjobs.com"
     base = f"{host}/wday/cxs/{tenant}/{site}"
-    gate = gate or asyncio.Semaphore(_WORKDAY_CONCURRENCY)
+    gate = gate or asyncio.Semaphore(_SEARCH_CONCURRENCY)
     jobs: list[dict] = []
     try:
         async with http_client.async_client(timeout=15.0, headers={"Accept": "application/json"}) as client:
             listed: dict[str, dict] = {}
             for query in queries or [" ".join(keywords)]:
-                for page in range(_WORKDAY_PAGES):
-                    resp = await _workday_call(client, gate, "POST", f"{base}/jobs", json={
+                for page in range(-(-_SEARCH_DEPTH // _WORKDAY_PAGE)):
+                    resp = await _paced_call(client, gate, "POST", f"{base}/jobs", json={
                         "appliedFacets": {}, "limit": _WORKDAY_PAGE, "offset": page * _WORKDAY_PAGE,
                         "searchText": query})
                     if resp.status_code == 429:
@@ -1079,8 +1109,8 @@ async def _fetch_workday(slug: str, company: str, keywords: list[str], queries: 
             wanted = [p for p in listed.values() if _title_matches_query(p.get("title") or "", keywords)
                       and (_MULTI_PLACE.match(p.get("locationsText") or "")
                            or jobs_db.in_locations(p.get("locationsText") or "", locations or []))]
-            for posting in wanted[:_WORKDAY_READS]:
-                resp = await _workday_call(client, gate, "GET", base + posting["externalPath"])
+            for posting in wanted[:_READS_PER_BOARD]:
+                resp = await _paced_call(client, gate, "GET", base + posting["externalPath"])
                 if resp.status_code == 429:
                     logger.info("Workday %s: refused as too many calls after %d postings", slug, len(jobs))
                     break
@@ -1107,11 +1137,200 @@ async def _fetch_workday(slug: str, company: str, keywords: list[str], queries: 
         return jobs
 
 
+# Oracle Recruiting: GET <host>/hcmRestApi/resources/latest/recruitingCEJobRequisitions with a findReqs finder
+# lists postings (expand=requisitionList, or none come back), and recruitingCEJobRequisitionDetails with ById is one.
+_ORACLE_PAGE = 25            # postings a search call returns
+_ORACLE_API = "https://{host}/hcmRestApi/resources/latest"
+
+
+def _oracle_search_url(host: str, site: str, query: str = "", limit: int = _ORACLE_PAGE, offset: int = 0) -> str:
+    """A findReqs search; the finder's own separators (, ; =) are dropped from the query."""
+    finder = f"findReqs;siteNumber={site},limit={limit},offset={offset}"
+    if query:
+        finder += f",keyword={' '.join(re.sub(r'[,;=]+', ' ', query).split())},sortBy=RELEVANCY"
+    return (f"{_ORACLE_API.format(host=host)}/recruitingCEJobRequisitions?onlyData=true"
+            f"&expand=requisitionList.secondaryLocations&finder={quote(finder, safe=';=,')}")
+
+
+async def _fetch_oracle(slug: str, company: str, keywords: list[str], queries: list[str] = (),
+                        locations: list[str] | None = None, gate: asyncio.Semaphore | None = None) -> list[dict]:
+    """An Oracle Recruiting board ("<host>/<site number>"), searched like a Workday one (see _fetch_workday)."""
+    host, site = slug.split("/")
+    gate = gate or asyncio.Semaphore(_SEARCH_CONCURRENCY)
+    jobs: list[dict] = []
+    try:
+        async with http_client.async_client(timeout=15.0, headers={"Accept": "application/json"}) as client:
+            listed: dict[str, dict] = {}
+            for query in queries or [" ".join(keywords)]:
+                for page in range(-(-_SEARCH_DEPTH // _ORACLE_PAGE)):
+                    resp = await _paced_call(client, gate, "GET",
+                                             _oracle_search_url(host, site, query, offset=page * _ORACLE_PAGE))
+                    if resp.status_code == 429:
+                        logger.info("Oracle %s: refused as too many calls; searching it next time", slug)
+                        return jobs
+                    resp.raise_for_status()
+                    postings = ((resp.json().get("items") or [{}])[0].get("requisitionList")) or []
+                    for posting in postings:
+                        if posting.get("Id"):
+                            listed.setdefault(str(posting["Id"]), posting)
+                    if len(postings) < _ORACLE_PAGE:
+                        break
+
+            def places(posting: dict) -> list[str]:
+                return [posting.get("PrimaryLocation") or "",
+                        *[(s or {}).get("Name") or "" for s in posting.get("secondaryLocations") or []]]
+            wanted = [p for p in listed.values() if _title_matches_query(p.get("Title") or "", keywords)
+                      and jobs_db.in_locations("; ".join(x for x in places(p) if x), locations or [])]
+            for posting in wanted[:_READS_PER_BOARD]:
+                finder = quote(f'ById;Id="{posting["Id"]}",siteNumber={site}', safe=';=,"')
+                resp = await _paced_call(client, gate, "GET", f"{_ORACLE_API.format(host=host)}"
+                                         f"/recruitingCEJobRequisitionDetails?expand=all&onlyData=true&finder={finder}")
+                if resp.status_code == 429:
+                    logger.info("Oracle %s: refused as too many calls after %d postings", slug, len(jobs))
+                    break
+                if resp.status_code != 200:
+                    continue
+                info = (resp.json().get("items") or [{}])[0]
+                title = posting.get("Title") or ""
+                text = " ".join(info.get(k) or "" for k in ("ExternalDescriptionStr", "ExternalResponsibilitiesStr",
+                                                           "ExternalQualificationsStr"))
+                jobs.append({
+                    "job_id": f"oracle-{host.split('.')[0]}-{posting['Id']}",
+                    "title": title,
+                    "company": company,
+                    "location": _place_and_setting(places(posting), posting.get("WorkplaceType") or ""),
+                    "description": _html_to_text(text)[:_DESC_MAX],
+                    "url": f"https://{host}/hcmUI/CandidateExperience/en/sites/{site}/job/{posting['Id']}",
+                    "salary_min": None,
+                    "salary_max": None,
+                    "exposure_score": round(occupation_exposure(title), 3),
+                })
+        return jobs
+    except Exception as exc:
+        logger.debug("Oracle %s failed: %s", slug, type(exc).__name__)
+        return jobs
+
+
+# Eightfold: GET <tenant>.eightfold.ai/api/pcsx/search lists a domain's postings (10 a call at most, by query and
+# location: a search without one is mostly elsewhere) and /api/pcsx/position_details is one.
+_EIGHTFOLD_PAGE = 10
+
+
+async def _fetch_eightfold(slug: str, company: str, keywords: list[str], queries: list[str] = (),
+                           locations: list[str] | None = None, gate: asyncio.Semaphore | None = None) -> list[dict]:
+    """An Eightfold board ("<tenant>/<domain>"), searched with each of `queries` in each of `locations`, then read
+    like a Workday one (see _fetch_workday)."""
+    tenant, domain = slug.split("/")
+    base = f"https://{tenant}.eightfold.ai/api/pcsx"
+    gate = gate or asyncio.Semaphore(_SEARCH_CONCURRENCY)
+    places = [p for p in (locations or []) if p and p.strip().lower() != "remote"] or [""]
+    jobs: list[dict] = []
+    try:
+        async with http_client.async_client(timeout=15.0, headers={"Accept": "application/json"}) as client:
+            listed: dict[str, dict] = {}
+            for query in queries or [" ".join(keywords)]:
+                for place in places:
+                    for page in range(-(-_SEARCH_DEPTH // _EIGHTFOLD_PAGE)):
+                        params = {"domain": domain, "query": query, "start": page * _EIGHTFOLD_PAGE,
+                                  "num": _EIGHTFOLD_PAGE, **({"location": place} if place else {})}
+                        resp = await _paced_call(client, gate, "GET", f"{base}/search", params=params)
+                        if resp.status_code == 429:
+                            logger.info("Eightfold %s: refused as too many calls; searching it next time", slug)
+                            return jobs
+                        resp.raise_for_status()
+                        postings = (resp.json().get("data") or {}).get("positions") or []
+                        for posting in postings:
+                            if posting.get("id"):
+                                listed.setdefault(str(posting["id"]), posting)
+                        if len(postings) < _EIGHTFOLD_PAGE:
+                            break
+
+            def where(posting: dict) -> list[str]:
+                return list(posting.get("standardizedLocations") or posting.get("locations") or [])
+            wanted = [p for p in listed.values() if _title_matches_query(p.get("name") or "", keywords)
+                      and jobs_db.in_locations("; ".join(where(p)), locations or [])]
+            for posting in wanted[:_READS_PER_BOARD]:
+                resp = await _paced_call(client, gate, "GET", f"{base}/position_details",
+                                         params={"position_id": posting["id"], "domain": domain, "hl": "en"})
+                if resp.status_code == 429:
+                    logger.info("Eightfold %s: refused as too many calls after %d postings", slug, len(jobs))
+                    break
+                if resp.status_code != 200:
+                    continue
+                info = resp.json().get("data") or {}
+                title = posting.get("name") or ""
+                jobs.append({
+                    "job_id": f"eightfold-{tenant}-{posting.get('displayJobId') or posting['id']}",
+                    "title": title,
+                    "company": company,
+                    "location": _place_and_setting(where(posting), posting.get("workLocationOption") or ""),
+                    "description": _html_to_text(info.get("jobDescription") or "")[:_DESC_MAX],
+                    "url": info.get("publicUrl")
+                           or f"https://{tenant}.eightfold.ai/careers/job/{posting['id']}?domain={domain}",
+                    "salary_min": None,
+                    "salary_max": None,
+                    "exposure_score": round(occupation_exposure(title), 3),
+                })
+        return jobs
+    except Exception as exc:
+        logger.debug("Eightfold %s failed: %s", slug, type(exc).__name__)
+        return jobs
+
+
+# Teamtailor: every posting is in <site>/jobs.rss, with its description and places (tt:location's city and
+# country). Read with patterns, not an XML parser: a page from the web is no place for entity expansion.
+_RSS_ITEM = re.compile(r"<item>(.*?)</item>", re.S)
+_TT_LOCATION = re.compile(r"<tt:location>(.*?)</tt:location>", re.S)
+_TT_REMOTE = {"hybrid": "hybrid", "fully": "remote", "temporary": "remote"}
+
+
+def _rss_text(item: str, tag: str) -> str:
+    """A tag's text in an RSS item: CDATA unwrapped and entities decoded."""
+    m = re.search(rf"<{tag}>(.*?)</{tag}>", item, re.S)
+    raw = (m.group(1) if m else "").strip()
+    raw = re.sub(r"^<!\[CDATA\[(.*)\]\]>$", r"\1", raw, flags=re.S)
+    return _html.unescape(raw).strip()
+
+
+def _teamtailor_jobs(raw: str, company: str, keywords: list[str]) -> list[dict]:
+    jobs = []
+    for item in _RSS_ITEM.findall(raw):
+        title = _rss_text(item, "title")
+        if not _title_matches_query(title, keywords):
+            continue
+        places = [", ".join(p for p in (_rss_text(loc, "tt:city"), _rss_text(loc, "tt:country")) if p)
+                  for loc in _TT_LOCATION.findall(item)]
+        link = _rss_text(item, "link")
+        jobs.append({
+            "job_id": f"teamtailor-{_rss_text(item, 'guid') or link}",
+            "title": title,
+            "company": company,
+            "location": _place_and_setting(places, _TT_REMOTE.get(_rss_text(item, "remoteStatus").lower(), "")),
+            "description": _html_to_text(_rss_text(item, "description"))[:_DESC_MAX],
+            "url": link,
+            "salary_min": None,
+            "salary_max": None,
+            "exposure_score": round(occupation_exposure(title), 3),
+        })
+    return jobs
+
+
+async def _fetch_teamtailor(slug: str, company: str, keywords: list[str]) -> list[dict]:
+    try:
+        async with http_client.async_client(timeout=10.0) as client:
+            resp = await client.get(f"https://{slug}/jobs.rss")
+            resp.raise_for_status()
+        return await asyncio.to_thread(_teamtailor_jobs, resp.text, company, keywords)
+    except Exception:
+        return []
+
+
 def listed_boards() -> list[tuple[str, str, str]]:
     """(ats, slug, company) of every board listed in this module."""
     lists = {"greenhouse": _GREENHOUSE_COMPANIES, "ashby": _ASHBY_COMPANIES, "lever": _LEVER_COMPANIES,
              "lever_eu": _LEVER_EU_COMPANIES, "workable": _WORKABLE_COMPANIES,
-             "smartrecruiters": _SMARTRECRUITERS_COMPANIES, "workday": _WORKDAY_BOARDS}
+             "smartrecruiters": _SMARTRECRUITERS_COMPANIES, "workday": _WORKDAY_BOARDS, "oracle": _ORACLE_BOARDS,
+             "eightfold": _EIGHTFOLD_BOARDS, "teamtailor": _TEAMTAILOR_BOARDS}
     return [(ats, slug, company) for ats, listed in lists.items() for slug, company in listed]
 
 
@@ -1134,10 +1353,10 @@ def _all_boards(found: list[tuple[str, str, str]] = (), gone: set[tuple[str, str
 async def _search_level2_ats_apis(queries: list[str], boards: dict[str, list[tuple[str, str]]] | None = None,
                                   locations: list[str] | None = None) -> list[dict]:
     """
-    Concurrently fetch from Greenhouse, Ashby, Lever, Workable, SmartRecruiters and Workday public APIs: `boards`
-    ({ats: [(slug, company)]}, see _all_boards), by default the listed ones. Filters each company's
-    listings by query keyword relevance in a single pass; Workday boards are searched with `queries` and read
-    in full only for postings that may be in `locations` (see _fetch_workday).
+    Concurrently fetch from Greenhouse, Ashby, Lever, Workable, SmartRecruiters, Teamtailor, Workday, Oracle and
+    Eightfold public APIs: `boards` ({ats: [(slug, company)]}, see _all_boards), by default the listed ones. Filters
+    each company's listings by query keyword relevance in a single pass; Workday, Oracle and Eightfold boards are
+    searched with `queries` and read in full only for postings that may be in `locations` (see _fetch_workday).
     """
     all_keywords = []
     for q in queries:
@@ -1150,14 +1369,17 @@ async def _search_level2_ats_apis(queries: list[str], boards: dict[str, list[tup
     async def fetch_lever_eu(slug: str, company: str, keywords: list[str]) -> list[dict]:
         return await _fetch_lever(slug, company, keywords, eu=True)
 
-    workday_gate = asyncio.Semaphore(_WORKDAY_CONCURRENCY)   # every Workday board's calls share it
+    searched = asyncio.Semaphore(_SEARCH_CONCURRENCY)   # every searched board's calls share it
 
-    async def fetch_workday(slug: str, company: str, keywords: list[str]) -> list[dict]:
-        return await _fetch_workday(slug, company, keywords, queries, locations, workday_gate)
+    def searching(fetch):   # a searched board's fetcher, given the queries, locations and shared gate
+        async def fetch_board(slug: str, company: str, keywords: list[str]) -> list[dict]:
+            return await fetch(slug, company, keywords, queries, locations, searched)
+        return fetch_board
 
     fetchers = {"greenhouse": _fetch_greenhouse, "ashby": _fetch_ashby, "lever": _fetch_lever,
                 "lever_eu": fetch_lever_eu, "workable": _fetch_workable, "smartrecruiters": _fetch_smartrecruiters,
-                "workday": fetch_workday}
+                "teamtailor": _fetch_teamtailor, "workday": searching(_fetch_workday),
+                "oracle": searching(_fetch_oracle), "eightfold": searching(_fetch_eightfold)}
     every = _all_boards() if boards is None else boards
     tasks = [fetchers[ats](slug, name, keywords) for ats, listed in every.items() if ats in fetchers
              for slug, name in listed]
@@ -1265,6 +1487,24 @@ async def check_board(client: httpx.AsyncClient, ats: str, slug: str) -> int | N
             return None
         resp.raise_for_status()
         return int(resp.json().get("total") or 0)
+    if ats in ("oracle", "eightfold", "teamtailor"):
+        if ats == "oracle":
+            host, site = slug.split("/")
+            resp = await client.get(_oracle_search_url(host, site, limit=1), headers={"Accept": "application/json"})
+        elif ats == "eightfold":
+            tenant, domain = slug.split("/")
+            resp = await client.get(f"https://{tenant}.eightfold.ai/api/pcsx/search",
+                                    params={"domain": domain, "query": "", "start": 0, "num": 1})
+        else:
+            resp = await client.get(f"https://{slug}/jobs.rss")
+        if resp.status_code == 404:
+            return None
+        resp.raise_for_status()
+        if ats == "oracle":
+            return int((resp.json().get("items") or [{}])[0].get("TotalJobsCount") or 0)
+        if ats == "eightfold":
+            return int((resp.json().get("data") or {}).get("count") or 0)
+        return len(_RSS_ITEM.findall(resp.text))
     resp = await client.get(_BOARD_API[ats].format(slug=slug))
     if resp.status_code == 404:
         return None
