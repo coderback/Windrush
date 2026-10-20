@@ -670,7 +670,8 @@ _LETTER_RUBRIC = (
     "the candidate through their own data (not a bare 'this is relevant'); it passes the swap test (another "
     "employer's name couldn't replace theirs); never 'I am writing to apply'. 2. EVIDENCE: two named projects, the "
     "first in precise detail with a real number matched to a requirement in the ad, the second a judgement call, "
-    "joined by the discipline both show. 3. HONEST GAP: one real requirement from the ad the candidate is lighter "
+    "joined by the discipline both show; neither is the hook's project when the candidate has three or more, and "
+    "no detail is told twice. 3. HONEST GAP: one real requirement from the ad the candidate is lighter "
     "on, stated plainly with what they do have and how they'd close it; no invented weakness, no self-deprecation "
     "(or, if nothing is missing, a third piece of evidence). 4. CLOSE: short; no perks or salary. 5. VOICE: first "
     "person, direct and specific, no hedging filler or clichés."
@@ -1233,6 +1234,8 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
             "worked on, a stated goal), never just that it is 'relevant'; end on why this is the place to start "
             "their career. NEVER begin with 'I am writing'. It MUST fail the "
             "'swap-the-company-name' test: if another employer's name could replace theirs, it is too generic. "
+            "Whenever the data has three or more projects, the hook's project is a different one from the two in "
+            "EVIDENCE, so no project or detail is told twice. "
             "(2) EVIDENCE ~110 words — start 'Two projects demonstrate the <quality this role needs> I'd bring to "
             "your <team/work>.' First, one named project in precise technical detail with a real number from the "
             "candidate data, matched to a requirement in the ad (use the ad's own terms). Then 'Separately, ...' a "
@@ -1263,8 +1266,8 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
                 f"CANDIDATE PERSONA (JSON): {json.dumps(_llm_persona(persona))}\n\n"
                 f"JOB: {job.get('title')} at {job.get('company')}\n"
                 f"DESCRIPTION: {job.get('description', '')[:2500]}"
-                + (f"\n\nMOST DOMAIN-RELEVANT PROJECTS for this role (draw the hook and the evidence from these, "
-                   f"in priority order): {', '.join(top_project_names)}" if top_project_names else "")
+                + (f"\n\nMOST DOMAIN-RELEVANT PROJECTS for this role, in priority order (one for the hook, a "
+                   f"different two for the evidence): {', '.join(top_project_names)}" if top_project_names else "")
                 + (f"\n\nCOMPANY RESEARCH (take the hook's fact about the employer from this and tie it to the "
                    f"candidate — do NOT restate it):\n{company_research}" if company_research else "")
             ),

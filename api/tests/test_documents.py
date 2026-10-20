@@ -496,6 +496,7 @@ def test_the_hook_says_why_the_employer_draws_the_candidate(llm):
                             "paragraphs": _letter_paragraphs(), "signoff": "Kind Regards,"})
     _cover_letter()
     assert "why that fact draws THIS candidate" in llm.prompts[0]
+    assert "the hook's project is a different one from the two in EVIDENCE" in llm.prompts[0]
 
 
 def test_c_plus_plus_stays_on_one_line():
