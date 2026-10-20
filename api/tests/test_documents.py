@@ -491,6 +491,13 @@ def test_the_letter_ends_on_the_candidates_closing_line(llm, close):
         "I'd welcome the chance to talk. Thank you for your time and consideration and I hope to hear from you soon.")
 
 
+def test_the_hook_says_why_the_employer_draws_the_candidate(llm):
+    llm.reply = json.dumps({"headline": "Computer Science Graduate", "salutation": "Dear Hiring Manager",
+                            "paragraphs": _letter_paragraphs(), "signoff": "Kind Regards,"})
+    _cover_letter()
+    assert "why that fact draws THIS candidate" in llm.prompts[0]
+
+
 def test_c_plus_plus_stays_on_one_line():
     html = doc_render.render_letter_html({"candidate_name": "Sam Okafor", "paragraphs": ["I write C++ daily."]})
     assert "C+⁠+ daily" in html                                     # a word joiner between the plus signs

@@ -216,6 +216,17 @@ def test_a_revision_in_the_wrong_shape_is_dropped(replies):
     assert _generate_cv()["experience"][0]["bullets"] == ["Cut API latency by 35% with Redis caching."]
 
 
+def test_the_most_relevant_role_keeps_a_third_bullet(replies):
+    bullets = ["Built a FastAPI service ingesting 40k readings a day into PostgreSQL.",
+               "Wrote tests for the ingestion service in Python.",
+               "Documented the service's API for the analytics team."]
+    model = _model_cv(bullets[0])
+    model["experience"][0]["bullets"] = bullets
+    replies.queue = [json.dumps(model)]
+    assert _generate_cv()["experience"][0]["bullets"] == bullets
+    assert "up to 3 for the ONE role" in replies.prompts[0]
+
+
 def test_a_letter_with_a_flagged_word_is_revised(replies):
     first = {"salutation": "Dear Hiring Manager,", "signoff": "Yours faithfully,", "headline": "Graduate",
              "paragraphs": ["I leverage FastAPI daily.", "Your team of 40 engineers ships daily."]}
