@@ -1052,6 +1052,19 @@ async def autopilot_dismiss(run_id: str, current_user: Annotated[auth.User, Depe
     return {"dismissed": run_id}
 
 
+@app.post("/autopilot/runs/{run_id}/code", status_code=202)
+async def autopilot_code(run_id: str, body: dict, current_user: Annotated[auth.User, Depends(auth.get_current_user)]):
+    """The code a job site emailed you, typed in for the form autopilot holds open for it: it's entered on the form
+    and the application sent. The only way a code reaches a form: Windrush never fetches one itself."""
+    run = _own_run(current_user.id, run_id)
+    code = re.sub(r"[\s-]+", "", str(body.get("code") or ""))
+    if not re.fullmatch(r"[A-Za-z0-9]{4,12}", code):
+        raise HTTPException(status_code=400, detail="That doesn't look like the code: letters and digits only.")
+    if run["outcome"] != "awaiting_code" or not autopilot.give_code(run_id, code):
+        raise HTTPException(status_code=409, detail="That form isn't waiting for a code any more.")
+    return {"accepted": True}
+
+
 @app.get("/autopilot/runs/{run_id}/pack")
 async def autopilot_pack(run_id: str, current_user: Annotated[auth.User, Depends(auth.get_current_user)]):
     """A run's handover pack, for applying yourself: a ZIP of its CV and cover letter under the names autopilot

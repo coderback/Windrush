@@ -142,6 +142,7 @@ class World:
         self.decided: dict[str, bool] = {}
         self.cv_paths: list[str] = []
         self.written: list[str] = []     # the documents written, as "cv" / "letter"
+        self.asks_for_codes: dict[str, bool] = {}   # company → whether the run could wait for an emailed code
 
 
 @pytest.fixture
@@ -172,10 +173,11 @@ def world(db, ollama, monkeypatch):
         return job
 
     async def apply_with_browser(job_url, persona, cover_letter, queue, frames, *, job_email, job_password, cv_path,
-                                 cover_letter_path, answerer, decide):
+                                 cover_letter_path, answerer, decide, ask_code=None):
         company = next(name for name, url in URLS.items() if url == job_url)
         w.filled.append(company)
         w.cv_paths.append(cv_path)
+        w.asks_for_codes[company] = ask_code is not None
         assert cover_letter.startswith("Dear Hiring Manager,") and os.path.exists(cover_letter_path)
         form = w.forms[company]
         yield {"action": "Step 1: filling", "done": False}
@@ -188,6 +190,14 @@ def world(db, ollama, monkeypatch):
         if send:
             final.update(submit_attempted=True, submitted=form["confirm"], submit_detail="Thanks for applying",
                          confirm_screenshot=JPEG, code_asked=form.get("code", ""))
+            tries = 0   # as browser_agent._finish_unattended: ask, enter, send again, up to three codes
+            while final["code_asked"] and ask_code is not None and tries < 3:
+                tries += 1
+                given = await ask_code(final["code_asked"], tries)
+                if not given:
+                    break
+                if given == form.get("right_code"):
+                    final.update(submitted=True, code_asked="")
         yield final
 
     monkeypatch.setattr(agent, "execute_tool", execute_tool)
@@ -195,6 +205,7 @@ def world(db, ollama, monkeypatch):
     monkeypatch.setattr(jobs_db, "ensure_full_description", ensure_full_description)
     monkeypatch.setattr(browser_agent, "apply_with_browser", apply_with_browser)
     monkeypatch.setattr(doc_check, "check_facts", lambda *a, **k: [])
+    monkeypatch.setattr(autopilot, "_CODE_WAIT_S", 0.05)   # nobody types a code in unless a test does
     jobs_db.add_jobs([make_job(i, f"Graduate Engineer {name}", name, url=url, description="Python")
                       for i, (name, url) in enumerate(URLS.items())])
     return w
@@ -273,16 +284,64 @@ def test_a_click_the_page_doesnt_confirm_is_not_counted_as_applied(ada, world):
     assert autopilot.sent_last_day(ada) == 3                              # still counts toward the limit
 
 
+ASKED = ("A verification code was sent to ada@example.com. To submit your application, enter the 8-character code to "
+         "confirm you're a human.")
+
+
 def test_a_site_that_emails_a_code_holds_the_application_for_the_user(ada, world):
-    asked = ("A verification code was sent to ada@example.com. To submit your application, enter the 8-character "
-             "code to confirm you're a human.")
-    world.forms["alpha"].update(confirm=False, code=asked)
-    _run(ada, live=True)
+    world.forms["alpha"].update(confirm=False, code=ASKED)
+    _run(ada, live=True)                            # nobody types the code in
     run = _runs(ada)["alpha"]
-    assert run["outcome"] == "needs_you" and "wasn't sent" in run["reasons"][0] and asked in run["reasons"][0]
+    assert run["outcome"] == "needs_you" and ASKED in run["reasons"][0]
+    assert "no code was typed in" in run["reasons"][0] and "wasn't sent" in run["reasons"][0]
     app = {a["company"]: a for a in tracker.list_applications(ada)}["alpha"]
     assert app["status"] == "Pending Review" and "asked for a code it emailed you" in app["notes"]
     assert autopilot.sent_last_day(ada) == 2                              # beta and gamma: alpha didn't go
+
+
+def test_a_code_typed_into_windrush_sends_the_form_held_open_for_it(ada, world, monkeypatch):
+    monkeypatch.setattr(autopilot, "_CODE_WAIT_S", 5)
+    world.forms["alpha"].update(confirm=False, code=ASKED, right_code="AB12CD34")
+    autopilot.save_settings(ada, {"live": True})
+    seen: list[dict] = []
+
+    async def type_in(code: str, after: asyncio.Future | None = None) -> asyncio.Future:
+        # Wait for the form to be held open for a code (a new wait, not the one answered last), then type it in.
+        while not autopilot._codes or next(iter(autopilot._codes.values())) is after:
+            await asyncio.sleep(0.01)
+        run_id, waiting = next(iter(autopilot._codes.items()))
+        seen.append(tracker.get_autopilot_run(ada, run_id))
+        assert autopilot.give_code(run_id, code)
+        return waiting
+
+    async def main():
+        task = asyncio.create_task(autopilot.run(ada))
+        first = await asyncio.wait_for(type_in("WRONG123"), 5)      # a code that doesn't take: it asks again
+        await asyncio.wait_for(type_in("AB12CD34", after=first), 5)
+        return await task
+    asyncio.run(main())
+
+    assert [r["outcome"] for r in seen] == ["awaiting_code", "awaiting_code"]
+    assert ASKED in seen[0]["reasons"][0] and "Type it in here within" in seen[0]["reasons"][0]
+    assert "The last code didn't work" in seen[1]["reasons"][0]
+    run = _runs(ada)["alpha"]
+    assert run["outcome"] == "submitted" and "Sent after you typed in the code" in run["notes"]
+    assert {a["company"]: a["status"] for a in tracker.list_applications(ada)}["alpha"] == "Applied"
+    assert autopilot._codes == {}
+
+
+def test_a_practice_run_never_waits_for_a_code(ada, world):
+    _run(ada)
+    assert world.asks_for_codes == {"alpha": False, "beta": False, "gamma": False}
+    _run(ada, live=True)
+    assert world.asks_for_codes == {"alpha": True, "beta": True, "gamma": True}
+
+
+def test_a_restart_while_a_form_waits_for_its_code_holds_it(ada, world):
+    run_id = tracker.start_autopilot_run(ada, {"id": "j1", "title": "Engineer", "company": "alpha"}, "awaiting_code")
+    tracker.finish_stale_autopilot_runs()
+    run = tracker.get_autopilot_run(ada, run_id)
+    assert run["outcome"] == "needs_you" and "restarted while the form waited for the code" in run["reasons"][0]
 
 
 def test_poor_fits_and_stretches_are_skipped_without_filling(ada, world):
@@ -402,6 +461,23 @@ def test_a_handover_pack_holds_what_applying_by_hand_needs(ada, world, client_fo
     assert "for a form that wants it pasted:\n\nDear Hiring Manager,\n\nI'd like to join." in sheet
 
 
+def test_the_code_endpoint_hands_a_typed_code_to_the_waiting_form(ada, world, client_for, monkeypatch):
+    run_id = tracker.start_autopilot_run(ada, {"id": "j1", "title": "Engineer", "company": "alpha"}, "awaiting_code")
+    handed: list[tuple[str, str]] = []
+    monkeypatch.setattr(autopilot, "give_code", lambda rid, code: handed.append((rid, code)) or True)
+    client = client_for(ada)
+    assert client.post(f"/autopilot/runs/{run_id}/code", json={"code": " ab12-cd34 "}).json() == {"accepted": True}
+    assert handed == [(run_id, "ab12cd34")]
+    assert client.post(f"/autopilot/runs/{run_id}/code", json={"code": "12"}).status_code == 400
+    assert client.post(f"/autopilot/runs/{run_id}/code", json={"code": "<script>"}).status_code == 400
+
+    monkeypatch.setattr(autopilot, "give_code", lambda rid, code: False)   # its wait ran out
+    gone = client.post(f"/autopilot/runs/{run_id}/code", json={"code": "AB12CD34"})
+    assert gone.status_code == 409 and "isn't waiting" in gone.json()["detail"]
+    tracker.update_autopilot_run(run_id, user_id=ada, outcome="needs_you")
+    assert client.post(f"/autopilot/runs/{run_id}/code", json={"code": "AB12CD34"}).status_code == 409
+
+
 def test_a_handover_pack_needs_the_runs_documents(ada, world, client_for):
     asyncio.run(autopilot.run(ada))
     run = _runs(ada)["alpha"]
@@ -419,6 +495,7 @@ def test_another_users_runs_are_out_of_reach(ada, world, client_for, make_user):
         assert other.get(path).status_code == 404
     assert other.post(f"/autopilot/runs/{run_id}/dismiss").status_code == 404
     assert other.post(f"/autopilot/runs/{run_id}/retry").status_code == 404
+    assert other.post(f"/autopilot/runs/{run_id}/code", json={"code": "AB12CD34"}).status_code == 404
 
 
 def test_one_run_at_a_time(ada, world, client_for, monkeypatch):

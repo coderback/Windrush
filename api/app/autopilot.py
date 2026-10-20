@@ -226,6 +226,17 @@ class _Run:
 
 _runs: dict[str, _Run] = {}           # user id → the run in progress
 _last: dict[str, dict] = {}           # user id → how the last run ended
+_codes: dict[str, asyncio.Future] = {}   # run id → the code the user types in, while its form waits for one
+_CODE_WAIT_S = 10 * 60                # how long a form held open for an emailed code waits for the user's
+
+
+def give_code(run_id: str, code: str) -> bool:
+    """Hand the code the user typed into Windrush to the form waiting for it; False when none is waiting."""
+    waiting = _codes.get(run_id)
+    if waiting is None or waiting.done():
+        return False
+    waiting.set_result(code)
+    return True
 
 
 class _Stop(Exception):
@@ -368,6 +379,7 @@ async def _apply(state: _Run, user_id: str, job: dict, verdict: dict, cfg: dict,
     run = tracker.get_autopilot_run(user_id, run_id)
     state.job = f"{job.get('title', '')} at {job.get('company', '')}"
     held: list[str] = []
+    given: list[str] = []   # codes the user typed in for this form
     final: dict = {}
     questions: list[dict] = []
     try:
@@ -395,12 +407,32 @@ async def _apply(state: _Run, user_id: str, job: dict, verdict: dict, cfg: dict,
                 held.append(f"Your limit of {cfg['daily_cap']} a day was reached before this one could go.")
             return live and not held
 
+        async def ask_code(asked: str, attempt: int) -> str | None:
+            # The site emailed the user a code to confirm a person is applying: the form waits, open, for them to
+            # type it into Windrush (give_code). It never comes from anywhere else (see browser_agent.CodeAsker).
+            again = " The last code didn't work: check it's the newest one." if attempt > 1 else ""
+            tracker.update_autopilot_run(run_id, user_id=user_id, outcome="awaiting_code", reasons=[
+                f"The job site emailed you a code: “{asked}”{again} Type it in here within {_CODE_WAIT_S // 60} "
+                f"minutes and Windrush will enter it and send the application."[:600]])
+            waiting = asyncio.get_running_loop().create_future()
+            _codes[run_id] = waiting
+            try:
+                code = await asyncio.wait_for(waiting, _CODE_WAIT_S)
+            except asyncio.TimeoutError:
+                return None
+            finally:
+                _codes.pop(run_id, None)
+            given.append(code)
+            tracker.update_autopilot_run(run_id, user_id=user_id, outcome="running", reasons=[])
+            return code
+
         state.step = "Filling in the form"
         core = persona.get("core_info") or {}
         async with aclosing(browser_agent.apply_with_browser(
             job["url"], persona, text, asyncio.Queue(), None,
             job_email=core.get("job_email", ""), job_password=tracker.get_job_password(user_id),
             cv_path=_pdf(cv_doc_id), cover_letter_path=_pdf(letter_doc_id), answerer=answerer, decide=decide,
+            ask_code=ask_code if live else None,
         )) as steps:
             async for step in steps:
                 if step.get("done"):
@@ -425,10 +457,12 @@ async def _apply(state: _Run, user_id: str, job: dict, verdict: dict, cfg: dict,
         outcome, reasons = "submitted", []
     elif final.get("code_asked"):
         # The site emailed the candidate a code to prove a person is applying (Catapult, on Greenhouse: "enter the
-        # 8-character code to confirm you're a human"). That check is theirs to pass: nothing went, so it waits.
-        outcome, reasons = "needs_you", [f"The job site emailed you a code to confirm a person is applying, so this "
-                                         f"wasn't sent. It says: “{final['code_asked']}” Apply on the job's page "
-                                         f"with this run's CV and cover letter."[:600]]
+        # 8-character code to confirm you're a human"), and no code they gave got it through: nothing went.
+        why = ("the code you typed in didn't take" if given else
+               f"no code was typed in within {_CODE_WAIT_S // 60} minutes")
+        outcome, reasons = "needs_you", [f"The job site emailed you a code to confirm a person is applying, and "
+                                         f"{why}, so this wasn't sent. It says: “{final['code_asked']}” Apply on the "
+                                         f"job's page with this run's handover pack."[:600]]
     elif final.get("submit_attempted"):
         detail = final.get("submit_detail") or "no confirmation shown"
         outcome, reasons = "unconfirmed", [f"The submit button was clicked, but the page didn't confirm it ({detail}). "
@@ -457,6 +491,8 @@ async def _apply(state: _Run, user_id: str, job: dict, verdict: dict, cfg: dict,
             tracker.set_application_questions(app_id, questions, user_id=user_id)
     reused = (f"Used the CV and cover letter from the {'practice ' if earlier['practice'] else ''}run of "
               f"{earlier['updated_at'][:10]}. " if earlier else "")
+    if given and outcome == "submitted":
+        reused += "Sent after you typed in the code the job site emailed you. "
     tracker.update_autopilot_run(run_id, user_id=user_id, outcome=outcome, reasons=reasons, questions=questions,
                                  notes=(reused + str(final.get("notes") or ""))[:2000], application_id=app_id)
     logger.info("autopilot: %s -> %s (%d reasons)", state.job, outcome, len(reasons))

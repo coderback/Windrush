@@ -1352,6 +1352,77 @@ async def _code_asked(browser_session) -> str:
         return ""
 
 
+# Where the emailed code goes: one box per character (Greenhouse: eight boxes of one character), else one field whose
+# label, name or placeholder says code. Marks them data-windrush-code=0..n-1 and returns how many it found.
+_CODE_BOXES_JS = r"""() => {
+  const docs = [document];
+  for (const frame of document.querySelectorAll('iframe')) {
+    try { if (frame.contentDocument) docs.push(frame.contentDocument); } catch (e) {}
+  }
+  const skip = ['hidden', 'checkbox', 'radio', 'file', 'submit', 'button', 'email', 'password'];
+  const inputs = [];
+  for (const doc of docs) {
+    for (const el of doc.querySelectorAll('input')) {
+      const style = doc.defaultView.getComputedStyle(el);
+      const box = el.getBoundingClientRect();
+      if (!skip.includes(el.type) && !el.disabled && style.display !== 'none' && style.visibility !== 'hidden'
+          && (box.width > 0 || box.height > 0)) inputs.push(el);
+    }
+  }
+  let boxes = inputs.filter((el) => el.maxLength === 1);
+  if (boxes.length < 4) {
+    const says = (el) => /code/i.test([el.name, el.id, el.placeholder, el.getAttribute('aria-label') || '',
+      el.getAttribute('autocomplete') || '', ...[...(el.labels || [])].map((l) => l.textContent)].join(' '));
+    boxes = inputs.filter(says).slice(0, 1);
+  }
+  boxes.forEach((el, i) => el.setAttribute('data-windrush-code', String(i)));
+  return JSON.stringify(boxes.length);
+}"""
+
+# Focus marked box __INDEX__ and select what it holds, so the next insertText replaces it.
+_FOCUS_CODE_BOX_JS = r"""() => {
+  const docs = [document];
+  for (const frame of document.querySelectorAll('iframe')) {
+    try { if (frame.contentDocument) docs.push(frame.contentDocument); } catch (e) {}
+  }
+  for (const doc of docs) {
+    const el = doc.querySelector('[data-windrush-code="__INDEX__"]');
+    if (el) { el.focus(); if (el.select) el.select(); return JSON.stringify(true); }
+  }
+  return JSON.stringify(false);
+}"""
+
+# What the marked boxes hold, in order.
+_CODE_TYPED_JS = r"""() => {
+  const docs = [document];
+  for (const frame of document.querySelectorAll('iframe')) {
+    try { if (frame.contentDocument) docs.push(frame.contentDocument); } catch (e) {}
+  }
+  const boxes = docs.flatMap((doc) => [...doc.querySelectorAll('[data-windrush-code]')]);
+  boxes.sort((a, b) => Number(a.dataset.windrushCode) - Number(b.dataset.windrushCode));
+  return JSON.stringify(boxes.map((el) => el.value).join(''));
+}"""
+
+
+async def _enter_code(browser_session, code: str) -> bool:
+    """Type the code the user gave into the page's code box(es), one character a box when there's a box each
+    (insertText, so React-controlled boxes take it like typing). True when the boxes then hold the code."""
+    try:
+        page, cdp_session = await _focused_page(browser_session)
+        count = json.loads(await page.evaluate(_CODE_BOXES_JS))
+        if not count:
+            return False
+        parts = list(code) if count > 1 else [code]
+        for i, part in enumerate(parts[:count]):
+            if json.loads(await page.evaluate(_FOCUS_CODE_BOX_JS.replace("__INDEX__", str(i)))) is not True:
+                return False
+            await _insert_text(browser_session, cdp_session, part)
+        return str(json.loads(await page.evaluate(_CODE_TYPED_JS))).upper() == code.upper()
+    except Exception as exc:
+        logger.warning("couldn't enter the code: %s", exc)
+        return False
+
+
 async def _submit_button_shown(browser_session) -> bool:
     """Whether the focused page shows the button that sends the application; False if it can't be read."""
     try:
@@ -1513,15 +1584,23 @@ def _with_empty_fields(notes: str, empty: list[str], left_blank: list[str] = (),
 # {ready, error, notes, questions, empty} — and says whether to send it. Nobody reviews it in between.
 Decider = Callable[[dict], Awaitable[bool]]
 
+# When the send stops at a page wanting a code the site emailed the candidate, `ask_code` gets that page's line and
+# the attempt (1, 2, …) and returns the code the user typed into Windrush, or None when none came. The code always
+# comes from the user: the check is there to confirm a person is applying, so Windrush never fetches it itself,
+# not even from a connected Gmail inbox.
+CodeAsker = Callable[[str, int], Awaitable[str | None]]
+_MAX_CODE_TRIES = 3
+
 
 async def _finish_unattended(decide: Decider, filled: dict, browser_session, llm, sensitive_data: dict | None,
-                             secret: str) -> AsyncGenerator[dict, None]:
+                             secret: str, ask_code: CodeAsker | None = None) -> AsyncGenerator[dict, None]:
     """
     Send the filled form if `decide` says to, else leave it. The last event is done=True and carries the
     fill's results plus `form_screenshot` (the filled form, before anything is sent); when the submit agent
     ran, also `submit_attempted`, `submitted` (only if the page confirmed it), `submit_detail`, `code_asked` (the
-    page's request for a code the site emailed the candidate, when it made one instead of confirming) and
-    `confirm_screenshot` (the page after the click).
+    page's request for a code the site emailed the candidate, when it still wants one) and `confirm_screenshot`
+    (the page after the click). With `ask_code`, a page that wants such a code waits for the user's: up to
+    _MAX_CODE_TRIES codes are entered and the form sent again.
     """
     final = {"action": "Filled in; not sent", "screenshot": None, "blocked": False, "reason": None, "done": True,
              "submitted": False, "submit_attempted": False, **filled,
@@ -1536,6 +1615,21 @@ async def _finish_unattended(decide: Decider, filled: dict, browser_session, llm
                "done": False}
         ok, detail = await _submit_with_agent(llm, browser_session, sensitive_data, secret)
         code = "" if ok else _redact(await _code_asked(browser_session), secret)
+        tries = 0
+        while code and ask_code is not None and tries < _MAX_CODE_TRIES:
+            tries += 1
+            yield {"action": "Waiting for the code the site emailed you", "screenshot": None, "blocked": False,
+                   "reason": None, "done": False}
+            given = await ask_code(code, tries)
+            if not given:
+                break
+            yield {"action": "Entering your code and sending the application…", "screenshot": None, "blocked": False,
+                   "reason": None, "done": False}
+            if not await _enter_code(browser_session, given):
+                detail = "Couldn't find where the code goes on the page."
+                break
+            ok, detail = await _submit_with_agent(llm, browser_session, sensitive_data, secret)
+            code = "" if ok else _redact(await _code_asked(browser_session), secret)
         final.update(submit_attempted=True, submitted=ok, submit_detail=detail, code_asked=code,
                      confirm_screenshot=await _screenshot_b64(browser_session),
                      action="Application submitted" if ok else
@@ -1555,6 +1649,7 @@ async def apply_with_browser(
     cover_letter_path: str = "",
     answerer: Answerer | None = None,
     decide: Decider | None = None,
+    ask_code: CodeAsker | None = None,
 ) -> AsyncGenerator[dict, None]:
     """
     Async generator: the browser-use agent fills the application, then the user reviews it and
@@ -1562,7 +1657,8 @@ async def apply_with_browser(
     under the candidate's name ("Ada_Lovelace_CV.pdf"), not their stored ids. `answerer` answers the
     form's questions (answers.answer_questions); without one, every question is left for the user.
     With `decide` the run is unattended: there is no review, and `decide` says whether the filled form is
-    sent (see _finish_unattended for what the last event then carries).
+    sent (see _finish_unattended for what the last event then carries); `ask_code` gets the user's code when
+    the site emails one before it takes the application (see CodeAsker).
     Yields dicts:
       { action, screenshot (base64|None), blocked (bool), reason (str|None), done (bool),
         interactive (bool, optional), submitted (bool, only on the final done event),
@@ -1694,7 +1790,8 @@ async def apply_with_browser(
             checked = _with_empty_fields("" if ready else summary, empty, left_blank, self_answered)
             filled = {"ready": ready, "error": agent_error, "notes": checked[:_MAX_NOTES_CHARS],
                       "questions": questions, "empty": empty, "self_answered": self_answered}
-            async for step in _finish_unattended(decide, filled, browser_session, llm, sensitive_data, job_password):
+            async for step in _finish_unattended(decide, filled, browser_session, llm, sensitive_data, job_password,
+                                                 ask_code):
                 yield step
             return
 

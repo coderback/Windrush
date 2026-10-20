@@ -262,7 +262,8 @@ export interface AutopilotStatus {
 }
 
 export type AutopilotOutcome =
-  | "running" | "submitted" | "unconfirmed" | "ready" | "needs_you" | "skipped" | "failed" | "dismissed";
+  | "running" | "submitted" | "unconfirmed" | "ready" | "needs_you" | "awaiting_code" | "skipped" | "failed"
+  | "dismissed";
 
 export interface AutopilotRun {
   id: string;

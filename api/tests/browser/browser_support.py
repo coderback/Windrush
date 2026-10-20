@@ -76,8 +76,10 @@ class ScriptedLLM:
     name = property(lambda self: "scripted")
     model_name = property(lambda self: "scripted")
 
-    def __init__(self, fill_success: bool = True, submit_success: bool = True):
-        self.fill_success, self.submit_success = fill_success, submit_success
+    def __init__(self, fill_success: bool = True, submit_success: bool | list[bool] = True):
+        # submit_success as a list: one result per submit agent, in order (the last repeats).
+        self.fill_success = fill_success
+        self.submit_results = list(submit_success) if isinstance(submit_success, list) else [submit_success]
         self.tasks: list[str] = []
         self.seen: list[str] = []
 
@@ -88,7 +90,8 @@ class ScriptedLLM:
     def next_action(self, text: str) -> list[dict]:
         is_submit = "candidate has reviewed" in text
         self.tasks.append("submit" if is_submit else "fill")
-        ok = self.submit_success if is_submit else self.fill_success
+        ok = (self.submit_results.pop(0) if len(self.submit_results) > 1 else self.submit_results[0]) if is_submit \
+            else self.fill_success
         return [{"done": {"text": "submit agent ran" if is_submit else "Filled every field", "success": ok}}]
 
     async def ainvoke(self, messages, output_format=None, **kwargs):

@@ -113,7 +113,8 @@ export default function Sidebar() {
 
   const waiting = (apps.data ?? []).filter((a) => a.status === "Pending Review").length;
   const autopilot = useResource<AutopilotRun[]>("/api/autopilot/runs");
-  const held = (autopilot.data ?? []).filter((r) => r.outcome === "needs_you" || r.outcome === "unconfirmed").length;
+  const held = (autopilot.data ?? []).filter((r) =>
+    r.outcome === "needs_you" || r.outcome === "unconfirmed" || r.outcome === "awaiting_code").length;
   const emails = useResource<EmailEvent[]>("/api/gmail/events");
   const emailsWaiting = (emails.data ?? []).filter((e) => e.decision === "suggested" || e.decision === "unmatched").length;
   const suggestions = useResource<ProfileSuggestions>("/api/profile/suggestions");

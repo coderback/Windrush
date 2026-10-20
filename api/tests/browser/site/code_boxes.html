@@ -1,0 +1,22 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Test Application Form, wanting the emailed code</title></head>
+<body style="margin:0;font-family:sans-serif">
+<!-- Greenhouse after the first submit: eight one-character boxes for the emailed code, each moving on to the next. -->
+<form id="f" onsubmit="event.preventDefault();">
+  <p style="position:absolute;left:20px;top:40px;width:600px">A verification code was sent to ada@example.com. To submit your application, enter the 8-character code to confirm you're a human.</p>
+  <label style="position:absolute;left:20px;top:110px">Security code</label>
+  <div id="boxes" style="position:absolute;left:20px;top:140px"></div>
+  <button id="submit" type="submit" style="position:absolute;left:20px;top:220px;width:200px;height:40px">Submit application</button>
+</form>
+<script>
+  const holder = document.getElementById("boxes");
+  for (let i = 0; i < 8; i++) {
+    const box = document.createElement("input");
+    box.maxLength = 1;
+    box.setAttribute("aria-label", `Security code character ${i + 1}`);
+    box.style.cssText = "width:30px;height:36px;margin-right:6px;text-align:center";
+    box.addEventListener("input", () => { if (box.value && box.nextElementSibling) box.nextElementSibling.focus(); });
+    holder.appendChild(box);
+  }
+</script>
+</body></html>
