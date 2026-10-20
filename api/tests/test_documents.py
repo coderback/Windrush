@@ -584,6 +584,17 @@ def test_the_graduate_cv_is_one_page_in_the_designs_type_with_live_links(pdf_dir
 
 
 @needs_weasyprint
+def test_a_parser_reading_the_cv_in_order_finds_each_bullet_under_its_role(pdf_dir):
+    # A parser reads the PDF in the order it was drawn. A positioned bullet marker was drawn after the page's other
+    # text, so every experience bullet came after the Skills section, cut off from its role.
+    cv = agent._persona_to_cvdoc(GRADUATE) | {"seniority": "junior"}
+    text = " ".join(_weasy("cv", cv)[0].get_text().split())
+    order = ["Software Engineering Intern", "Built a FastAPI service that ingests 40k", "Pantry Planner",
+             "Skills & Technical Proficiency"]
+    assert [text.index(s) for s in order] == sorted(text.index(s) for s in order)
+
+
+@needs_weasyprint
 def test_a_full_graduate_cv_fits_one_page(pdf_dir):
     # Everything the tailoring prompt allows a junior: a 3-sentence summary, three roles with 2 bullets of
     # ~35 words, 4 projects of ~60 words with 8 technologies, 35 skills in 5 rows, 3 certificates.

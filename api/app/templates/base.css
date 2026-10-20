@@ -73,8 +73,11 @@ body.cv {
 .cv-entry-title { font-weight: 700; }
 .cv-dates { flex-shrink: 0; margin-right: 44pt; font-size: 9pt; color: #595959; white-space: nowrap; }
 .cv-bullets { margin: 0; padding: 0 0 0 36pt; list-style: none; }
-.cv-bullets li { position: relative; margin: 0; }
-.cv-bullets li::before { content: "•"; position: absolute; left: -18pt; font-family: Arial, "Liberation Sans", sans-serif; }
+.cv-bullets li { margin: 0; }
+/* The bullet sits in the line, hung into the list's indent, rather than positioned: WeasyPrint draws positioned
+   boxes after the page's other text, so a parser reading the PDF in order found every bullet after Skills. */
+.cv-bullets li::before { content: "•"; display: inline-block; width: 18pt; margin-left: -18pt; line-height: 1;
+                         font-family: Arial, "Liberation Sans", sans-serif; }
 .cv-muted { font-size: 9pt; color: #595959; }
 
 /* ── Fit to page ────────────────────────────────────────────────────── */
