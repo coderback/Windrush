@@ -480,8 +480,8 @@ def test_unattended_run_sends_only_when_decide_says_so(ba, site, monkeypatch):
     llm, shown, events = run(send=True)
     final = events[-1]
     assert not any(e.get("interactive") for e in events)                 # nobody is asked anything
-    assert shown == [{"ready": True, "error": "", "notes": "Filled every field", "questions": [], "empty": [],
-                      "self_answered": []}]
+    # A filled form's notes are what Windrush checked on it, not the agent's own summary ("Filled every field").
+    assert shown == [{"ready": True, "error": "", "notes": "", "questions": [], "empty": [], "self_answered": []}]
     assert llm.tasks == ["fill", "submit"]
     assert final["done"] and final["submitted"] and final["submit_attempted"]
     assert _is_jpeg(final["form_screenshot"]) and _is_jpeg(final["confirm_screenshot"])
@@ -491,6 +491,25 @@ def test_unattended_run_sends_only_when_decide_says_so(ba, site, monkeypatch):
     assert llm.tasks == ["fill"]                                          # the submit agent never ran
     assert final["done"] and not final["submitted"] and not final["submit_attempted"]
     assert _is_jpeg(final["form_screenshot"]) and "confirm_screenshot" not in final
+    assert_no_chromium_left()
+
+
+@pytest.mark.parametrize("page, asked", [
+    ("code.html", "A verification code was sent to ada@example.com. To submit your application, enter the "
+                  "8-character code to confirm you're a human."),
+    ("form.html", ""),                                                    # unconfirmed, but no code asked for
+])
+def test_a_submit_the_site_answers_with_an_emailed_code_is_reported(ba, site, monkeypatch, page, asked):
+    llm = ScriptedLLM(submit_success=False)
+    monkeypatch.setattr(ba, "_make_browser_llm", lambda: llm)
+
+    async def flow():
+        return [event async for event in ba.apply_with_browser(
+            f"{site}/{page}", {"core_info": {"first_name": "Ada"}}, "", asyncio.Queue(),
+            decide=lambda filled: asyncio.sleep(0, result=True))]
+    final = asyncio.run(flow())[-1]
+    assert final["submit_attempted"] and not final["submitted"] and final["code_asked"] == asked
+    assert final["action"] == ("The site asked for a code it emailed you" if asked else "Couldn't confirm the submission")
     assert_no_chromium_left()
 
 

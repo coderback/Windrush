@@ -1319,6 +1319,39 @@ _SUBMIT_SHOWN_JS = r"""() => {
 }"""
 
 
+# After a submit the page didn't confirm: the site's request for a code it emailed the candidate (Greenhouse: "A
+# verification code was sent to … enter the 8-character code to confirm you're a human"). The line that says it was
+# sent, else one that asks for such a code; "" when there's neither.
+_CODE_ASKED_JS = r"""() => {
+  const docs = [document];
+  for (const frame of document.querySelectorAll('iframe')) {
+    try { if (frame.contentDocument) docs.push(frame.contentDocument); } catch (e) {}
+  }
+  const sent = /\bcode\b[^.]*\b(sent|emailed)\b|\b(sent|emailed)\b[^.]*\bcode\b/i;
+  const asks = /\b(verification|security|confirmation|one[- ]time) code\b|confirm you'?re (a )?human/i;
+  let found = '';
+  for (const doc of docs) {
+    const text = (doc.body && doc.body.innerText) || '';
+    for (const line of text.split(/\n+/).map(l => l.trim()).filter(Boolean)) {
+      if (sent.test(line)) return JSON.stringify(line.slice(0, 300));
+      if (!found && asks.test(line)) found = line.slice(0, 300);
+    }
+  }
+  return JSON.stringify(found);
+}"""
+
+
+async def _code_asked(browser_session) -> str:
+    """The page's request for a code the site emailed the candidate (see _CODE_ASKED_JS); "" if none or unreadable."""
+    try:
+        page, _ = await _focused_page(browser_session)
+        asked = json.loads(await page.evaluate(_CODE_ASKED_JS))
+        return asked if isinstance(asked, str) else ""
+    except Exception as exc:
+        logger.debug("code check failed: %s", exc)
+        return ""
+
+
 async def _submit_button_shown(browser_session) -> bool:
     """Whether the focused page shows the button that sends the application; False if it can't be read."""
     try:
@@ -1486,7 +1519,8 @@ async def _finish_unattended(decide: Decider, filled: dict, browser_session, llm
     """
     Send the filled form if `decide` says to, else leave it. The last event is done=True and carries the
     fill's results plus `form_screenshot` (the filled form, before anything is sent); when the submit agent
-    ran, also `submit_attempted`, `submitted` (only if the page confirmed it), `submit_detail` and
+    ran, also `submit_attempted`, `submitted` (only if the page confirmed it), `submit_detail`, `code_asked` (the
+    page's request for a code the site emailed the candidate, when it made one instead of confirming) and
     `confirm_screenshot` (the page after the click).
     """
     final = {"action": "Filled in; not sent", "screenshot": None, "blocked": False, "reason": None, "done": True,
@@ -1501,9 +1535,11 @@ async def _finish_unattended(decide: Decider, filled: dict, browser_session, llm
         yield {"action": "Submitting the application…", "screenshot": None, "blocked": False, "reason": None,
                "done": False}
         ok, detail = await _submit_with_agent(llm, browser_session, sensitive_data, secret)
-        final.update(submit_attempted=True, submitted=ok, submit_detail=detail,
+        code = "" if ok else _redact(await _code_asked(browser_session), secret)
+        final.update(submit_attempted=True, submitted=ok, submit_detail=detail, code_asked=code,
                      confirm_screenshot=await _screenshot_b64(browser_session),
-                     action="Application submitted" if ok else "Couldn't confirm the submission")
+                     action="Application submitted" if ok else
+                     "The site asked for a code it emailed you" if code else "Couldn't confirm the submission")
     yield final
 
 
@@ -1651,8 +1687,13 @@ async def apply_with_browser(
         notes = _with_empty_fields(summary, empty, left_blank, self_answered)[:_MAX_NOTES_CHARS]
 
         if decide is not None:
-            filled = {"ready": ready, "error": agent_error, "notes": notes, "questions": questions, "empty": empty,
-                      "self_answered": self_answered}
+            # The agent's summary is its own account, written as it stopped, and can disagree with the form as it ends
+            # up: Catapult's said the consent box was left unticked, yet the form showed it ticked from the saved
+            # answer. Unattended, nobody checks it against the page, so the notes keep what the final form shows; the
+            # summary stays only when the agent couldn't finish, to say why.
+            checked = _with_empty_fields("" if ready else summary, empty, left_blank, self_answered)
+            filled = {"ready": ready, "error": agent_error, "notes": checked[:_MAX_NOTES_CHARS],
+                      "questions": questions, "empty": empty, "self_answered": self_answered}
             async for step in _finish_unattended(decide, filled, browser_session, llm, sensitive_data, job_password):
                 yield step
             return
