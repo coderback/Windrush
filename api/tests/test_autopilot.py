@@ -185,7 +185,7 @@ def world(db, ollama, monkeypatch):
         w.decided[company] = send
         if send:
             final.update(submit_attempted=True, submitted=form["confirm"], submit_detail="Thanks for applying",
-                         confirm_screenshot=JPEG)
+                         confirm_screenshot=JPEG, code_asked=form.get("code", ""))
         yield final
 
     monkeypatch.setattr(agent, "execute_tool", execute_tool)
@@ -269,6 +269,18 @@ def test_a_click_the_page_doesnt_confirm_is_not_counted_as_applied(ada, world):
     assert run["outcome"] == "unconfirmed" and "Check whether it went through" in run["reasons"][0]
     assert {a["company"]: a["status"] for a in tracker.list_applications(ada)}["alpha"] == "Pending Review"
     assert autopilot.sent_last_day(ada) == 3                              # still counts toward the limit
+
+
+def test_a_site_that_emails_a_code_holds_the_application_for_the_user(ada, world):
+    asked = ("A verification code was sent to ada@example.com. To submit your application, enter the 8-character "
+             "code to confirm you're a human.")
+    world.forms["alpha"].update(confirm=False, code=asked)
+    _run(ada, live=True)
+    run = _runs(ada)["alpha"]
+    assert run["outcome"] == "needs_you" and "wasn't sent" in run["reasons"][0] and asked in run["reasons"][0]
+    app = {a["company"]: a for a in tracker.list_applications(ada)}["alpha"]
+    assert app["status"] == "Pending Review" and "asked for a code it emailed you" in app["notes"]
+    assert autopilot.sent_last_day(ada) == 2                              # beta and gamma: alpha didn't go
 
 
 def test_poor_fits_and_stretches_are_skipped_without_filling(ada, world):

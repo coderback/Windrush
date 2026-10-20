@@ -1,0 +1,13 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Test Application Form, after submit</title></head>
+<body style="margin:0;font-family:sans-serif">
+<!-- Greenhouse after the submit click on Catapult's form: it emails a code instead of confirming. -->
+<form id="f" onsubmit="event.preventDefault();">
+  <label style="position:absolute;left:20px;top:105px">Full name</label>
+  <input id="name" name="name" style="position:absolute;left:100px;top:100px;width:300px;height:30px">
+  <p id="code-sent" style="position:absolute;left:20px;top:160px;width:600px">A verification code was sent to ada@example.com. To submit your application, enter the 8-character code to confirm you're a human.</p>
+  <label style="position:absolute;left:20px;top:230px">Security code</label>
+  <input id="code" name="code" style="position:absolute;left:140px;top:225px;width:200px;height:30px">
+  <button id="submit" type="submit" style="position:absolute;left:100px;top:300px;width:200px;height:40px">Submit application</button>
+</form>
+</body></html>

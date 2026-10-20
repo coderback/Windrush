@@ -387,6 +387,12 @@ async def _apply(state: _Run, user_id: str, job: dict, verdict: dict, cfg: dict,
     _keep_screenshot(run, "confirm", final.get("confirm_screenshot") or "")
     if final.get("submitted"):
         outcome, reasons = "submitted", []
+    elif final.get("code_asked"):
+        # The site emailed the candidate a code to prove a person is applying (Catapult, on Greenhouse: "enter the
+        # 8-character code to confirm you're a human"). That check is theirs to pass: nothing went, so it waits.
+        outcome, reasons = "needs_you", [f"The job site emailed you a code to confirm a person is applying, so this "
+                                         f"wasn't sent. It says: “{final['code_asked']}” Apply on the job's page "
+                                         f"with this run's CV and cover letter."[:600]]
     elif final.get("submit_attempted"):
         detail = final.get("submit_detail") or "no confirmation shown"
         outcome, reasons = "unconfirmed", [f"The submit button was clicked, but the page didn't confirm it ({detail}). "
@@ -409,6 +415,8 @@ async def _apply(state: _Run, user_id: str, job: dict, verdict: dict, cfg: dict,
         if app_id:
             note = {"submitted": "Sent by autopilot.", "unconfirmed": "Autopilot clicked submit but saw no confirmation.",
                     "needs_you": "Autopilot filled this in and held it for you."}[outcome]
+            if final.get("code_asked"):
+                note = "Autopilot filled this in, but the job site asked for a code it emailed you: apply on its page."
             tracker.update_status(app_id, status, note, user_id=user_id)
             tracker.set_application_questions(app_id, questions, user_id=user_id)
     reused = (f"Used the CV and cover letter from the {'practice ' if earlier['practice'] else ''}run of "
