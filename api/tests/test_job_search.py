@@ -74,7 +74,7 @@ def test_same_role_in_two_locations_keeps_both_postings(monkeypatch):
     for name in LIVE_SOURCES[:3]:
         monkeypatch.setattr(job_searcher, name, _empty)
 
-    async def fake_ats(queries, boards=None):
+    async def fake_ats(queries, boards=None, locations=None):
         return [{"title": "Graduate Software Engineer", "company": "Sky", "url": "https://sky/1"}]
     monkeypatch.setattr(job_searcher, "_search_level2_ats_apis", fake_ats)
 
@@ -353,6 +353,111 @@ def test_a_board_on_levers_eu_instance_is_fetched_from_its_own_api(monkeypatch):
     assert asyncio.run(job_searcher.check_board(web, "lever_eu", "x")) == 3
 
 
+class _Workday:
+    """A fake Workday site (tenant t, site Site): a search answers from `postings` by its text, a posting read
+    from `details` by its path; `status` other than 200 answers every call with it."""
+    BASE = "https://t.wd3.myworkdayjobs.com/wday/cxs/t/Site"
+
+    def __init__(self, postings=None, details=None, status=200):
+        self.postings, self.details, self.status, self.calls = postings or {}, details or {}, status, []
+
+    def __call__(self, *a, **k):   # as http_client.async_client
+        return self
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *a):
+        pass
+
+    async def request(self, method, url, json=None, **kwargs):
+        self.calls.append((method, url[len(self.BASE):], (json or {}).get("searchText")))
+        req = httpx.Request(method, url)
+        if self.status != 200:
+            return httpx.Response(self.status, json={}, request=req)
+        if method == "POST":
+            found = self.postings.get(json["searchText"], [])
+            page = found[json["offset"]:json["offset"] + json["limit"]]
+            return httpx.Response(200, json={"total": len(found), "jobPostings": page}, request=req)
+        return httpx.Response(200, json={"jobPostingInfo": self.details[url[len(self.BASE):]]}, request=req)
+
+    async def post(self, url, json=None):
+        return await self.request("POST", url, json=json)
+
+    async def get(self, url, **kwargs):
+        return await self.request("GET", url, **kwargs)
+
+
+def _posting(path, title, place):
+    return {"externalPath": f"/job/{path}", "title": title, "locationsText": place}
+
+
+def test_a_workday_board_is_searched_and_only_postings_that_may_be_here_are_read(monkeypatch):
+    site = _Workday(
+        postings={"Graduate Software Engineer": [
+            _posting("London/Grad-SE_1", "Software Engineer Graduate Scheme", "London"),
+            _posting("Pune/Grad-SE_2", "Graduate Software Engineer", "Pune, India"),    # elsewhere: not read
+            _posting("London/AE_3", "Account Executive", "London"),                      # not the search
+            _posting("Many/SE_4", "Software Engineer", "2 Locations"),                   # the posting says where
+        ], "Quant Developer": [_posting("London/Grad-SE_1", "Software Engineer Graduate Scheme", "London")]},
+        details={
+            "/job/London/Grad-SE_1": {"title": "Software Engineer Graduate Scheme", "location": "London",
+                                      "jobReqId": "R1", "jobDescription": "<p>Build things.</p>",
+                                      "externalUrl": "https://t.wd3.myworkdayjobs.com/Site/job/London/Grad-SE_1"},
+            "/job/Many/SE_4": {"title": "Software Engineer", "location": "Leeds", "additionalLocations": ["Austin, TX"],
+                               "remoteType": "Hybrid", "jobReqId": "R4", "jobDescription": "Code."}})
+    monkeypatch.setattr(job_searcher, "http_client", MagicMock(async_client=site))
+    jobs = asyncio.run(job_searcher._fetch_workday(
+        "t/wd3/Site", "T", ["graduate", "software", "engineer", "quant", "developer"],
+        ["Graduate Software Engineer", "Quant Developer"], ["London", "United Kingdom"]))
+    assert [c for c in site.calls if c[0] == "POST"] == [("POST", "/jobs", "Graduate Software Engineer"),
+                                                        ("POST", "/jobs", "Quant Developer")]
+    assert [c[1] for c in site.calls if c[0] == "GET"] == ["/job/London/Grad-SE_1", "/job/Many/SE_4"]   # once each
+    assert [(j["job_id"], j["title"], j["location"], j["description"], j["url"]) for j in jobs] == [
+        ("workday-t-R1", "Software Engineer Graduate Scheme", "London", "Build things.",
+         "https://t.wd3.myworkdayjobs.com/Site/job/London/Grad-SE_1"),
+        ("workday-t-R4", "Software Engineer", "Leeds; Austin, TX (Hybrid)", "Code.",
+         "https://t.wd3.myworkdayjobs.com/Site/job/Many/SE_4"),
+    ]
+
+
+def test_a_workday_site_refusing_calls_is_waited_out_once_then_left(monkeypatch):
+    site = _Workday(status=429)
+    monkeypatch.setattr(job_searcher, "http_client", MagicMock(async_client=site))
+    monkeypatch.setattr(job_searcher, "_WORKDAY_BACKOFF_S", 0)
+    assert asyncio.run(job_searcher._fetch_workday("t/wd3/Site", "T", ["software"], ["Software"], ["London"])) == []
+    assert len(site.calls) == 2                     # the call and its one retry; nothing more this collection
+
+
+def test_a_workday_board_is_checked_by_its_total_and_its_postings_read_whole():
+    site = _Workday(postings={"": [_posting("a", "A", "London")] * 7},
+                    details={"/job/London/Grad-SE_1": {"jobDescription": "<p>" + "Build things. " * 30 + "</p>"}})
+    assert asyncio.run(job_searcher.check_board(site, "workday", "t/wd3/Site")) == 7
+    assert asyncio.run(job_searcher.check_board(_Workday(status=404), "workday", "t/wd3/Site")) is None
+
+
+def test_full_descriptions_come_from_workday_and_levers_eu_instance(monkeypatch):
+    asked: list[str] = []
+
+    class Client:
+        def __init__(self, *a, **k): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): pass
+        async def get(self, url, **kwargs):
+            asked.append(url)
+            body = ({"jobPostingInfo": {"jobDescription": "<p>Workday ad.</p>"}} if "myworkdayjobs" in url
+                    else {"descriptionPlain": "Lever EU ad."})
+            return httpx.Response(200, json=body, request=httpx.Request("GET", url))
+    monkeypatch.setattr(job_searcher, "http_client", MagicMock(async_client=Client))
+    workday = asyncio.run(job_searcher._ats_full_description(
+        "https://lbg.wd3.myworkdayjobs.com/en-GB/Graduate_careers/job/London/Software-Engineer_163384-2"))
+    lever = asyncio.run(job_searcher._ats_full_description(
+        "https://jobs.eu.lever.co/coretechsecurity/0a1b2c3d-1111-2222-3333-444455556666"))
+    assert (workday, lever) == ("Workday ad.", "Lever EU ad.")
+    assert asked == ["https://lbg.wd3.myworkdayjobs.com/wday/cxs/lbg/Graduate_careers/job/London/Software-Engineer_163384-2",
+                     "https://api.eu.lever.co/v0/postings/coretechsecurity/0a1b2c3d-1111-2222-3333-444455556666"]
+
+
 def test_no_board_is_listed_twice():
     listed = [(ats, slug.lower()) for ats, slug, _ in job_searcher.listed_boards()]
     assert len(listed) == len(set(listed))
@@ -459,7 +564,7 @@ def test_every_match_in_the_searched_locations_is_kept(monkeypatch):
     for name in ("_search_level1_playwright", "_search_level3_websearch", "_search_level4_adzuna"):
         monkeypatch.setattr(job_searcher, name, _empty)
 
-    async def fake_ats(queries, boards=None):
+    async def fake_ats(queries, boards=None, locations=None):
         here = [{"title": f"Software Engineer {i}", "company": f"Co {i}", "location": "London, United Kingdom",
                  "url": f"https://x/{i}"} for i in range(100)]
         elsewhere = [{"title": f"Software Engineer {i}", "company": f"Far {i}", "location": "Austin, TX",
@@ -475,7 +580,7 @@ def test_a_posting_elsewhere_does_not_stand_in_for_the_one_here(monkeypatch):
     for name in ("_search_level1_playwright", "_search_level3_websearch", "_search_level4_adzuna"):
         monkeypatch.setattr(job_searcher, name, _empty)
 
-    async def fake_ats(queries, boards=None):
+    async def fake_ats(queries, boards=None, locations=None):
         return [{"title": "Software Engineer", "company": "Cloudflare", "location": "Austin, TX", "url": "https://x/1"},
                 {"title": "Software Engineer", "company": "Cloudflare", "location": "London, UK", "url": "https://x/2"}]
     monkeypatch.setattr(job_searcher, "_search_level2_ats_apis", fake_ats)
@@ -488,7 +593,7 @@ def test_nothing_in_the_searched_locations_is_not_the_fixture(monkeypatch):
     for name in ("_search_level1_playwright", "_search_level3_websearch", "_search_level4_adzuna"):
         monkeypatch.setattr(job_searcher, name, _empty)
 
-    async def fake_ats(queries, boards=None):
+    async def fake_ats(queries, boards=None, locations=None):
         return [{"title": "Software Engineer", "company": "Far", "location": "Austin, TX", "url": "https://x/1"}]
     monkeypatch.setattr(job_searcher, "_search_level2_ats_apis", fake_ats)
     assert asyncio.run(job_searcher.search_jobs_multi("software engineer", ["London"])) == []

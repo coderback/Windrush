@@ -72,7 +72,7 @@ def test_every_board_is_fetched_once_for_all_titles(monkeypatch):
         calls.append(("l1", sorted(keywords)))
         return []
 
-    async def l2(queries, boards=None):
+    async def l2(queries, boards=None, locations=None):
         calls.append(("l2", queries))
         return [{"title": "Graduate Software Engineer", "company": "A", "location": "London", "url": "https://a/1"},
                 {"title": "Quantitative Developer", "company": "B", "location": "London", "url": "https://b/1"},
