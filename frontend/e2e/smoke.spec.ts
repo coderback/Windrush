@@ -472,6 +472,9 @@ test("autopilot: practice runs, the queue, answering a held question and turning
                             cv_doc_id: "c".repeat(32), letter_doc_id: "d".repeat(32) }),
     run("2", "ready", { practice: true }),
     run("3", "skipped", { reasons: ["Fit 60 is under your threshold of 75."] }),
+    run("4", "awaiting_code", { reasons: ["The job site emailed you a code: “A verification code was sent to "
+                                          + "sam@example.com.” Type it in here within 10 minutes and Windrush will "
+                                          + "enter it and send the application."] }),
   ];
   let settings = { enabled: false, live: false, min_fit: 75, daily_cap: 3 };
   const puts: object[] = [];
@@ -488,13 +491,17 @@ test("autopilot: practice runs, the queue, answering a held question and turning
     },
     "POST /api/autopilot/run": () => { posts.push("run"); return { status: 202, json: { started: true } }; },
     "POST /api/autopilot/runs/1/retry": () => { posts.push("retry 1"); return { status: 202, json: { started: true } }; },
+    "POST /api/autopilot/runs/4/code": (request) => {
+      posts.push(`code 4 ${request.postDataJSON().code}`);
+      return { status: 202, json: { accepted: true } };
+    },
     "POST /api/answers": { id: "b1", question: blank.question, answer: "No", kind: "fact", company: "", created_at: "",
                            updated_at: "" },
   });
   await page.goto("/autopilot");
 
   await expect(page.getByText("Practice mode", { exact: true })).toBeVisible();
-  await expect(page.getByRole("link", { name: /Autopilot/ })).toContainText("1");          // the sidebar badge
+  await expect(page.getByRole("link", { name: /Autopilot/ })).toContainText("2");          // the sidebar badge
   const queue = page.getByRole("tabpanel");
   await expect(queue).toContainText("Graduate Engineer 1");
   await expect(queue).toContainText("only you can answer");
@@ -514,6 +521,13 @@ test("autopilot: practice runs, the queue, answering a held question and turning
   await queue.getByRole("button", { name: "Try again with my answers" }).click();
   await expect.poll(() => posts).toEqual(["retry 1"]);
 
+  // A form held open for the code a job site emailed: the code typed here goes to it.
+  await expect(queue).toContainText("Needs your code");
+  await queue.getByLabel("Code from your email").fill("AB12CD34");
+  await queue.getByRole("button", { name: "Send code" }).click();
+  await expect.poll(() => posts).toEqual(["retry 1", "code 4 AB12CD34"]);
+  await expect(queue).toContainText("Entering it on the form and sending");
+
   await page.getByRole("tab", { name: /Practice/ }).click();
   await expect(page.getByRole("tabpanel")).toContainText("Would have sent");
   await page.getByRole("tab", { name: /Skipped/ }).click();
@@ -531,7 +545,7 @@ test("autopilot: practice runs, the queue, answering a held question and turning
   await expect.poll(() => puts.at(-1)).toEqual({ daily_cap: 5 });
 
   await page.getByRole("button", { name: "Run now" }).click();
-  await expect.poll(() => posts).toEqual(["retry 1", "run"]);
+  await expect.poll(() => posts).toEqual(["retry 1", "code 4 AB12CD34", "run"]);
   api.expectAllMocked();
 });
 

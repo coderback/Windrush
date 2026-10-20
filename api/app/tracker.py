@@ -129,10 +129,12 @@ CREATE TABLE IF NOT EXISTS autopilot_runs (
 # unconfirmed - the submit button was clicked but the page didn't confirm it: the user checks
 # ready     - practice mode: everything checked out, and it would have been sent
 # needs_you - filled in but held back (see reasons)
+# awaiting_code - the form is open on a page wanting a code the site emailed the user; it waits for them to type it in
 # skipped   - not tried: the fit was too low, say
 # failed    - something broke before the form was filled
 # dismissed - the user cleared it from the queue
-AUTOPILOT_OUTCOMES = ("running", "submitted", "unconfirmed", "ready", "needs_you", "skipped", "failed", "dismissed")
+AUTOPILOT_OUTCOMES = ("running", "submitted", "unconfirmed", "ready", "needs_you", "awaiting_code", "skipped", "failed",
+                      "dismissed")
 
 
 def init_db(db_path: str = "") -> None:
@@ -786,11 +788,16 @@ def autopilot_sent_since(user_id: str, since: str) -> int:
 
 
 def finish_stale_autopilot_runs() -> None:
-    """Runs left 'running' by a restart are over: nothing is working on them now."""
+    """Runs left 'running' or 'awaiting_code' by a restart are over: nothing is working on them now, and a form
+    waiting for a code closed with the browser."""
     con = sqlite3.connect(_DB_PATH)
     with con:
         con.execute("UPDATE autopilot_runs SET outcome='failed', reasons=?, updated_at=? WHERE outcome='running'",
                     (json.dumps(["Windrush restarted while this was in progress."]), _now()))
+        con.execute("UPDATE autopilot_runs SET outcome='needs_you', reasons=?, updated_at=? "
+                    "WHERE outcome='awaiting_code'",
+                    (json.dumps(["Windrush restarted while the form waited for the code the job site emailed you, "
+                                 "so it wasn't sent. Apply on the job's page with this run's handover pack."]), _now()))
     con.close()
 
 

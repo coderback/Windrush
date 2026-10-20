@@ -39,6 +39,12 @@ export async function screenshotUrl(id: string, which: "form" | "confirm"): Prom
   return URL.createObjectURL(await res.blob());
 }
 
+/** The code a job site emailed you, for the form autopilot holds open for it: it's entered and the form sent. */
+export async function sendCode(id: string, code: string) {
+  await requestJson(`${RUNS_URL}/${encodeURIComponent(id)}/code`, json("POST", { code }));
+  await load(RUNS_URL, { force: true });
+}
+
 function save(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");

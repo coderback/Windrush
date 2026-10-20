@@ -14,7 +14,8 @@ import { load, useResource } from "@/lib/store";
 import { jobKey, longAgo } from "@/lib/format";
 import { jobHref, rememberJob } from "@/lib/jobs";
 import {
-  dismissRun, downloadDocument, downloadPack, retryRun, RUNS_URL, runNow, saveSettings, screenshotUrl, STATUS_URL,
+  dismissRun, downloadDocument, downloadPack, retryRun, RUNS_URL, runNow, saveSettings, screenshotUrl, sendCode,
+  STATUS_URL,
 } from "@/lib/autopilot";
 import type { AutopilotOutcome, AutopilotRun, AutopilotSettings, AutopilotStatus, Job } from "@/lib/types";
 
@@ -26,13 +27,14 @@ const OUTCOME: Record<AutopilotOutcome, { label: string; tone: ChipTone }> = {
   unconfirmed: { label: "Check it went through", tone: "warn" },
   ready: { label: "Would have sent", tone: "info" },
   needs_you: { label: "Needs you", tone: "warn" },
+  awaiting_code: { label: "Needs your code", tone: "warn" },
   skipped: { label: "Skipped", tone: "neutral" },
   failed: { label: "Didn't work", tone: "danger" },
   dismissed: { label: "Dismissed", tone: "neutral" },
 };
 
 const TAB_OF: Record<AutopilotOutcome, Tab> = {
-  needs_you: "queue", unconfirmed: "queue", running: "queue",
+  needs_you: "queue", unconfirmed: "queue", running: "queue", awaiting_code: "queue",
   submitted: "sent", ready: "practice",
   skipped: "other", failed: "other", dismissed: "other",
 };
@@ -197,6 +199,44 @@ function asJob(run: AutopilotRun): Job {
   return { id: run.job_id, title: run.job_title, company: run.company, location: run.location, url: run.job_url };
 }
 
+/** The code a job site emailed you, typed in for the form autopilot holds open for it. */
+function CodeForm({ runId }: { runId: string }) {
+  const [code, setCode] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [sent, setSent] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const send = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      await sendCode(runId, code);
+      setSent(true);
+      setCode("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "That didn't work.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <form onSubmit={send} className="flex flex-col gap-[6px] max-w-[420px]">
+      <label htmlFor={`code-${runId}`} className={labelClass}>Code from your email</label>
+      <span className="flex gap-2">
+        <input id={`code-${runId}`} className={cx(inputClass, "font-mono tracking-[0.15em]")} value={code}
+          onChange={(e) => setCode(e.target.value)} autoComplete="one-time-code" spellCheck={false} maxLength={16} />
+        <button type="submit" disabled={busy || code.trim().length < 4} className={buttonClass("primary", "sm")}>
+          {busy ? <Spinner /> : null}Send code
+        </button>
+      </span>
+      {sent && !error && <p className="m-0 text-[12.5px] text-ink-2">Entering it on the form and sending…</p>}
+      {error && <p role="alert" className="m-0 text-[12.5px] text-red">{error}</p>}
+    </form>
+  );
+}
+
 function RunRow({ run, running }: { run: AutopilotRun; running: boolean }) {
   const [open, setOpen] = useState(run.outcome === "needs_you" || run.outcome === "unconfirmed");
   const [busy, setBusy] = useState<"retry" | "dismiss" | null>(null);
@@ -254,6 +294,7 @@ function RunRow({ run, running }: { run: AutopilotRun; running: boolean }) {
           ))}
         </ul>
       )}
+      {run.outcome === "awaiting_code" && <CodeForm runId={run.id} />}
 
       <div className="flex flex-wrap gap-2">
         {(run.questions.length > 0 || run.screenshots.length > 0 || run.notes) && (

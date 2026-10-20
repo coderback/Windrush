@@ -513,6 +513,54 @@ def test_a_submit_the_site_answers_with_an_emailed_code_is_reported(ba, site, mo
     assert_no_chromium_left()
 
 
+@pytest.mark.parametrize("page, asked", [
+    ("code_boxes.html", "A verification code was sent to ada@example.com. To submit your application, enter the "
+                        "8-character code to confirm you're a human."),
+    ("code_field.html", "We emailed you a one-time code. Enter it below to finish your application."),
+])
+def test_the_code_the_user_types_in_is_entered_and_the_form_sent_again(ba, site, monkeypatch, page, asked):
+    llm = ScriptedLLM(submit_success=[False, True])     # the first send stops at the code; the second goes
+    monkeypatch.setattr(ba, "_make_browser_llm", lambda: llm)
+    typed: list[str] = []
+    real_enter = ba._enter_code
+
+    async def enter_and_read(session, code):
+        ok = await real_enter(session, code)
+        held, _ = await ba._focused_page(session)
+        typed.append(json.loads(await held.evaluate(ba._CODE_TYPED_JS)))
+        return ok
+    monkeypatch.setattr(ba, "_enter_code", enter_and_read)
+    calls: list[tuple[str, int]] = []
+
+    async def ask_code(line, attempt):
+        calls.append((line, attempt))
+        return "AB12CD34"
+
+    async def flow():
+        return [event async for event in ba.apply_with_browser(
+            f"{site}/{page}", {"core_info": {"first_name": "Ada"}}, "", asyncio.Queue(),
+            decide=lambda filled: asyncio.sleep(0, result=True), ask_code=ask_code)]
+    events = asyncio.run(flow())
+    final = events[-1]
+    assert calls == [(asked, 1)] and typed == ["AB12CD34"]
+    assert llm.tasks == ["fill", "submit", "submit"] and final["submitted"] and final["code_asked"] == ""
+    assert "Waiting for the code the site emailed you" in [e["action"] for e in events]
+    assert_no_chromium_left()
+
+
+def test_without_a_code_the_form_is_left_unsent(ba, site, monkeypatch):
+    llm = ScriptedLLM(submit_success=False)
+    monkeypatch.setattr(ba, "_make_browser_llm", lambda: llm)
+
+    async def flow():
+        return [event async for event in ba.apply_with_browser(
+            f"{site}/code_boxes.html", {"core_info": {"first_name": "Ada"}}, "", asyncio.Queue(),
+            decide=lambda filled: asyncio.sleep(0, result=True), ask_code=lambda line, attempt: asyncio.sleep(0))]
+    final = asyncio.run(flow())[-1]
+    assert llm.tasks == ["fill", "submit"] and not final["submitted"] and final["code_asked"].startswith("A verification")
+    assert_no_chromium_left()
+
+
 class GreenhouseLLM(ScriptedLLM):
     """Fills greenhouse.html the way the task asks: applicant details with fill_fields, questions through
     answer_questions with their indexes, then tries to fill a question that was left for the candidate."""
