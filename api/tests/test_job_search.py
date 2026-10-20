@@ -573,6 +573,52 @@ def test_searched_and_feed_boards_are_checked(ats, slug, body, expected):
     assert asyncio.run(job_searcher.check_board(_Site(lambda m, u, p: (404, {})), ats, slug)) is None
 
 
+def test_pinpoint_recruitee_and_bamboohr_boards_are_read(monkeypatch):
+    def answer(method, url, params):
+        if url == "https://co.pinpointhq.com/postings.json":
+            return 200, {"data": [
+                {"id": 1, "title": "Graduate Software Engineer", "location": {"city": "London", "name": "London HQ"},
+                 "workplace_type": "hybrid", "description": "<p>Pinpoint ad.</p>",
+                 "url": "https://careers.co.uk/en/postings/1"},
+                {"id": 2, "title": "Office Manager", "location": {"city": "London"}, "description": "", "url": "x"}]}
+        if url == "https://co.recruitee.com/api/offers/":
+            return 200, {"offers": [
+                {"id": 7, "title": "Junior Software Engineer", "location": "London, England, United Kingdom",
+                 "remote": False, "hybrid": True, "description": "<p>Recruitee ad.</p>",
+                 "requirements": "<p>Python.</p>", "careers_url": "https://co.recruitee.com/o/junior-se"}]}
+        if url == "https://co.bamboohr.com/careers/list":
+            return 200, {"result": [
+                {"id": "42", "jobOpeningName": "Software Engineer", "location": {"city": "London", "state": "Greater London"},
+                 "isRemote": None},
+                {"id": "43", "jobOpeningName": "Sales Lead", "location": {"city": "London"}}]}
+        if url == "https://co.bamboohr.com/careers/42/detail":
+            return 200, {"result": {"jobOpening": {"description": "<p>BambooHR ad.</p>"}}}
+        return 404, {}
+    site = _Site(answer)
+    monkeypatch.setattr(job_searcher, "http_client", MagicMock(async_client=site))
+    boards = {"pinpoint": [("co", "Pin")], "recruitee": [("co", "Rec")], "bamboohr": [("co", "Bam")]}
+    jobs = asyncio.run(job_searcher._search_level2_ats_apis(["Software Engineer"], boards=boards))
+    got = {j["company"]: (j["job_id"], j["location"], " ".join(j["description"].split()), j["url"]) for j in jobs}
+    assert got == {
+        "Pin": ("pinpoint-co-1", "London (Hybrid)", "Pinpoint ad.", "https://careers.co.uk/en/postings/1"),
+        "Rec": ("recruitee-7", "London, England, United Kingdom (Hybrid)", "Recruitee ad. Python.",
+                "https://co.recruitee.com/o/junior-se"),
+        "Bam": ("bamboohr-co-42", "London, Greater London", "BambooHR ad.", "https://co.bamboohr.com/careers/42"),
+    }
+    assert "https://co.bamboohr.com/careers/43/detail" not in [u for _, u, _ in site.calls]   # not the search
+
+
+@pytest.mark.parametrize("ats, url, body", [
+    ("pinpoint", "https://co.pinpointhq.com/postings.json", {"data": [{}, {}]}),
+    ("recruitee", "https://co.recruitee.com/api/offers/", {"offers": [{}, {}]}),
+    ("bamboohr", "https://co.bamboohr.com/careers/list", {"result": [{}, {}]}),
+])
+def test_feed_boards_on_json_are_checked(ats, url, body):
+    web = _Web({url: (200, body)})
+    assert asyncio.run(job_searcher.check_board(web, ats, "co")) == 2
+    assert asyncio.run(job_searcher.check_board(_Web({}), ats, "co")) is None
+
+
 def test_no_board_is_listed_twice():
     listed = [(ats, slug.lower()) for ats, slug, _ in job_searcher.listed_boards()]
     assert len(listed) == len(set(listed))

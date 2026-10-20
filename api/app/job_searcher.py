@@ -703,6 +703,13 @@ _GREENHOUSE_COMPANIES: list[tuple[str, str]] = [
     ("mthree",           "mthree"),
     ("mako",             "Mako Trading"),
     ("gsacapital",       "GSA Capital"),
+    # behind graduate employers' own careers pages (October 2026)
+    ("quberesearchandtechnologies", "Qube Research & Technologies"),
+    ("staged",           "KKR"),                  # "Student Careers at KKR"
+    ("ndagroupgraduate", "NDA Group"),
+    ("alphafmcrolesearlycareers", "Alpha FMC"),
+    ("2ilimited",        "2i"),                   # nFocus's group
+    ("towerresearchcapital", "Tower Research Capital"),
 ]
 
 _ASHBY_COMPANIES: list[tuple[str, str]] = [
@@ -833,6 +840,13 @@ _WORKDAY_BOARDS: list[tuple[str, str]] = [
     ("unilever/wd3/Unilever_Experienced_Professionals", "Unilever"),
     ("ayvens/wd3/AyvensCareers",                      "Ayvens"),
     ("alfa/wd3/Alfa",                                 "Alfa"),
+    # behind graduate employers' own careers pages (October 2026)
+    ("pwc/wd3/CRM_Campus_Careers_Site",               "PwC"),
+    ("relx/wd3/relx",                                 "RELX"),
+    ("ag/wd3/Airbus",                                 "Airbus"),
+    ("slihrms/wd3/Careers",                           "AtkinsRéalis"),
+    ("libertyglobal/wd3/Liberty_Global_Careers",      "Liberty Global"),
+    ("southernwater/wd3/SouthernWater",               "Southern Water"),
 ]
 
 # Oracle Recruiting (Candidate Experience) sites, as "<host>/<site number>" (the oraclecloud.com host behind the
@@ -845,6 +859,8 @@ _ORACLE_BOARDS: list[tuple[str, str]] = [
     ("eicg.fa.em2.oraclecloud.com/MorrisonsJobs",     "Morrisons"),
     ("fa-evzn-saasfaukgovprod1.fa.ocs.oraclecloud.com/UKRI-Careers", "UKRI"),
     ("fa-emqh-saasfaprod1.fa.ocs.oraclecloud.com/CX_1001", "Kent"),
+    # behind graduate employers' own careers pages (October 2026)
+    ("jpmc.fa.oraclecloud.com/CX_1001",               "J.P. Morgan"),
 ]
 
 # Eightfold careers sites, as "<tenant>/<domain>" (<tenant>.eightfold.ai, searched for <domain>'s postings):
@@ -861,6 +877,25 @@ _TEAMTAILOR_BOARDS: list[tuple[str, str]] = [
     ("73strings.teamtailor.com",                      "73 Strings"),
     ("careers.dare.global",                           "Dare"),
     ("bre-1729757562.teamtailor.com",                 "BRE"),
+]
+
+# Pinpoint (<slug>.pinpointhq.com), Recruitee (<slug>.recruitee.com) and BambooHR (<slug>.bamboohr.com) boards, each
+# listing every posting in public JSON: behind graduate employers' own careers pages (October 2026).
+_PINPOINT_BOARDS: list[tuple[str, str]] = [
+    ("actica",             "Actica Consulting"),
+    ("auroraer",           "Aurora Energy Research"),
+    ("bmt",                "BMT"),
+    ("convexin",           "Convex"),
+    ("lowcarboncontracts", "Low Carbon Contracts Company"),
+    ("manutd-careers",     "Manchester United"),
+]
+_RECRUITEE_BOARDS: list[tuple[str, str]] = [
+    ("acturis",            "Acturis"),
+    ("framestore",         "Framestore"),
+]
+_BAMBOOHR_BOARDS: list[tuple[str, str]] = [
+    ("ding",               "Ding"),
+    ("silvertide",         "SilverTide"),
 ]
 
 async def _fetch_greenhouse(slug: str, company: str, keywords: list[str]) -> list[dict]:
@@ -1315,6 +1350,77 @@ def _teamtailor_jobs(raw: str, company: str, keywords: list[str]) -> list[dict]:
     return jobs
 
 
+def _board_job(job_id: str, title: str, company: str, location: str, description_html: str, url: str) -> dict:
+    return {"job_id": job_id, "title": title, "company": company, "location": location,
+            "description": _html_to_text(description_html or "")[:_DESC_MAX], "url": url,
+            "salary_min": None, "salary_max": None, "exposure_score": round(occupation_exposure(title), 3)}
+
+
+async def _fetch_pinpoint(slug: str, company: str, keywords: list[str]) -> list[dict]:
+    """A Pinpoint board: every posting, with its description and place, in postings.json."""
+    try:
+        async with http_client.async_client(timeout=10.0) as client:
+            resp = await client.get(f"https://{slug}.pinpointhq.com/postings.json")
+            resp.raise_for_status()
+        jobs = []
+        for item in resp.json().get("data") or []:
+            title = item.get("title") or ""
+            if not _title_matches_query(title, keywords):
+                continue
+            place = (item.get("location") or {}).get("city") or (item.get("location") or {}).get("name") or ""
+            jobs.append(_board_job(f"pinpoint-{slug}-{item.get('id', '')}", title, company,
+                                   _place_and_setting([place], item.get("workplace_type") or ""),
+                                   item.get("description") or "", item.get("url") or ""))
+        return jobs
+    except Exception:
+        return []
+
+
+async def _fetch_recruitee(slug: str, company: str, keywords: list[str]) -> list[dict]:
+    """A Recruitee board: every offer, with its description, requirements and place, in api/offers."""
+    try:
+        async with http_client.async_client(timeout=10.0) as client:
+            resp = await client.get(f"https://{slug}.recruitee.com/api/offers/")
+            resp.raise_for_status()
+        jobs = []
+        for offer in resp.json().get("offers") or []:
+            title = offer.get("title") or ""
+            if not _title_matches_query(title, keywords):
+                continue
+            setting = "hybrid" if offer.get("hybrid") else "remote" if offer.get("remote") else ""
+            jobs.append(_board_job(f"recruitee-{offer.get('id', '')}", title, company,
+                                   _place_and_setting([offer.get("location") or ""], setting),
+                                   (offer.get("description") or "") + (offer.get("requirements") or ""),
+                                   offer.get("careers_url") or ""))
+        return jobs
+    except Exception:
+        return []
+
+
+async def _fetch_bamboohr(slug: str, company: str, keywords: list[str]) -> list[dict]:
+    """A BambooHR board: careers/list names every opening; each one matching is read for its description."""
+    base = f"https://{slug}.bamboohr.com/careers"
+    try:
+        async with http_client.async_client(timeout=10.0, headers={"Accept": "application/json"}) as client:
+            resp = await client.get(f"{base}/list")
+            resp.raise_for_status()
+            jobs = []
+            for item in resp.json().get("result") or []:
+                title = item.get("jobOpeningName") or ""
+                if not _title_matches_query(title, keywords):
+                    continue
+                where = item.get("location") or {}
+                place = ", ".join(p for p in (where.get("city"), where.get("state")) if p)
+                detail = await client.get(f"{base}/{item.get('id')}/detail")
+                opening = ((detail.json().get("result") or {}).get("jobOpening") or {}) if detail.status_code == 200 else {}
+                jobs.append(_board_job(f"bamboohr-{slug}-{item.get('id', '')}", title, company,
+                                       _place_and_setting([place], "remote" if item.get("isRemote") else ""),
+                                       opening.get("description") or "", f"{base}/{item.get('id')}"))
+            return jobs
+    except Exception:
+        return []
+
+
 async def _fetch_teamtailor(slug: str, company: str, keywords: list[str]) -> list[dict]:
     try:
         async with http_client.async_client(timeout=10.0) as client:
@@ -1330,7 +1436,8 @@ def listed_boards() -> list[tuple[str, str, str]]:
     lists = {"greenhouse": _GREENHOUSE_COMPANIES, "ashby": _ASHBY_COMPANIES, "lever": _LEVER_COMPANIES,
              "lever_eu": _LEVER_EU_COMPANIES, "workable": _WORKABLE_COMPANIES,
              "smartrecruiters": _SMARTRECRUITERS_COMPANIES, "workday": _WORKDAY_BOARDS, "oracle": _ORACLE_BOARDS,
-             "eightfold": _EIGHTFOLD_BOARDS, "teamtailor": _TEAMTAILOR_BOARDS}
+             "eightfold": _EIGHTFOLD_BOARDS, "teamtailor": _TEAMTAILOR_BOARDS, "pinpoint": _PINPOINT_BOARDS,
+             "recruitee": _RECRUITEE_BOARDS, "bamboohr": _BAMBOOHR_BOARDS}
     return [(ats, slug, company) for ats, listed in lists.items() for slug, company in listed]
 
 
@@ -1353,8 +1460,9 @@ def _all_boards(found: list[tuple[str, str, str]] = (), gone: set[tuple[str, str
 async def _search_level2_ats_apis(queries: list[str], boards: dict[str, list[tuple[str, str]]] | None = None,
                                   locations: list[str] | None = None) -> list[dict]:
     """
-    Concurrently fetch from Greenhouse, Ashby, Lever, Workable, SmartRecruiters, Teamtailor, Workday, Oracle and
-    Eightfold public APIs: `boards` ({ats: [(slug, company)]}, see _all_boards), by default the listed ones. Filters
+    Concurrently fetch from Greenhouse, Ashby, Lever, Workable, SmartRecruiters, Teamtailor, Pinpoint, Recruitee,
+    BambooHR, Workday, Oracle and Eightfold public APIs: `boards` ({ats: [(slug, company)]}, see _all_boards), by
+    default the listed ones. Filters
     each company's listings by query keyword relevance in a single pass; Workday, Oracle and Eightfold boards are
     searched with `queries` and read in full only for postings that may be in `locations` (see _fetch_workday).
     """
@@ -1378,7 +1486,8 @@ async def _search_level2_ats_apis(queries: list[str], boards: dict[str, list[tup
 
     fetchers = {"greenhouse": _fetch_greenhouse, "ashby": _fetch_ashby, "lever": _fetch_lever,
                 "lever_eu": fetch_lever_eu, "workable": _fetch_workable, "smartrecruiters": _fetch_smartrecruiters,
-                "teamtailor": _fetch_teamtailor, "workday": searching(_fetch_workday),
+                "teamtailor": _fetch_teamtailor, "pinpoint": _fetch_pinpoint, "recruitee": _fetch_recruitee,
+                "bamboohr": _fetch_bamboohr, "workday": searching(_fetch_workday),
                 "oracle": searching(_fetch_oracle), "eightfold": searching(_fetch_eightfold)}
     every = _all_boards() if boards is None else boards
     tasks = [fetchers[ats](slug, name, keywords) for ats, listed in every.items() if ats in fetchers
@@ -1408,6 +1517,9 @@ _BOARD_API = {
     "lever_eu": "https://api.eu.lever.co/v0/postings/{slug}?mode=json",
     "workable": "https://apply.workable.com/api/v1/widget/accounts/{slug}",
     "smartrecruiters": "https://api.smartrecruiters.com/v1/companies/{slug}/postings?limit=100",
+    "pinpoint": "https://{slug}.pinpointhq.com/postings.json",
+    "recruitee": "https://{slug}.recruitee.com/api/offers/",
+    "bamboohr": "https://{slug}.bamboohr.com/careers/list",
 }
 _FIND_ON = ("greenhouse", "ashby", "lever")
 _BOARD_NAME_DROP = re.compile(r"\b(?:ltd|limited|plc|llp|llc|inc|corp|corporation|uk|group|holdings|the)\b")
@@ -1427,6 +1539,8 @@ def _board_jobs(ats: str, data) -> list[dict]:
         return data if isinstance(data, list) else []
     if ats == "smartrecruiters":
         return data.get("content") or []
+    if ats in ("pinpoint", "recruitee", "bamboohr"):
+        return data.get({"pinpoint": "data", "recruitee": "offers", "bamboohr": "result"}[ats]) or []
     return data.get("jobs") or []
 
 
