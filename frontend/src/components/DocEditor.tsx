@@ -349,12 +349,10 @@ function LetterForm({ letter, onChange }: { letter: LetterDoc; onChange: (l: Let
         <AddButton onClick={() => set({ paragraphs: [...letter.paragraphs, ""] })}>Add paragraph</AddButton>
         <Field label="Sign-off" value={letter.signoff} onChange={(v) => set({ signoff: v })} />
       </SectionCard>
-      {/* The dated recipient block above the greeting. */}
-      <SectionCard title="Date & recipient" meta={[letter.date, letter.company].filter(Boolean).join(" · ")}
+      {/* Who it's to, under the contact block: "Recruitment Team," then the company and its town. */}
+      <SectionCard title="Recipient" meta={letter.company ?? ""}
         open={s.isOpen("head")} onToggle={() => s.toggle("head")}>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-[10px]">
-          <Field label="Date" value={letter.date ?? ""} onChange={(v) => set({ date: v })} />
-          <Field label="Role (Re: line)" value={letter.job_title ?? ""} onChange={(v) => set({ job_title: v })} />
           <Field label="Company" value={letter.company ?? ""} onChange={(v) => set({ company: v })} />
           <Field label="Company location" value={letter.company_location ?? ""} onChange={(v) => set({ company_location: v })} />
         </div>

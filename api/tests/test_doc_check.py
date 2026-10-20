@@ -222,7 +222,8 @@ def test_a_letter_with_a_flagged_word_is_revised(replies):
     replies.queue = [json.dumps(first),
                      json.dumps({"paragraphs": ["I use FastAPI daily.", "Your team of 40 engineers ships daily."]})]
     letter = asyncio.run(agent.execute_tool("generate_cover_letter", {"job": AD, "persona": GRADUATE}))["letter"]
-    assert letter["paragraphs"] == ["I use FastAPI daily.", "Your team of 40 engineers ships daily."]
+    assert letter["paragraphs"] == ["I use FastAPI daily.",
+                                    f"Your team of 40 engineers ships daily. {agent._CLOSING_LINE}"]
 
 
 # ── Critique and revise (writing quality) ─────────────────────────────────────────────────────

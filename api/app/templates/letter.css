@@ -1,0 +1,69 @@
+/* Cover letter stylesheet, measured from the candidate's own letter: a serif name with the surname in sage, a sage
+   rule, a right-aligned left column (contact, then who it's to) beside the letter, a sage line between them and a
+   sage band along the foot. Inlined into classic_letter.html like base.css, so the preview and the PDF agree.
+   Gelasio (OFL, metric-compatible with Georgia) is bundled for the PDF; the browser preview falls back to Georgia. */
+
+@font-face { font-family: "Gelasio"; src: url("fonts/Gelasio-Regular.woff") format("woff"); font-weight: 400; }
+@font-face { font-family: "Gelasio"; src: url("fonts/Gelasio-Bold.woff") format("woff"); font-weight: 700; }
+
+@page { size: A4; margin: 0; }
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: #ffffff;
+  color: #404040;
+  font-family: "Liberation Sans", Arial, Helvetica, sans-serif;
+  font-size: 10pt;
+  line-height: 1.38;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+
+body { width: 210mm; min-height: 297mm; position: relative; padding: 16mm 12.7mm 22mm; }
+@media screen { body { margin: 0 auto; } }
+
+a { color: inherit; text-decoration: none; }
+p { margin: 0; }
+
+/* The name and who the candidate is. */
+.head { padding: 0 0 8.9mm 18mm; }
+.head .name { font-family: "Gelasio", Georgia, serif; font-weight: 400; font-size: 45pt; line-height: 1.05; margin: 0;
+              color: #000000; }
+.head .name .last { color: #648276; }
+.head .headline { font-family: "Gelasio", Georgia, serif; font-weight: 700; font-size: 22pt; line-height: 1.2;
+                  margin: 2.4mm 0 0; color: #000000; }
+
+.rule { border-top: 0.8mm solid #648276; margin: 0; }
+
+/* Two columns: the left one is right-aligned, a sage line runs down between them. */
+table.columns { width: 100%; border-collapse: collapse; table-layout: fixed; }
+table.columns td { vertical-align: top; }
+table.columns td.side { width: 47.2mm; text-align: right; padding: 6.8mm 4.1mm 0 0; }
+table.columns td.main { border-left: 0.7mm solid #648276; padding: 6.8mm 0 11mm 5.2mm; }
+
+.side h2, .main h2 { font-family: "Gelasio", Georgia, serif; font-weight: 700; font-size: 14pt; color: #648276;
+                     margin: 0 0 1.6mm; line-height: 1.2; }
+.side p { font-size: 11pt; line-height: 1.39; }
+.side .to { margin-top: 10.3mm; }
+
+.main .para { margin: 0 0 4.7mm; }
+.main .signoff { color: #648276; }
+
+/* The sage band along the foot of the page: against the body in the browser preview, against the page in the PDF
+   (WeasyPrint places an absolute box under a min-height body straight after the text, not at its foot). */
+.band { position: absolute; left: 12.7mm; right: 12.7mm; bottom: 0; height: 12.7mm; background: #648276; }
+@media print { .band { position: fixed; } }
+
+/* doc_render tightens a letter that runs past one page: first the spacing, then the heading and side type
+   (the body is already at 10pt, the floor). */
+body.tight { padding-top: 12mm; }
+body.tight .head { padding-bottom: 6mm; }
+body.tight table.columns td.side, body.tight table.columns td.main { padding-top: 5mm; }
+body.tight table.columns td.main { padding-bottom: 6mm; }
+body.tight .main .para { margin-bottom: 3mm; line-height: 1.3; }
+body.small .head .name { font-size: 38pt; }
+body.small .head .headline { font-size: 18pt; }
+body.small .side p { font-size: 10pt; }

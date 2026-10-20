@@ -74,6 +74,18 @@ def _letter_paragraphs(words_each=(60, 80, 140, 40)) -> list[str]:
     return [_sentence(n, i) + "." for i, n in enumerate(words_each)]
 
 
+# Prose at the density of the candidate's own letter (about 5.2 characters a word; _WORDS run to 8), for
+# measuring what a page holds.
+_PROSE = ("I designed a scheduling service that cut deployment latency from forty minutes to nine by caching every "
+          "build step, checking which inputs changed and rerunning only the affected tests, which taught me to "
+          "measure before optimising and to explain each compromise clearly to reviewers on the team").split()
+
+
+def _prose_paragraphs(words_each) -> list[str]:
+    return [" ".join(_PROSE[(7 * p + i) % len(_PROSE)] for i in range(n)).capitalize() + "."
+            for p, n in enumerate(words_each)]
+
+
 def _full_cvdoc(seniority: str) -> dict:
     """A CVDoc at every length limit: what a verbose model can hand the renderer."""
     return {
@@ -125,8 +137,9 @@ def _headings(html: str) -> list[str]:
 
 
 def _letter_body(html: str) -> list[str]:
-    body = re.search(r'<div class="letter-body">(.*?)</div>', html, re.S).group(1)
-    return re.findall(r"<p>(.*?)</p>", body, re.S)
+    """The letter's right-hand column: the salutation heading, then each paragraph."""
+    main = re.search(r'<td class="main">(.*?)<div class="signoff">', html, re.S).group(1)
+    return re.findall(r"<h2>(.*?)</h2>", main, re.S) + re.findall(r'<p class="para">(.*?)</p>', main, re.S)
 
 
 # ── CV: profile → document ───────────────────────────────────────────────────────
@@ -433,35 +446,71 @@ def test_summaries_are_depersonalised(raw, clean):
 
 # ── Cover letter ─────────────────────────────────────────────────────────────────
 
-@pytest.mark.parametrize("salutation, signoff", [
-    ("Dear Hiring Manager,", "Yours faithfully,"),
-    ("Dear Acme Robotics team,", "Yours faithfully,"),
-    ("Dear Ms Patel,", "Yours sincerely,"),
+@pytest.mark.parametrize("salutation, heading", [
+    ("Dear Hiring Manager,", "Dear Hiring Manager"),
+    ("Dear Ms Patel,", "Dear Ms Patel"),                        # a named contact is kept
+    ("", "Dear Hiring Manager"),
 ])
-def test_cover_letter_sign_off_follows_the_salutation(llm, salutation, signoff):
-    wrong = "Yours sincerely," if signoff == "Yours faithfully," else "Yours faithfully,"
+def test_cover_letter_signs_off_as_the_candidate_does(llm, salutation, heading):
     llm.reply = json.dumps({"headline": "Computer Science Graduate", "salutation": salutation,
-                            "paragraphs": _letter_paragraphs(), "signoff": wrong})
+                            "paragraphs": _letter_paragraphs(), "signoff": "Yours faithfully,"})
     letter = _cover_letter()
-    assert (letter["salutation"], letter["signoff"]) == (salutation, signoff)
+    assert (letter["salutation"], letter["signoff"]) == (heading, "Kind Regards,")
 
 
 def test_cover_letter_renders_every_paragraph_and_the_contact_block(llm):
     paragraphs = _letter_paragraphs() + ["A fifth, closing paragraph the model added."]
     llm.reply = json.dumps({"headline": "Computer Science Graduate", "salutation": "Dear Hiring Manager,",
-                            "paragraphs": paragraphs, "signoff": "Yours faithfully,"})
+                            "paragraphs": paragraphs, "signoff": "Kind Regards,"})
     html = doc_render.render_letter_html(_cover_letter())
 
-    assert _letter_body(html) == ["Dear Hiring Manager,", *paragraphs]    # the closing paragraph isn't dropped
-    assert '<p class="letter-headline">Computer Science Graduate</p>' in html
+    closing = f"{paragraphs[-1]} {agent._CLOSING_LINE}"                    # the closing paragraph isn't dropped
+    assert _letter_body(html) == ["Dear Hiring Manager", *paragraphs[:-1], closing]
+    assert 'Sam <span class="last">Okafor</span></h1>' in html            # the surname in the accent colour
+    assert '<p class="headline">Computer Science Graduate</p>' in html
     assert ">Bristol.</p>" in html and 'href="mailto:sam@example.com"' in html and 'href="tel:+447700900456"' in html
-    assert re.search(r'<p>Yours faithfully,</p>\s*<p class="sig-name">Sam Okafor</p>', html)
+    assert re.search(r'<p>Kind Regards,</p>\s*<p class="sig-name">Sam Okafor.</p>', html)
 
-    # Under the candidate's contact details: the date, the employer and where, then the role.
-    today = datetime.date.today().strftime("%d %B %Y")
-    order = [">Bristol.</p>", f'<p class="letter-date">{today}</p>', "<p>Acme Robotics</p>", "<p>Cambridge, UK</p>",
-             '<p class="letter-subject">Re: Graduate Software Engineer</p>', "<p>Dear Hiring Manager,</p>"]
+    # The left column: contact, then who it's to; the letter has no date and no "Re:" line.
+    order = ["<h2>Contact</h2>", ">Bristol.</p>", "<p>Recruitment Team,</p>", "<p>Acme Robotics,</p>",
+             "<p>Cambridge.</p>", '<td class="main">', "<h2>Dear Hiring Manager</h2>"]
     assert [html.index(s) for s in order] == sorted(html.index(s) for s in order)
+    assert datetime.date.today().strftime("%d %B %Y") not in html and "Re:" not in html
+
+
+@pytest.mark.parametrize("close", [
+    "I'd welcome the chance to talk. Thank you for your consideration.",
+    "I'd welcome the chance to talk. Thank you for your time. I look forward to hearing from you.",
+    "I'd welcome the chance to talk.",
+    "I'd welcome the chance to talk. Thank you for your time and consideration and I hope to hear from you soon.",
+])
+def test_the_letter_ends_on_the_candidates_closing_line(llm, close):
+    llm.reply = json.dumps({"headline": "Computer Science Graduate", "salutation": "Dear Hiring Manager",
+                            "paragraphs": _letter_paragraphs()[:3] + [close], "signoff": "Kind Regards,"})
+    assert _cover_letter()["paragraphs"][-1] == (
+        "I'd welcome the chance to talk. Thank you for your time and consideration and I hope to hear from you soon.")
+
+
+def test_c_plus_plus_stays_on_one_line():
+    html = doc_render.render_letter_html({"candidate_name": "Sam Okafor", "paragraphs": ["I write C++ daily."]})
+    assert "C+⁠+ daily" in html                                     # a word joiner between the plus signs
+
+
+def test_the_letter_leaves_out_the_street_address():
+    contact = {"address_line_1": "1 High Street", "city": "Bristol", "postcode": "BS1 1AA",
+               "phone": "+44 7700 900456", "email": "sam@example.com"}
+    html = doc_render.render_letter_html({"candidate_name": "Sam Okafor", "contact": contact, "paragraphs": ["Hi."]})
+    assert "<p>Bristol BS1 1AA.</p>" in html and "High Street" not in html
+
+
+@pytest.mark.parametrize("location, lines", [
+    ("Cambridge, UK", ["Recruitment Team,", "Acme Robotics,", "Cambridge."]),
+    ("London, UK (Hybrid)", ["Recruitment Team,", "Acme Robotics,", "London."]),
+    ("London / Remote", ["Recruitment Team,", "Acme Robotics,", "London."]),
+    ("", ["Recruitment Team,", "Acme Robotics."]),
+])
+def test_the_letter_is_addressed_to_the_employers_recruitment_team(location, lines):
+    assert doc_render._letter_recipient_lines("Acme Robotics", location) == lines
 
 
 def test_a_job_without_a_location_leaves_the_employers_location_blank(llm):
@@ -472,9 +521,10 @@ def test_a_job_without_a_location_leaves_the_employers_location_blank(llm):
     assert letter["company"] == "Acme Robotics" and letter["company_location"] == ""
 
 
-def test_a_letter_without_date_or_employer_has_no_empty_block():
+def test_a_letter_without_contact_or_employer_has_no_empty_block():
     html = doc_render.render_letter_html({"candidate_name": "Sam Okafor", "paragraphs": ["Hello."]})
-    assert 'class="letter-meta"' not in html.split("</style>")[1] and "Re:" not in html
+    page = html.split("</style>")[1]
+    assert 'class="to"' not in page and "<h2>Contact</h2>" not in page
 
 
 def test_cover_letter_without_the_model_still_reads_as_a_letter(llm):
@@ -482,7 +532,7 @@ def test_cover_letter_without_the_model_still_reads_as_a_letter(llm):
     letter = _cover_letter()
     assert letter["headline"] == "Computer Science Graduate"      # from the degree
     assert letter["paragraphs"] == [GRADUATE["summary"]]
-    assert (letter["salutation"], letter["signoff"]) == ("Dear Hiring Manager,", "Yours faithfully,")
+    assert (letter["salutation"], letter["signoff"]) == ("Dear Hiring Manager", "Kind Regards,")
 
 
 # ── PDFs ─────────────────────────────────────────────────────────────────────────
@@ -559,8 +609,19 @@ def test_a_full_length_cover_letter_fits_one_page(pdf_dir):
                           "phone": "+44 7700 900456", "email": "sam@example.com"},
               "date": "15 October 2026", "company": "Acme Robotics", "company_location": "Cambridge, UK",
               "job_title": "Graduate Software Engineer (2027 start)",
-              "paragraphs": _letter_paragraphs((70, 95, 160, 55))}   # longer than the ~380 words asked for
-    assert _weasy("cover_letter", letter).page_count == 1
+              "paragraphs": _prose_paragraphs((110, 130, 110, 70))}   # longer than the ~380 words asked for
+    assert '<body>' in doc_render.render_letter_html(letter)            # fits without tightening
+    pdf = _weasy("cover_letter", letter)
+    assert pdf.page_count == 1
+    assert any(f[3].endswith("+Gelasio-Bold") for f in pdf[0].get_fonts())   # the bundled serif, not a fallback
+    spans = {s["text"].strip(): (round(s["size"], 1), f"#{s['color']:06x}")
+             for b in pdf[0].get_text("dict")["blocks"] for line in b.get("lines", []) for s in line["spans"]}
+    assert spans["Okafor"] == (45.0, "#648276") and spans["Contact"] == (14.0, "#648276")   # the candidate's letter,
+    assert spans["Kind Regards,"] == (10.0, "#648276")                                      # measured
+    assert "High Street" not in pdf[0].get_text()
+    mm = 25.4 / 72
+    band = [d["rect"] for d in pdf[0].get_drawings() if d["rect"].y0 * mm > 280]
+    assert band and round(band[0].y1 * mm) == 297                       # the sage band sits on the page's foot
 
 
 @needs_weasyprint
@@ -570,10 +631,10 @@ def test_a_five_paragraph_letter_at_full_length_fits_one_page(pdf_dir):
                           "phone": "+44 7700 900456", "email": "sam@example.com"},
               "date": "15 October 2026", "company": "Acme Robotics", "company_location": "Cambridge, UK",
               "job_title": "Graduate Software Engineer (2027 start)",
-              "paragraphs": _letter_paragraphs((60, 75, 120, 70, 55))}   # 380 words, the prompt's top end
+              "paragraphs": _prose_paragraphs((60, 75, 120, 70, 55))}   # 380 words, the prompt's top end
     pdf = _weasy("cover_letter", letter)
     assert pdf.page_count == 1
-    assert _sentence(55, 4) in " ".join(pdf[0].get_text().split())           # the last paragraph is on the page
+    assert letter["paragraphs"][-1] in " ".join(pdf[0].get_text().split())   # the last paragraph is on the page
 
 
 @pytest.mark.parametrize("doc_type, doc, expected", [
@@ -582,8 +643,8 @@ def test_a_five_paragraph_letter_at_full_length_fits_one_page(pdf_dir):
     ("cover_letter", {"candidate_name": "Sam Okafor", "job_title": "Graduate Software Engineer",
                       "company": "Acme Robotics", "company_location": "Cambridge, UK", "date": "15 October 2026",
                       "paragraphs": ["I would like to join Acme Robotics."]},
-     ["Sam Okafor", "15 October 2026", "Acme Robotics Cambridge, UK", "Re: Graduate Software Engineer",
-      "Dear Hiring Manager", "I would like to join Acme Robotics."]),
+     ["Sam Okafor", "Recruitment Team, Acme Robotics, Cambridge.", "Dear Hiring Manager",
+      "I would like to join Acme Robotics.", "Kind Regards, Sam Okafor."]),
 ])
 def test_a_failing_weasyprint_falls_back_to_a_plain_pdf(pdf_dir, monkeypatch, doc_type, doc, expected):
     def broken(html):
