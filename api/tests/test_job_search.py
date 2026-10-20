@@ -331,6 +331,33 @@ def _fake_client(payload):
     return MagicMock(async_client=FakeClient)
 
 
+def test_a_board_on_levers_eu_instance_is_fetched_from_its_own_api(monkeypatch):
+    # CoreTech Security's board is on jobs.eu.lever.co; api.lever.co doesn't have its postings.
+    asked: list[str] = []
+
+    class Client:
+        def __init__(self, *a, **k): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): pass
+        async def get(self, url, params=None):
+            asked.append(url)
+            return httpx.Response(200, json=[{"id": "1", "text": "Graduate Software Engineer",
+                                              "categories": {"location": "London"},
+                                              "hostedUrl": "https://jobs.eu.lever.co/x/1"}],
+                                  request=httpx.Request("GET", url))
+    monkeypatch.setattr(job_searcher, "http_client", MagicMock(async_client=Client))
+    jobs = asyncio.run(job_searcher._search_level2_ats_apis(["software"], boards={"lever_eu": [("x", "X")]}))
+    assert asked == ["https://api.eu.lever.co/v0/postings/x?mode=json"]
+    assert [(j["company"], j["url"]) for j in jobs] == [("X", "https://jobs.eu.lever.co/x/1")]
+    web = _Web({"https://api.eu.lever.co/v0/postings/x?mode=json": (200, [{}, {}, {}])})
+    assert asyncio.run(job_searcher.check_board(web, "lever_eu", "x")) == 3
+
+
+def test_no_board_is_listed_twice():
+    listed = [(ats, slug.lower()) for ats, slug, _ in job_searcher.listed_boards()]
+    assert len(listed) == len(set(listed))
+
+
 def test_ashby_boards_with_a_string_location_are_read(monkeypatch):
     # The posting API gives `location` as a string; reading it as a dict raised, and every Ashby board
     # came back empty.

@@ -679,6 +679,16 @@ _GREENHOUSE_COMPANIES: list[tuple[str, str]] = [
     # moved from Lever (October 2026)
     ("scaleai",          "Scale AI"),
     ("togetherai",       "Together AI"),
+    # moved from Workable (October 2026)
+    ("riverlane",        "Riverlane"),
+    # graduate employers' careers sites (October 2026)
+    ("mavensecuritiesholdingltd", "Maven Securities"),
+    ("neptunenorth",     "Neptune North"),
+    ("netcraft",         "Netcraft"),
+    ("radixuniversity",  "Radix Trading"),
+    ("mthree",           "mthree"),
+    ("mako",             "Mako Trading"),
+    ("gsacapital",       "GSA Capital"),
 ]
 
 _ASHBY_COMPANIES: list[tuple[str, str]] = [
@@ -725,11 +735,14 @@ _ASHBY_COMPANIES: list[tuple[str, str]] = [
     ("improbable",  "Improbable"),
     ("temporal",    "Temporal"),
     ("runpod",      "RunPod"),
+    # moved from Lever (October 2026)
+    ("mistral.ai",  "Mistral AI"),
+    # graduate employers' careers sites (October 2026)
+    ("checkout.com", "Checkout.com"),
 ]
 
 _LEVER_COMPANIES: list[tuple[str, str]] = [
     ("palantir",    "Palantir"),
-    ("mistral",     "Mistral AI"),
     # added from grad-programmes.json
     ("ion",         "ION"),
     # added from summer-internships.json
@@ -737,9 +750,14 @@ _LEVER_COMPANIES: list[tuple[str, str]] = [
     ("gearset",     "Gearset"),
 ]
 
+# Lever's EU instance (jobs.eu.lever.co): these boards are only on its own API.
+_LEVER_EU_COMPANIES: list[tuple[str, str]] = [
+    # graduate employers' careers sites (October 2026)
+    ("coretechsecurity", "CoreTech Security"),
+]
+
 _WORKABLE_COMPANIES: list[tuple[str, str]] = [
     ("starling-bank", "Starling Bank"),
-    ("riverlane", "Riverlane"),
     ("capula-investment-management-ltd", "Capula Investment Management"),
     ("longshot-systems-ltd", "Longshot Systems"),
     ("insight-investment", "Insight Investment"),
@@ -750,6 +768,8 @@ _WORKABLE_COMPANIES: list[tuple[str, str]] = [
     ("caxton",       "Caxton Associates"),
     # added from slug validation
     ("two-sigma",   "Two Sigma"),
+    # graduate employers' careers sites (October 2026)
+    ("grayce",      "Grayce"),
 ]
 
 _SMARTRECRUITERS_COMPANIES: list[tuple[str, str]] = [
@@ -758,6 +778,9 @@ _SMARTRECRUITERS_COMPANIES: list[tuple[str, str]] = [
     ("TTP1",             "TTP"),
     ("Vitol",            "Vitol"),
     ("LegalAndGeneral",  "Legal & General"),
+    # graduate employers' careers sites (October 2026)
+    ("AECOM2",           "AECOM"),
+    ("DataIntellect",    "Data Intellect"),
 ]
 
 async def _fetch_greenhouse(slug: str, company: str, keywords: list[str]) -> list[dict]:
@@ -826,9 +849,10 @@ async def _fetch_ashby(slug: str, company: str, keywords: list[str]) -> list[dic
         return []
 
 
-async def _fetch_lever(slug: str, company: str, keywords: list[str]) -> list[dict]:
+async def _fetch_lever(slug: str, company: str, keywords: list[str], eu: bool = False) -> list[dict]:
+    """A Lever board; `eu` for one on Lever's EU instance (jobs.eu.lever.co), whose postings only its own API has."""
     try:
-        url = f"https://api.lever.co/v0/postings/{slug}?mode=json"
+        url = f"https://api.{'eu.' if eu else ''}lever.co/v0/postings/{slug}?mode=json"
         async with http_client.async_client(timeout=8.0) as client:
             resp = await client.get(url)
             resp.raise_for_status()
@@ -947,7 +971,8 @@ async def _fetch_smartrecruiters(slug: str, company: str, keywords: list[str]) -
 def listed_boards() -> list[tuple[str, str, str]]:
     """(ats, slug, company) of every board listed in this module."""
     lists = {"greenhouse": _GREENHOUSE_COMPANIES, "ashby": _ASHBY_COMPANIES, "lever": _LEVER_COMPANIES,
-             "workable": _WORKABLE_COMPANIES, "smartrecruiters": _SMARTRECRUITERS_COMPANIES}
+             "lever_eu": _LEVER_EU_COMPANIES, "workable": _WORKABLE_COMPANIES,
+             "smartrecruiters": _SMARTRECRUITERS_COMPANIES}
     return [(ats, slug, company) for ats, listed in lists.items() for slug, company in listed]
 
 
@@ -982,8 +1007,11 @@ async def _search_level2_ats_apis(queries: list[str], boards: dict[str, list[tup
     if not keywords:
         return []
 
+    async def fetch_lever_eu(slug: str, company: str, keywords: list[str]) -> list[dict]:
+        return await _fetch_lever(slug, company, keywords, eu=True)
+
     fetchers = {"greenhouse": _fetch_greenhouse, "ashby": _fetch_ashby, "lever": _fetch_lever,
-                "workable": _fetch_workable, "smartrecruiters": _fetch_smartrecruiters}
+                "lever_eu": fetch_lever_eu, "workable": _fetch_workable, "smartrecruiters": _fetch_smartrecruiters}
     every = _all_boards() if boards is None else boards
     tasks = [fetchers[ats](slug, name, keywords) for ats, listed in every.items() if ats in fetchers
              for slug, name in listed]
@@ -1009,6 +1037,7 @@ _BOARD_API = {
     "greenhouse": "https://boards-api.greenhouse.io/v1/boards/{slug}/jobs",
     "ashby": "https://api.ashbyhq.com/posting-api/job-board/{slug}",
     "lever": "https://api.lever.co/v0/postings/{slug}?mode=json",
+    "lever_eu": "https://api.eu.lever.co/v0/postings/{slug}?mode=json",
     "workable": "https://apply.workable.com/api/v1/widget/accounts/{slug}",
     "smartrecruiters": "https://api.smartrecruiters.com/v1/companies/{slug}/postings?limit=100",
 }
@@ -1026,7 +1055,7 @@ def _board_slugs(company: str) -> list[str]:
 
 
 def _board_jobs(ats: str, data) -> list[dict]:
-    if ats == "lever":
+    if ats in ("lever", "lever_eu"):
         return data if isinstance(data, list) else []
     if ats == "smartrecruiters":
         return data.get("content") or []
