@@ -169,16 +169,29 @@ async def _ats_full_description(url: str) -> str:
                 if r.status_code == 200:
                     return _html_to_text(r.json().get("content") or "")
 
-        # Lever — jobs.lever.co/{slug}/{id}
+        # Lever — jobs.lever.co/{slug}/{id}, or jobs.eu.lever.co on its EU instance (its own API)
         elif "lever.co" in host:
             m = re.search(r"/([^/]+)/([0-9a-fA-F-]{8,})", path)
             if m:
                 slug, pid = m.group(1), m.group(2)
-                r = await client.get(f"https://api.lever.co/v0/postings/{slug}/{pid}")
+                api = "api.eu.lever.co" if host.endswith("eu.lever.co") else "api.lever.co"
+                r = await client.get(f"https://{api}/v0/postings/{slug}/{pid}")
                 if r.status_code == 200:
                     data = r.json()
                     raw = data.get("descriptionPlain") or data.get("description") or ""
                     return _html_to_text(raw)
+
+        # Workday — <tenant>.wd<n>.myworkdayjobs.com/[<locale>/]<site>/job/…, read through the site's job service
+        # (the bare host name: the link can be the user's, and only a Workday host is called)
+        elif (parsed.hostname or "").lower().endswith(".myworkdayjobs.com"):
+            m = re.match(r"/(?:[a-z]{2}-[A-Z]{2}/)?([^/]+)(/job/.+)", path)
+            if m:
+                workday = parsed.hostname.lower()
+                tenant = workday.split(".")[0]
+                r = await client.get(f"https://{workday}/wday/cxs/{tenant}/{m.group(1)}{m.group(2)}",
+                                     headers={"Accept": "application/json"})
+                if r.status_code == 200:
+                    return _html_to_text((r.json().get("jobPostingInfo") or {}).get("jobDescription") or "")
 
     return ""
 
@@ -188,7 +201,7 @@ async def fetch_full_description(url: str, max_chars: int = 8000) -> str:
     Fetch a job listing's full description on demand.
 
     Strategy, in order of reliability:
-      1. Known ATS structured API (Greenhouse, Lever) — clean, complete JD.
+      1. Known ATS structured API (Greenhouse, Lever, Workday) — clean, complete JD.
       2. JSON-LD JobPosting block on the page — common on real listing pages.
 
     Returns "" on any failure or if nothing trustworthy is found, so callers
@@ -783,6 +796,44 @@ _SMARTRECRUITERS_COMPANIES: list[tuple[str, str]] = [
     ("DataIntellect",    "Data Intellect"),
 ]
 
+# Workday careers sites, as "<tenant>/wd<n>/<site>" (<tenant>.wd<n>.myworkdayjobs.com/<site>): graduate employers'
+# careers sites (October 2026). Accenture's (accenture/wd103/AccentureCareers) refuses searches (429) and isn't here.
+_WORKDAY_BOARDS: list[tuple[str, str]] = [
+    # early-careers sites
+    ("lbg/wd3/Graduate_careers",                      "Lloyds Banking Group"),
+    ("lseg/wd3/Graduate_Careers",                     "LSEG"),
+    ("mufgub/wd3/MUFG-EarlyCareers",                  "MUFG"),
+    ("visa/wd5/Visa_Early_Careers",                   "Visa"),
+    ("rollsroyce/wd3/Intern_Graduate",                "Rolls-Royce"),
+    ("fca/wd3/FCA_earlycareers",                      "Financial Conduct Authority"),
+    ("abrdn/wd3/AberdeenEarlyCareer",                 "abrdn"),
+    # whole careers sites
+    ("citi/wd5/2",                                    "Citi"),
+    ("barclays/wd3/External_Career_Site_Barclays",    "Barclays"),
+    ("rbs/wd3/RBS",                                   "NatWest Group"),
+    ("capitalone/wd12/Capital_One",                   "Capital One"),
+    ("allstate/wd5/allstate_careers",                 "Allstate"),
+    ("hiscox/wd3/Hiscox_External_Site",               "Hiscox"),
+    ("quilter/wd3/External-Career-Site",              "Quilter"),
+    ("hyperiongrp/wd3/hyperion_external",             "Howden"),
+    ("fticonsulting/wd108/FTIConsultingCareers",      "FTI Consulting"),
+    ("clearwateranalytics/wd1/Clearwater_Analytics_Careers", "Clearwater Analytics"),
+    ("thales/wd3/Careers",                            "Thales"),
+    ("gevernova/wd5/Vernova_ExternalSite",            "GE Vernova"),
+    ("motorolasolutions/wd5/Careers",                 "Motorola Solutions"),
+    ("crowdstrike/wd5/crowdstrikecareers",            "CrowdStrike"),
+    ("aveva/wd3/AVEVA_careers",                       "AVEVA"),
+    ("expedia/wd108/search",                          "Expedia"),
+    ("bpinternational/wd3/bpCareers",                 "bp"),
+    ("shell/wd3/ShellCareers",                        "Shell"),
+    ("centrica/wd3/Centrica",                         "Centrica"),
+    ("neso/wd103/Careers",                            "NESO"),
+    ("glencorecorp/wd3/External",                     "Glencore"),
+    ("unilever/wd3/Unilever_Experienced_Professionals", "Unilever"),
+    ("ayvens/wd3/AyvensCareers",                      "Ayvens"),
+    ("alfa/wd3/Alfa",                                 "Alfa"),
+]
+
 async def _fetch_greenhouse(slug: str, company: str, keywords: list[str]) -> list[dict]:
     try:
         # content=true is required — without it the API omits the JD entirely.
@@ -968,11 +1019,99 @@ async def _fetch_smartrecruiters(slug: str, company: str, keywords: list[str]) -
     except Exception:
         return []
 
+# ── Workday ───────────────────────────────────────────────────────────────────
+# A Workday careers site searches through a public JSON service, the one its own pages call: POST
+# .../wday/cxs/<tenant>/<site>/jobs lists postings (20 a call at most, no description) and GET
+# .../wday/cxs/<tenant>/<site><externalPath> is one posting. Boards are big and worldwide (Citi lists 2000+), so
+# each is searched with the collection's queries rather than read whole, and only postings whose title matches and
+# that may be in the searched locations are read in full.
+
+_WORKDAY_PAGE = 20           # postings a search call returns (Workday's most)
+_WORKDAY_PAGES = 2           # search calls per query and board: its 40 best matches
+_WORKDAY_READS = 25          # postings read in full per board and collection
+_WORKDAY_CONCURRENCY = 4     # Workday calls at once, across every board
+_WORKDAY_BACKOFF_S = 3.0     # wait before the one retry of a call a site refused as too many (429)
+_MULTI_PLACE = re.compile(r"^\s*\d+\s+locations?\s*$", re.I)   # "2 Locations": the posting says which
+
+
+async def _workday_call(client: httpx.AsyncClient, gate: asyncio.Semaphore, method: str, url: str,
+                        **kwargs) -> httpx.Response:
+    """One call, under `gate`; a 429 is waited out once before it's given up."""
+    for attempt in range(2):
+        async with gate:
+            resp = await client.request(method, url, **kwargs)
+        if resp.status_code != 429 or attempt:
+            return resp
+        await asyncio.sleep(_WORKDAY_BACKOFF_S)
+    return resp
+
+
+async def _fetch_workday(slug: str, company: str, keywords: list[str], queries: list[str] = (),
+                         locations: list[str] | None = None, gate: asyncio.Semaphore | None = None) -> list[dict]:
+    """
+    A Workday board ("<tenant>/wd<n>/<site>"), searched with each of `queries`: each posting whose title matches
+    `keywords` and that may be in `locations` (its place is one of them, or it lists several) is read in full, at
+    most _WORKDAY_READS. A site still refusing calls (429) after a wait keeps what was read before.
+    """
+    tenant, wd, site = slug.split("/")
+    host = f"https://{tenant}.{wd}.myworkdayjobs.com"
+    base = f"{host}/wday/cxs/{tenant}/{site}"
+    gate = gate or asyncio.Semaphore(_WORKDAY_CONCURRENCY)
+    jobs: list[dict] = []
+    try:
+        async with http_client.async_client(timeout=15.0, headers={"Accept": "application/json"}) as client:
+            listed: dict[str, dict] = {}
+            for query in queries or [" ".join(keywords)]:
+                for page in range(_WORKDAY_PAGES):
+                    resp = await _workday_call(client, gate, "POST", f"{base}/jobs", json={
+                        "appliedFacets": {}, "limit": _WORKDAY_PAGE, "offset": page * _WORKDAY_PAGE,
+                        "searchText": query})
+                    if resp.status_code == 429:
+                        logger.info("Workday %s: refused as too many calls; searching it next time", slug)
+                        return jobs
+                    resp.raise_for_status()
+                    postings = resp.json().get("jobPostings") or []
+                    for posting in postings:
+                        if posting.get("externalPath"):
+                            listed.setdefault(posting["externalPath"], posting)
+                    if len(postings) < _WORKDAY_PAGE:
+                        break
+            wanted = [p for p in listed.values() if _title_matches_query(p.get("title") or "", keywords)
+                      and (_MULTI_PLACE.match(p.get("locationsText") or "")
+                           or jobs_db.in_locations(p.get("locationsText") or "", locations or []))]
+            for posting in wanted[:_WORKDAY_READS]:
+                resp = await _workday_call(client, gate, "GET", base + posting["externalPath"])
+                if resp.status_code == 429:
+                    logger.info("Workday %s: refused as too many calls after %d postings", slug, len(jobs))
+                    break
+                if resp.status_code != 200:
+                    continue
+                info = resp.json().get("jobPostingInfo") or {}
+                title = info.get("title") or posting.get("title") or ""
+                places = [info.get("location") or posting.get("locationsText") or "",
+                          *(info.get("additionalLocations") or [])]
+                jobs.append({
+                    "job_id": f"workday-{tenant}-{info.get('jobReqId') or info.get('id') or posting['externalPath']}",
+                    "title": title,
+                    "company": company,
+                    "location": _place_and_setting(places, info.get("remoteType") or ""),
+                    "description": _html_to_text(info.get("jobDescription") or "")[:_DESC_MAX],
+                    "url": info.get("externalUrl") or f"{host}/{site}{posting['externalPath']}",
+                    "salary_min": None,
+                    "salary_max": None,
+                    "exposure_score": round(occupation_exposure(title), 3),
+                })
+        return jobs
+    except Exception as exc:
+        logger.debug("Workday %s failed: %s", slug, type(exc).__name__)
+        return jobs
+
+
 def listed_boards() -> list[tuple[str, str, str]]:
     """(ats, slug, company) of every board listed in this module."""
     lists = {"greenhouse": _GREENHOUSE_COMPANIES, "ashby": _ASHBY_COMPANIES, "lever": _LEVER_COMPANIES,
              "lever_eu": _LEVER_EU_COMPANIES, "workable": _WORKABLE_COMPANIES,
-             "smartrecruiters": _SMARTRECRUITERS_COMPANIES}
+             "smartrecruiters": _SMARTRECRUITERS_COMPANIES, "workday": _WORKDAY_BOARDS}
     return [(ats, slug, company) for ats, listed in lists.items() for slug, company in listed]
 
 
@@ -992,12 +1131,13 @@ def _all_boards(found: list[tuple[str, str, str]] = (), gone: set[tuple[str, str
     return boards
 
 
-async def _search_level2_ats_apis(queries: list[str], boards: dict[str, list[tuple[str, str]]] | None = None
-                                  ) -> list[dict]:
+async def _search_level2_ats_apis(queries: list[str], boards: dict[str, list[tuple[str, str]]] | None = None,
+                                  locations: list[str] | None = None) -> list[dict]:
     """
-    Concurrently fetch from Greenhouse, Ashby, Lever, Workable and SmartRecruiters public APIs: `boards`
+    Concurrently fetch from Greenhouse, Ashby, Lever, Workable, SmartRecruiters and Workday public APIs: `boards`
     ({ats: [(slug, company)]}, see _all_boards), by default the listed ones. Filters each company's
-    listings by query keyword relevance in a single pass.
+    listings by query keyword relevance in a single pass; Workday boards are searched with `queries` and read
+    in full only for postings that may be in `locations` (see _fetch_workday).
     """
     all_keywords = []
     for q in queries:
@@ -1010,8 +1150,14 @@ async def _search_level2_ats_apis(queries: list[str], boards: dict[str, list[tup
     async def fetch_lever_eu(slug: str, company: str, keywords: list[str]) -> list[dict]:
         return await _fetch_lever(slug, company, keywords, eu=True)
 
+    workday_gate = asyncio.Semaphore(_WORKDAY_CONCURRENCY)   # every Workday board's calls share it
+
+    async def fetch_workday(slug: str, company: str, keywords: list[str]) -> list[dict]:
+        return await _fetch_workday(slug, company, keywords, queries, locations, workday_gate)
+
     fetchers = {"greenhouse": _fetch_greenhouse, "ashby": _fetch_ashby, "lever": _fetch_lever,
-                "lever_eu": fetch_lever_eu, "workable": _fetch_workable, "smartrecruiters": _fetch_smartrecruiters}
+                "lever_eu": fetch_lever_eu, "workable": _fetch_workable, "smartrecruiters": _fetch_smartrecruiters,
+                "workday": fetch_workday}
     every = _all_boards() if boards is None else boards
     tasks = [fetchers[ats](slug, name, keywords) for ats, listed in every.items() if ats in fetchers
              for slug, name in listed]
@@ -1111,6 +1257,14 @@ async def find_board(client: httpx.AsyncClient, company: str) -> tuple[str, str,
 async def check_board(client: httpx.AsyncClient, ats: str, slug: str) -> int | None:
     """How many jobs a known board has now, or None when it's gone (404). Raises on anything else, so a
     passing error never drops a board."""
+    if ats == "workday":   # a search for anything, one posting long: its total
+        tenant, wd, site = slug.split("/")
+        resp = await client.post(f"https://{tenant}.{wd}.myworkdayjobs.com/wday/cxs/{tenant}/{site}/jobs",
+                                 json={"appliedFacets": {}, "limit": 1, "offset": 0, "searchText": ""})
+        if resp.status_code == 404:
+            return None
+        resp.raise_for_status()
+        return int(resp.json().get("total") or 0)
     resp = await client.get(_BOARD_API[ats].format(slug=slug))
     if resp.status_code == 404:
         return None
@@ -1642,7 +1796,7 @@ async def collect_jobs(queries: list[str], locations: list[str], web_search: boo
     # out over the locations, rather than repeating the whole search per location.
     l1, l2, l3, *l4_per_pair = await asyncio.gather(
         _search_level1_playwright(keywords),
-        _search_level2_ats_apis(queries, boards),
+        _search_level2_ats_apis(queries, boards, locations),
         _search_level3_websearch() if web_search else _no_jobs(),
         *[aggregators(q, area) for q, area in pairs],
     )
