@@ -94,6 +94,15 @@ def test_a_document_claim_the_profile_doesnt_back_holds_the_form():
     assert autopilot.hold_reasons({"ready": True, "error": "", "questions": [], "empty": []}, problems) == problems
 
 
+def test_a_letter_opening_on_a_barred_project_holds_the_form():
+    persona = {"core_info": {"first_name": "Ada"}, "projects": [{"name": "Windrush: Career Advisor", "not_in_opening": True}]}
+    job = {"title": "Engineer", "description": ""}
+    empty = {"summary": "", "experience": [], "projects": []}
+    assert autopilot.document_problems(empty, {"paragraphs": ["Building Windrush taught me.", "Next."]}, persona, job) == [
+        "The cover letter opens on Windrush, which you keep out of openings."]
+    assert autopilot.document_problems(empty, {"paragraphs": ["Other.", "Windrush taught me."]}, persona, job) == []
+
+
 @pytest.mark.parametrize("url, ats", [
     ("https://boards.greenhouse.io/acme/jobs/1", "Greenhouse"),
     ("https://job-boards.greenhouse.io/acme/jobs/1", "Greenhouse"),

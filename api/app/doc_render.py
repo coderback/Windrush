@@ -338,12 +338,35 @@ def build_letter_template_data(letter: dict, fit: tuple[str, ...] = ()) -> dict:
     }
 
 
+_COUNTRY = r"(?:united kingdom|great britain|england|scotland|wales|northern ireland|gbr?|uk|united states|usa|us)"
+# Before the town: "GB - London", "GBR-Nottingham-1 Chapel Qtr", "Hybrid - London", "Full-Time – London", "August 2026 - London".
+_NOT_THE_TOWN_YET = re.compile(
+    rf"^\s*(?:{_COUNTRY}|hybrid|remote|on-?site|home|office(?: based)?|(?:full|part)-?time|[a-z]+ \d{{4}})\s*[-–—]\s*", re.I)
+# After it: "Glasgow Campus", "Belfast  United Kingdom", "Berlin Metropolitan Area", "Massachusetts Remote Work".
+_NOT_THE_TOWN_ANY_MORE = re.compile(rf"\s+(?:campus|metropol[a-z]+ area|remote(?: work)?|{_COUNTRY})$", re.I)
+_NOT_A_TOWN = re.compile(rf"^(?:{_COUNTRY}\b|(?:hybrid|remote|on-?site|office|home|multiple locations|various|see listing|telecommute)$)", re.I)
+
+
+def _letter_town(location: str) -> str:
+    """The first town in a job's location, whichever way the employer's system writes it: no country, work setting or
+    street address ("United Kingdom - London", "Belfast 10 Mays Meadow", "LONDON, United Kingdom" -> a town each)."""
+    for part in re.split(r"[,;/|]", re.sub(r"\([^)]*\)", " ", location or "")):
+        while _NOT_THE_TOWN_YET.match(part):
+            part = _NOT_THE_TOWN_YET.sub("", part, count=1)
+        # What follows it: a street number ("-1 Chapel Qtr", " 10 Mays Meadow"), a site ("London - Shell Centre").
+        part = re.split(r"[\s-]+\d|^\d|\s+[-–—]\s+", part.strip())[0]
+        part = _NOT_THE_TOWN_ANY_MORE.sub("", part).strip(" -–—")
+        if part and not _NOT_A_TOWN.match(part):
+            return part.title() if part.isupper() and len(part) > 3 else part
+    return ""
+
+
 def _letter_recipient_lines(company: str, location: str) -> list[str]:
     """Who the letter is to, under the contact block: "Recruitment Team," / "Acme," / "London." The town is the
     first part of the job's location, without a work setting ("London, UK (Hybrid)" -> "London")."""
     if not company:
         return []
-    town = re.sub(r"\s*\([^)]*\)", "", re.split(r"[,;/]", location or "")[0]).strip()
+    town = _letter_town(location)
     return ["Recruitment Team,", f"{company}{',' if town else '.'}"] + ([f"{town}."] if town else [])
 
 

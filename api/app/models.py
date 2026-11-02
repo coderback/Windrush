@@ -44,6 +44,7 @@ class Project(BaseModel):
     outcomes: str = ""
     summary: str = ""
     is_ongoing: bool = False
+    not_in_opening: bool = False   # never the project a cover letter opens on (it can still be evidence)
 
 class BehavioralStory(BaseModel):
     title: str

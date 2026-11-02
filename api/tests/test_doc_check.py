@@ -237,6 +237,41 @@ def test_a_letter_with_a_flagged_word_is_revised(replies):
                                     f"Your team of 40 engineers ships daily. {agent._CLOSING_LINE}"]
 
 
+def test_job_ad_vocabulary_doesnt_rank_a_project_first():
+    job = {"title": "Graduate Developer", "description": "Our global teams value communication and quality. Apply for "
+           "this career in London: the application process, job requirements and hiring. You will price options."}
+    careers = {"name": "Careers", "problem_solved": "A job search and application process for global teams, on quality "
+               "and communication.", "outcomes": "Career and hiring requirements in London.", "technologies": []}
+    options = {"name": "Pricer", "problem_solved": "Options pricing.", "outcomes": "", "technologies": []}
+    assert agent._rank_projects_by_relevance(job, [careers, options])[0]["name"] == "Pricer"
+
+
+def _with_barred_project() -> dict:
+    persona = copy.deepcopy(GRADUATE)
+    persona["projects"] = [{"name": "Windrush: Career Advisor", "problem_solved": "FastAPI Python services.",
+                            "outcomes": "", "technologies": ["FastAPI", "Python"], "not_in_opening": True},
+                           {"name": "Pantry Planner", "problem_solved": "A meal planner.", "outcomes": "", "technologies": []}]
+    return persona
+
+
+def test_the_letter_opens_on_the_best_project_the_candidate_allows_there(replies):
+    replies.queue = [json.dumps({"paragraphs": ["Pantry Planner was hard.", "Windrush used FastAPI."]})]
+    letter = asyncio.run(agent.execute_tool("generate_cover_letter", {"job": AD, "persona": _with_barred_project()}))["letter"]
+    assert letter["paragraphs"][0] == "Pantry Planner was hard."
+    assert "PROJECT FOR THE HOOK: Pantry Planner" in replies.prompts[0]
+    assert "PROJECTS FOR THE EVIDENCE, in priority order: Windrush: Career Advisor" in replies.prompts[0]
+    assert "Do NOT name Windrush in the first paragraph." in replies.prompts[0]
+    assert len(replies.prompts) == 1                         # naming it as evidence isn't an issue, so no revision
+
+
+def test_a_letter_opening_on_a_barred_project_is_revised(replies):
+    replies.queue = [json.dumps({"paragraphs": ["Building Windrush was hard.", "Pantry Planner too."]}),
+                     json.dumps({"paragraphs": ["Pantry Planner was hard.", "Windrush too."]})]
+    letter = asyncio.run(agent.execute_tool("generate_cover_letter", {"job": AD, "persona": _with_barred_project()}))["letter"]
+    assert letter["paragraphs"][0] == "Pantry Planner was hard."
+    assert "open on Pantry Planner instead" in replies.prompts[1]
+
+
 # ── Critique and revise (writing quality) ─────────────────────────────────────────────────────
 
 @pytest.fixture

@@ -516,9 +516,40 @@ def test_the_letter_leaves_out_the_street_address():
     ("London, UK (Hybrid)", ["Recruitment Team,", "Acme Robotics,", "London."]),
     ("London / Remote", ["Recruitment Team,", "Acme Robotics,", "London."]),
     ("", ["Recruitment Team,", "Acme Robotics."]),
+    ("United Kingdom", ["Recruitment Team,", "Acme Robotics."]),
 ])
 def test_the_letter_is_addressed_to_the_employers_recruitment_team(location, lines):
     assert doc_render._letter_recipient_lines("Acme Robotics", location) == lines
+
+
+@pytest.mark.parametrize("location, town", [
+    ("United Kingdom - London", "London"),
+    ("GB - London, United Kingdom (Hybrid)", "London"),
+    ("GBR-Nottingham-1 Chapel Qtr", "Nottingham"),
+    ("Belfast 10 Mays Meadow; Der-Derry/Londonderry (Hybrid)", "Belfast"),
+    ("Canary Wharf, 1 Churchill Place", "Canary Wharf"),
+    ("Glasgow Campus", "Glasgow"),
+    ("Hybrid - London", "London"),
+    ("Office Based - London, UK", "London"),
+    ("August 2026 - London", "London"),
+    ("London - Shell Centre", "London"),
+    ("London, United Kingdom - Deliveroo", "London"),
+    ("LONDON, United Kingdom", "London"),
+    ("BURGESS HILL, WEST SUSSEX, United Kingdom", "Burgess Hill"),
+    ("Edinburgh, UK (ZUK129)", "Edinburgh"),
+    ("Home - UK- England", ""),
+    ("United Kingdom Offsite (ZUK99)", ""),
+    ("Multiple Locations", ""),
+    ("See listing", ""),
+    ("USA", ""),
+    ("US-Remote", ""),
+    ("Full-Time – London", "London"),
+    ("Belfast  United Kingdom", "Belfast"),
+    ("London Metropolitain Area", "London"),
+    ("Remote", ""),
+])
+def test_the_letter_takes_the_town_from_however_the_employer_writes_it(location, town):
+    assert doc_render._letter_town(location) == town
 
 
 def test_a_job_without_a_location_leaves_the_employers_location_blank(llm):

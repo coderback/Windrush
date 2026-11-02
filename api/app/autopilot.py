@@ -168,6 +168,9 @@ def document_problems(cv: dict, letter: dict, persona: dict, job: dict, research
             messages = list(dict.fromkeys(f["message"] for f in findings))
             out.append(f"{name} says something your profile doesn't back: " + "; ".join(messages[:3])
                        + (f" and {len(messages) - 3} more" if len(messages) > 3 else ""))
+    barred = agent.opening_names_barred_project(letter or {}, persona or {})
+    if barred:
+        out.append(f"The cover letter opens on {', '.join(barred)}, which you keep out of openings.")
     return out
 
 
