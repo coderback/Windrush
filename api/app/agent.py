@@ -428,6 +428,16 @@ _RELEVANCE_STOP = frozenset({
     "using", "into", "across", "within", "including", "etc", "via", "per", "new", "use",
     "used", "build", "building", "built", "develop", "developed", "developing", "design",
     "designing", "designed", "candidate", "company", "join", "looking", "passionate",
+    # Everyday words in nearly every ad, and the job-ad vocabulary itself: these say nothing about fit, and they ranked
+    # a project about job hunting (Windrush) first for ads it had nothing to do with.
+    "about", "against", "all", "also", "any", "best", "but", "can", "day", "each", "every", "first", "how", "like",
+    "may", "more", "next", "not", "one", "out", "over", "own", "part", "set", "since", "such", "than", "their", "them",
+    "they", "through", "time", "was", "were", "what", "when", "where", "which", "who", "why", "world", "would",
+    "application", "applications", "apply", "based", "benefits", "business", "candidates", "career", "careers",
+    "challenges", "committed", "communication", "core", "degree", "development", "directly", "driven", "employer",
+    "employers", "end", "engineering", "exposure", "full", "global", "hiring", "hours", "human", "impact", "job", "jobs",
+    "learn", "level", "live", "london", "office", "open", "people", "problem", "process", "quality", "real",
+    "recruitment", "requirements", "roles", "salary", "search", "sponsorship", "teams", "technical", "value", "years",
 })
 
 
@@ -462,6 +472,28 @@ def _rank_projects_by_relevance(job: dict, projects: list[dict]) -> list[dict]:
         scored.append((score, i, p))
     scored.sort(key=lambda x: (-x[0], x[1]))
     return [p for _, _, p in scored]
+
+
+def _project_short_name(name: str) -> str:
+    """'Windrush: Autonomous AI Career Advisor · AI London 2026' -> 'Windrush'."""
+    return re.split(r"[:·]", name or "")[0].strip()
+
+
+def opening_names_barred_project(letter: dict, persona: dict) -> list[str]:
+    """Projects the candidate keeps out of a letter's opening (Project.not_in_opening) that its first paragraph names."""
+    first = next(iter(letter.get("paragraphs") or []), "")
+    names = [_project_short_name(p.get("name", "")) for p in persona.get("projects") or [] if p.get("not_in_opening")]
+    return [n for n in names if n and re.search(rf"\b{re.escape(n)}\b", first, re.I)]
+
+
+def _letter_findings(letter: dict, persona: dict, job: dict, research: str, hook: str) -> list[dict]:
+    """What the letter's one targeted revision has to fix: unbacked claims, machine-sounding words, a barred opening."""
+    return (doc_check.check_facts("cover_letter", letter, persona, job, research)
+            + doc_check.check_style("cover_letter", letter)
+            + [{"kind": "opening", "field": "paragraphs.0", "label": "First paragraph", "value": name,
+                "message": f"it names {name}, which the candidate keeps out of the opening"
+                           + (f": open on {_project_short_name(hook)} instead" if hook else "")}
+               for name in opening_names_barred_project(letter, persona)])
 
 
 # How many skills a tailored CV lists: the candidate's own CV design shows about 30, in 5 rows.
@@ -604,8 +636,9 @@ def _finding_keys(findings: list[dict]) -> set[tuple[str, str]]:
 def _issue_lines(findings: list[dict]) -> str:
     lines = []
     for f in findings:
-        fix = ("use plain wording instead" if f["kind"] == "word"
-               else "remove it, or replace it with a fact the candidate data states")
+        fix = {"word": "use plain wording instead",
+               "opening": "tell the paragraph's story from that project, using only what the candidate data states",
+               }.get(f["kind"], "remove it, or replace it with a fact the candidate data states")
         lines.append(f"- {f['label']}: {f['message']} — {fix}")
     return "\n".join(lines)
 
@@ -1185,10 +1218,13 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
         core = persona.get("core_info", {})
         full_name = f"{core.get('first_name', '')} {core.get('last_name', '')}".strip()
         level = _seniority(persona)
-        # Surface the most domain-relevant projects so the EVIDENCE paragraph can anchor on
-        # the best-fitting project (not always the internship) when one fits the role better.
+        # The most domain-relevant projects, named by role: the model opens on whichever project it's told to (with the
+        # top three in reverse, every letter opened on the third), so the code picks the hook, never one the candidate
+        # keeps out of openings (Project.not_in_opening); those can still be evidence.
         ranked_projects = _rank_projects_by_relevance(job, _persona_projects_for_llm(persona))
-        top_project_names = [p["name"] for p in ranked_projects[:3]]
+        barred = {p.get("name") for p in persona.get("projects") or [] if p.get("not_in_opening")}
+        hook_project = next((p["name"] for p in ranked_projects if p["name"] not in barred), "")
+        evidence_projects = [p["name"] for p in ranked_projects if p["name"] != hook_project][:2]
         # Live company research grounds the "Why them?" paragraph (best-effort; "" on failure).
         company_research = await _research_company(job.get("company", ""), job.get("title", ""))
 
@@ -1225,7 +1261,7 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
             "'headline' = the candidate's concise professional identity in 2-4 words "
             "(e.g. 'Computer Science Graduate'); do NOT put the role being applied for. "
             "Write EXACTLY 4 paragraphs, one page total (~320-380 words), in this order: "
-            "(1) HOOK ~90 words — open on a specific moment from ONE of the candidate's own projects: the hardest "
+            "(1) HOOK ~90 words — open on a specific moment from the PROJECT FOR THE HOOK named below: the hardest "
             "technical challenge in it and what actually made it hard (the shape 'the hardest challenge wasn't X, "
             "but Y'), told only from what that project's data says. Say what it shows about how the candidate works "
             "(an instinct or habit), then tie that same instinct to the EXACT role and ONE concrete, specific fact "
@@ -1266,8 +1302,11 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
                 f"CANDIDATE PERSONA (JSON): {json.dumps(_llm_persona(persona))}\n\n"
                 f"JOB: {job.get('title')} at {job.get('company')}\n"
                 f"DESCRIPTION: {job.get('description', '')[:2500]}"
-                + (f"\n\nMOST DOMAIN-RELEVANT PROJECTS for this role, in priority order (one for the hook, a "
-                   f"different two for the evidence): {', '.join(top_project_names)}" if top_project_names else "")
+                + (f"\n\nPROJECT FOR THE HOOK: {hook_project}" if hook_project else "")
+                + (f"\nPROJECTS FOR THE EVIDENCE, in priority order: {', '.join(evidence_projects)}"
+                   if evidence_projects else "")
+                + (f"\nDo NOT name {', '.join(_project_short_name(b) for b in sorted(barred))} in the first paragraph."
+                   if barred else "")
                 + (f"\n\nCOMPANY RESEARCH (take the hook's fact about the employer from this and tie it to the "
                    f"candidate — do NOT restate it):\n{company_research}" if company_research else "")
             ),
@@ -1307,16 +1346,14 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
         # machine-sounding words: one targeted revision, kept only if it clears them.
         revision = "fallback"
         if data:
-            findings = (doc_check.check_facts("cover_letter", letter, persona, job, company_research)
-                        + doc_check.check_style("cover_letter", letter))
+            findings = _letter_findings(letter, persona, job, company_research, hook_project)
             revision = "clean"
             if findings:
                 revised = await _revise_letter_text(letter, findings, persona, job)
                 if revised is None:
                     revision = f"{len(findings)} found, bad reply"
                 else:
-                    after = (doc_check.check_facts("cover_letter", revised, persona, job, company_research)
-                             + doc_check.check_style("cover_letter", revised))
+                    after = _letter_findings(revised, persona, job, company_research, hook_project)
                     kept = _better(findings, after)
                     revision = f"{len(findings)}->{len(after)} {'kept' if kept else 'rejected'}"
                     if kept:

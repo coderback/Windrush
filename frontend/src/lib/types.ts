@@ -128,6 +128,7 @@ export interface Project {
   outcomes: string;
   summary: string;
   is_ongoing: boolean;
+  not_in_opening?: boolean;
 }
 
 export interface Certification {

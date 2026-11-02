@@ -123,7 +123,7 @@ def test_upload_keeps_bullets_stack_projects_and_certifications(client, user, mo
     assert {"grade": "First Class Honours", "end_date": "2025"}.items() <= p["education"][0].items()  # a lone year ends it
     assert p["projects"] == [{"name": "Engine Sim", "url": "https://github.com/ada/engine",
                               "problem_solved": "Simulates the engine.", "technologies": ["Python", "Numba"],
-                              "outcomes": "10x faster than the 1843 notes", "summary": "", "is_ongoing": False}]
+                              "outcomes": "10x faster than the 1843 notes", "summary": "", "is_ongoing": False, "not_in_opening": False}]
     assert p["certifications"][0]["issuing_organization"] == "Amazon"
     assert p["summary"] == "Engineer who ships ML products."
 

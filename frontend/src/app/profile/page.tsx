@@ -472,6 +472,10 @@ export default function ProfilePage() {
                       <input type="checkbox" checked={p.is_ongoing} onChange={(e) => projects.edit(i, { is_ongoing: e.target.checked })}
                         className="w-4 h-4" style={{ accentColor: "var(--teal)" }} />Still working on it
                     </label>
+                    <label className="flex items-center gap-2 text-[13.5px]">
+                      <input type="checkbox" checked={!!p.not_in_opening} onChange={(e) => projects.edit(i, { not_in_opening: e.target.checked })}
+                        className="w-4 h-4" style={{ accentColor: "var(--teal)" }} />Don&apos;t open cover letters with this project
+                    </label>
                   </div>
                 }>
                 {(p.summary || p.problem_solved) && <p className="m-0 text-[13.5px] leading-[1.5] text-ink-2">{p.summary || p.problem_solved}</p>}
