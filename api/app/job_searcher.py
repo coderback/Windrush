@@ -305,6 +305,68 @@ def _jsonld_salary(obj: dict) -> tuple[float | None, float | None]:
     return lo, hi
 
 
+# Application systems host many employers' jobs, so their address never names the employer. Where the link does:
+_ATS_EMPLOYER_IN_PATH = {
+    "greenhouse.io": re.compile(r"^/([^/]+)/jobs/"), "lever.co": re.compile(r"^/([^/]+)"),
+    "ashbyhq.com": re.compile(r"^/([^/]+)"), "workable.com": re.compile(r"^/([^/]+)"),
+    "smartrecruiters.com": re.compile(r"^/([^/]+)"),
+}
+_ATS_EMPLOYER_IN_SUBDOMAIN = ("teamtailor.com", "recruitee.com", "pinpointhq.com", "bamboohr.com", "eightfold.ai",
+                              "jobvite.com", "applytojob.com")
+_ATS_HOSTS = (*_ATS_EMPLOYER_IN_PATH, *_ATS_EMPLOYER_IN_SUBDOMAIN, "myworkdayjobs.com", "icims.com", "taleo.net",
+              "oraclecloud.com", "successfactors.com")
+_ATS_NAME = re.compile(r"(?:powered by )?(?:greenhouse|lever|ashby|workable|workday|smartrecruiters|teamtailor|recruitee|"
+                       r"pinpoint|bamboohr|eightfold|jobvite|icims|taleo|successfactors)(?: job boards?)?", re.I)
+
+
+def _on_ats(host: str, ats: str) -> bool:
+    return host == ats or host.endswith("." + ats)
+
+
+def _employer_from_address(url: str) -> str:
+    """The employer as far as a job link says, "" when it doesn't. The site's own address counts only when the site
+    isn't an application system's: job-boards.greenhouse.io is nobody's employer."""
+    from urllib.parse import parse_qs, urlparse
+    host, path = _site(url)
+    employer, _ = _employer_and_place("", url)
+    if employer != "Unknown":
+        return employer
+    named = ""
+    if _on_ats(host, "greenhouse.io") and path.startswith("/embed/"):
+        named = (parse_qs(urlparse(url).query).get("for") or [""])[0]
+    for ats, where in _ATS_EMPLOYER_IN_PATH.items():
+        m = where.search(path) if _on_ats(host, ats) and not named else None
+        if m:
+            named = m.group(1)
+    for ats in _ATS_EMPLOYER_IN_SUBDOMAIN:
+        if _on_ats(host, ats) and host != ats:
+            named = host.split(".")[0]
+    if named and named not in ("www", "apply", "embed", "jobs", "careers"):
+        return named.replace("-", " ").replace("_", " ").title()
+    return "" if any(_on_ats(host, ats) for ats in _ATS_HOSTS) else host
+
+
+async def _greenhouse_company(url: str) -> str:
+    """The employer's own name for a Greenhouse link, from Greenhouse's job data ("Catapult Sports", where the link
+    only says "catapultsports"). "" when it isn't one or that can't be read."""
+    from urllib.parse import parse_qs, urlparse
+    parsed = urlparse(url)
+    host, path = _site(url)
+    if not _on_ats(host, "greenhouse.io"):
+        return ""
+    m = re.search(r"/([^/]+)/jobs/\d+", path)
+    slug = m.group(1) if m else (parse_qs(parsed.query).get("for") or [""])[0]
+    if not re.fullmatch(r"[A-Za-z0-9_-]+", slug):
+        return ""
+    try:
+        async with http_client.async_client(follow_redirects=True, timeout=12.0) as client:
+            resp = await client.get(f"https://boards-api.greenhouse.io/v1/boards/{slug}")
+        return str(resp.json().get("name") or "").strip() if resp.status_code == 200 else ""
+    except Exception as exc:
+        logger.debug("Greenhouse board name failed for %s: %s", slug, exc)
+        return ""
+
+
 async def scrape_job_from_url(url: str) -> dict:
     """
     Scrape an arbitrary job-posting URL into a full Job dict ready for analysis.
@@ -316,7 +378,6 @@ async def scrape_job_from_url(url: str) -> dict:
     the caller can surface a clear "couldn't read that listing" message.
     """
     import uuid
-    from urllib.parse import urlparse
 
     if not url or not url.startswith("http"):
         raise ValueError("Please paste a valid http(s) job-posting link.")
@@ -354,10 +415,18 @@ async def scrape_job_from_url(url: str) -> dict:
         if not title:
             page_title = _first_tag_text(raw_html, "title")
             title = re.split(r"\s+[|\-–—]\s+", page_title)[0].strip() if page_title else ""
+    # Lever's page title is "Bloom & Wild Group - Junior Engineer", where the link only says "bloomon".
+    if not company and _on_ats(_site(url)[0], "lever.co"):
+        named, dash, role = title.partition(" - ")
+        if dash and role.strip():
+            company, title = named.strip(), role.strip()
+    if not company:
+        company = await _greenhouse_company(url)
     if not company:
         company = _meta_content(raw_html, "og:site_name")
+        company = "" if _ATS_NAME.fullmatch(company) else company
     if not company:
-        company = urlparse(url).netloc.replace("www.", "")
+        company = _employer_from_address(url)
 
     title = title.strip()
     if not title and not description:

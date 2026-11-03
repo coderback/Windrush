@@ -758,3 +758,76 @@ def test_nothing_in_the_searched_locations_is_not_the_fixture(monkeypatch):
         return [{"title": "Software Engineer", "company": "Far", "location": "Austin, TX", "url": "https://x/1"}]
     monkeypatch.setattr(job_searcher, "_search_level2_ats_apis", fake_ats)
     assert asyncio.run(job_searcher.search_jobs_multi("software engineer", ["London"])) == []
+
+
+# ── A pasted link's employer ──────────────────────────────────────────────────────────────────
+
+@pytest.mark.parametrize("url, employer", [
+    ("https://job-boards.greenhouse.io/catapultsports/jobs/7821130", "Catapultsports"),
+    ("https://job-boards.eu.greenhouse.io/b2c2/jobs/4745320101/", "B2C2"),
+    ("https://boards.greenhouse.io/embed/job_app?for=acme-labs&token=123", "Acme Labs"),
+    ("https://jobs.lever.co/mytos/bbb558c0-d769-4b5f-a3a7-025642c2626d/apply", "Mytos"),
+    ("https://jobs.eu.lever.co/bloomon/7f832927-5c83-4fe9", "Bloomon"),
+    ("https://jobs.ashbyhq.com/open-ai/abc", "Open Ai"),
+    ("https://apply.workable.com/acme/j/ABC123/", "Acme"),
+    ("https://jobs.smartrecruiters.com/Gousto/123", "Gousto"),
+    ("https://acme.teamtailor.com/jobs/1-engineer", "Acme"),
+    ("https://lseg.wd3.myworkdayjobs.com/en-US/Graduate_Careers/details/Engineer_R1", "LSEG"),
+    ("https://acme.wd3.myworkdayjobs.com/en-US/External/job/London/Engineer_R1", "Acme"),
+    ("https://careers.arm.com/job/1", "Arm"),
+    ("https://www.acme-robotics.com/careers/engineer", "acme-robotics.com"),     # its own site: the best there is
+    ("https://job-boards.greenhouse.io/", ""),                                   # never the system's own address
+    ("https://jobs.lever.co/", ""),
+    ("https://fa-abc.fa.em2.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX/job/1", ""),
+])
+def test_a_job_links_address_names_the_employer_or_nothing(url, employer):
+    assert job_searcher._employer_from_address(url) == employer
+
+
+def _pasted(monkeypatch, html: str, greenhouse: str = "") -> None:
+    async def ok(url):
+        return None
+
+    async def page(client, url):
+        return type("Page", (), {"text": html, "raise_for_status": lambda self: None})()
+
+    async def description(url, max_chars=8000):
+        return "A long enough description of the job."
+
+    async def company(url):
+        return greenhouse
+    monkeypatch.setattr(job_searcher.net_guard, "assert_public_url", ok)
+    monkeypatch.setattr(job_searcher.net_guard, "safe_get", page)
+    monkeypatch.setattr(job_searcher, "fetch_full_description", description)
+    monkeypatch.setattr(job_searcher, "_greenhouse_company", company)
+
+
+GREENHOUSE_LINK = "https://job-boards.greenhouse.io/catapultsports/jobs/7821130"
+
+
+def test_a_pasted_greenhouse_link_gets_the_employers_own_name(monkeypatch):
+    _pasted(monkeypatch, "<html><title>Job Application</title></html>", greenhouse="Catapult Sports")
+    assert asyncio.run(job_searcher.scrape_job_from_url(GREENHOUSE_LINK))["company"] == "Catapult Sports"
+
+
+def test_with_greenhouse_unreachable_the_link_still_names_the_employer(monkeypatch):
+    _pasted(monkeypatch, "<html><title>Job Application</title></html>")
+    assert asyncio.run(job_searcher.scrape_job_from_url(GREENHOUSE_LINK))["company"] == "Catapultsports"
+
+
+def test_a_page_naming_the_application_system_isnt_taken_for_the_employer(monkeypatch):
+    _pasted(monkeypatch, '<meta property="og:site_name" content="Lever"><h1>Engineer</h1>')
+    job = asyncio.run(job_searcher.scrape_job_from_url("https://jobs.lever.co/mytos/bbb558c0-d769-4b5f"))
+    assert job["company"] == "Mytos"
+
+
+def test_a_lever_page_title_gives_the_employer_and_the_role(monkeypatch):
+    _pasted(monkeypatch, '<meta property="og:title" content="Bloom &amp; Wild Group - Junior Full-Stack - London">')
+    job = asyncio.run(job_searcher.scrape_job_from_url("https://jobs.lever.co/bloomon/7f832927-5c83-4fe9"))
+    assert (job["company"], job["title"]) == ("Bloom & Wild Group", "Junior Full-Stack - London")
+
+
+def test_a_page_stating_its_employer_is_believed_first(monkeypatch):
+    _pasted(monkeypatch, '<meta property="og:site_name" content="Acme Robotics"><h1>Engineer</h1>')
+    job = asyncio.run(job_searcher.scrape_job_from_url("https://www.acme.example/job/1"))
+    assert job["company"] == "Acme Robotics"
