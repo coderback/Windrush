@@ -272,6 +272,43 @@ test("older job emails are counted before they're read, and the run can be stopp
   api.expectAllMocked();
 });
 
+test("the chart shows how applications went, with no reply only after 4 weeks of silence", async ({ page }) => {
+  await signIn(page);
+  const daysAgo = (n: number) => new Date(Date.now() - n * 86400000).toISOString();
+  const sent = (id: string, status: string, applied: number, steps: [string, number][] = []) => app(id, status, {
+    date_applied: daysAgo(applied).slice(0, 10),
+    history: [["Applied", applied] as [string, number], ...steps].map(([s, d]) => ({ status: s, source: "email", changed_at: daysAgo(d) })),
+  });
+  const api = await mockApi(page, {
+    ...SHELL,
+    "GET /api/applications": [
+      sent("waiting", "Applied", 10),
+      sent("silent", "Applied", 60),
+      sent("no", "Rejected", 50, [["Rejected", 40]]),
+      sent("far", "Rejected", 90, [["Responded", 80], ["Interview", 70], ["Rejected", 60]]),
+      sent("yes", "Offer", 40, [["Interview", 30], ["Offer", 20]]),
+      sent("old", "Rejected", 300, [["Rejected", 280]]),
+      app("unsent", "Saved"),
+    ],
+  });
+  await page.goto("/applications");
+  await page.getByRole("group", { name: "View" }).getByRole("button", { name: "How they went" }).click();
+  await expect(page.getByText("5 applied, 3 heard back (60%), 1 offer.")).toBeVisible();
+
+  await page.getByText("Show as a table").click();
+  const row = (from: string, to: string, n: string) => page.getByRole("row", { name: `${from} ${to} ${n}`, exact: true });
+  for (const [from, to, n] of [["Applied", "No reply", "1"], ["Applied", "Still waiting", "1"], ["Applied", "Rejected", "1"],
+    ["Applied", "Responded", "1"], ["Responded", "Interview", "1"], ["Interview", "Rejected", "1"], ["Applied", "Interview", "1"],
+    ["Interview", "Offer", "1"]]) {
+    await expect(row(from, to, n)).toBeVisible();
+  }
+
+  await page.getByRole("group", { name: "Chart range" }).getByRole("button", { name: "1 year" }).click();
+  await expect(page.getByText("6 applied, 4 heard back (67%), 1 offer.")).toBeVisible();
+  await page.getByRole("img", { name: /Sankey chart/ }).screenshot({ path: "test-results/sankey.png" });
+  api.expectAllMocked();
+});
+
 test("the review queue lists paused applications and records one you sent yourself", async ({ page }) => {
   await signIn(page);
   const patches: unknown[] = [];
