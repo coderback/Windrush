@@ -618,3 +618,152 @@ def test_an_interview_from_the_employers_own_address_adds_the_application(past, 
          _past("interview", company="Apple", role="Seasonal Specialist"))
     asyncio.run(_finish(user))
     assert _app_named(user, "Apple")["status"] == "Interview"
+
+
+# ── Replies that don't look like application emails ───────────────────────────────────────────
+
+def test_a_rejection_from_a_job_alerts_address_isnt_taken_for_an_alert():
+    email = _email("noreply@jobalerts.leonardojobs.co.uk", "Leonardo Application")
+    assert gmail.is_job_alert(email)
+    assert not gmail.is_job_alert({**email, "text": "Thank you for applying for the position of Graduate Software "
+                                                    "Engineer. We regret that the position you have applied for has been filled."})
+
+
+def test_an_alert_that_only_mentions_applying_stays_an_alert():
+    email = _email("jobalerts-noreply@linkedin.com", "Graduate Software Engineer at Catapult and 12 more jobs")
+    assert gmail.is_job_alert({**email, "text": "Apply now with one click. Be an early applicant to these jobs."})
+
+
+def test_workables_replies_are_searched_for_and_read(past, user):
+    assert "workablemail.com" in gmail._past_query("6m")
+    _app(user, "Validus", "Junior Python Software Engineer", "Applied")
+    past("m1", "Validus <noreply@candidates.workablemail.com>", "Junior Python Software Engineer - Validus",
+         "We regret to inform you that your application has not been selected.",
+         _past("rejected", 1, company="Validus", role="Junior Python Software Engineer"), days_ago=-1)
+    state = asyncio.run(_finish(user))
+    assert state["counts"] == {"applied": 1} and _app_named(user, "Validus")["status"] == "Rejected"
+
+
+# ── One application, however its emails word it ───────────────────────────────────────────────
+
+def _apps_at(user, company):
+    return [a for a in tracker.list_applications(user) if a["company"] == company]
+
+
+def test_follow_ups_that_word_the_role_differently_stay_on_one_application(past, user):
+    past("m1", "LinkedIn <jobs-noreply@linkedin.com>", "Ada, your application was sent to CarbonTrac", "Sent.",
+         _past("received", company="CarbonTrac", role="Full Stack Engineer - Intern"), days_ago=30)
+    past("m2", "CarbonTrac <hr@carbontrac.io>", "Interview - CarbonTrac Intern", "Let's talk.",
+         _past("interview", company="CarbonTrac", role="Full Stack Engineer Intern"), days_ago=25)
+    past("m3", "CarbonTrac <hr@carbontrac.io>", "Follow-up on your application", "We'd like to offer you the role.",
+         _past("offer", company="CarbonTrac", role="Full Stack Developer Intern"), days_ago=15)
+    asyncio.run(_finish(user))
+    apps = _apps_at(user, "CarbonTrac")
+    assert len(apps) == 1 and apps[0]["status"] == "Offer" and apps[0]["job_title"] == "Full Stack Engineer - Intern"
+    assert [s["status"] for s in apps[0]["history"]] == ["Applied", "Interview", "Offer"]
+
+
+def test_a_reply_in_the_same_thread_is_the_same_application_whatever_it_calls_the_role(past, user, google):
+    past("m1", "Alvan <hr@alvan.co.uk>", "Invitation to Interview", "Please come in.",
+         _past("interview", company="Alvan", role="Made Smarter"), days_ago=20)
+    past("m2", "Alvan <hr@alvan.co.uk>", "RE: Invitation to Interview", "See you then.",
+         _past("interview", company="Alvan", role="Digital placement"), days_ago=18)
+    google.messages["m2"]["threadId"] = google.messages["m1"]["threadId"]
+    asyncio.run(_finish(user))
+    assert len(_apps_at(user, "Alvan")) == 1
+
+
+def test_two_confirmations_are_two_applications_however_alike_their_roles(past, user):
+    past("m1", "LinkedIn <jobs-noreply@linkedin.com>", "Ada, your application was sent to Hunter Bond", "Sent.",
+         _past("received", company="Hunter Bond", role="Graduate Software Engineer - Python"), days_ago=30)
+    past("m2", "LinkedIn <jobs-noreply@linkedin.com>", "Ada, your application was sent to Hunter Bond again", "Sent.",
+         _past("received", company="Hunter Bond", role="Junior Software Engineer - Finance"), days_ago=28)
+    asyncio.run(_finish(user))
+    assert len(_apps_at(user, "Hunter Bond")) == 2
+
+
+def test_a_follow_up_that_could_be_about_several_applications_isnt_guessed(past, user):
+    past("m1", "Glencore <hr@glencore.com>", "Your Glencore graduate application", "Received.",
+         _past("received", company="Glencore", role="Technology Graduate Scheme"), days_ago=40)
+    past("m2", "Glencore <hr@glencore.com>", "Your Glencore technology application", "Received.",
+         _past("received", company="Glencore", role="Technology Programme"), days_ago=38)
+    past("m3", "Glencore <hr@glencore.com>", "Your Glencore application", "Unfortunately not.",
+         _past("rejected", company="Glencore", role="Technology Graduate Programme"), days_ago=20)
+    asyncio.run(_finish(user))
+    assert {a["job_title"]: a["status"] for a in _apps_at(user, "Glencore")} == {
+        "Technology Graduate Scheme": "Applied", "Technology Programme": "Applied",
+        "Technology Graduate Programme": "Rejected"}
+
+
+def test_a_follow_up_long_after_isnt_tied_to_an_old_application(past, user):
+    past("m1", "Globex <no-reply@greenhouse.io>", "Thanks for applying to Globex", "Thanks.",
+         _past("received", role="Data Engineer"), days_ago=300)
+    past("m2", "Globex <no-reply@greenhouse.io>", "Your application to Globex", "Unfortunately not.",
+         _past("rejected", role="Senior Data Engineer II"), days_ago=20)
+    asyncio.run(_finish(user))
+    assert {a["job_title"]: a["status"] for a in _apps_at(user, "Globex")} == {
+        "Data Engineer": "Applied", "Senior Data Engineer II": "Rejected"}
+
+
+def test_an_assessment_name_isnt_taken_for_the_role(past, user):
+    past("m1", "PwC <no-reply@myworkday.com>", "Confirming your PwC job application", "Thanks.",
+         _past("received", company="PwC", role="Graduate Technology"), days_ago=20)
+    past("m2", "PwC <careers@pwc.com>", "Reminder: complete your PwC assessment", "Please complete it.",
+         _past("assessment", company="PwC", role="Online Assessment"), days_ago=15)
+    asyncio.run(_finish(user))
+    apps = _apps_at(user, "PwC")
+    assert [(a["job_title"], a["status"]) for a in apps] == [("Graduate Technology", "Responded")]
+
+
+def test_a_confirmation_just_after_a_step_doesnt_undo_it(past, user):
+    past("m1", "Optiver <jobs@optiver.com>", "Optiver - Assessment invitation coming soon", "A test follows.",
+         _past("assessment", company="Optiver", role="Graduate Software Engineer"), days_ago=20)
+    past("m2", "Optiver <jobs@optiver.com>", "Thank you for applying to Optiver", "Thanks.",
+         _past("received", company="Optiver", role="Graduate Software Engineer"), days_ago=20)
+    asyncio.run(_finish(user))
+    assert _app_named(user, "Optiver")["status"] == "Responded"
+
+
+def test_a_confirmation_well_after_a_rejection_means_they_applied_again(past, user):
+    past("m1", "Roku <jobs@roku.com>", "Thank you for applying to Roku", "Thanks.",
+         _past("received", company="Roku", role="Software Engineer Intern"), days_ago=200)
+    past("m2", "Roku <jobs@roku.com>", "Your application for an internship with Roku", "Unfortunately not.",
+         _past("rejected", company="Roku", role="Software Engineer Intern"), days_ago=120)
+    past("m3", "Roku <jobs@roku.com>", "Thank you for applying again to Roku", "Thanks.",
+         _past("received", company="Roku", role="Software Engineer Intern"), days_ago=30)
+    asyncio.run(_finish(user))
+    app = _app_named(user, "Roku")
+    assert app["status"] == "Applied" and [s["status"] for s in app["history"]] == ["Applied", "Rejected", "Applied"]
+
+
+def test_a_boards_confirmation_for_another_role_is_another_application(past, user):
+    _app(user, "Intellect Group", "Junior AI Engineer", "Applied")
+    past("m1", "LinkedIn <jobs-noreply@linkedin.com>", "Ada, your application was sent to Intellect Group", "Sent.",
+         _past("received", 1, company="Intellect Group", role="Junior Data Scientist"))
+    past("m2", "LinkedIn <jobs-noreply@linkedin.com>", "Ada, your application was sent to Intellect Group Ltd", "Sent.",
+         _past("received", 1, company="Intellect Group", role="Graduate AI Engineer"))    # the same job, by its words
+    asyncio.run(_finish(user))
+    assert sorted(a["job_title"] for a in _apps_at(user, "Intellect Group")) == ["Junior AI Engineer", "Junior Data Scientist"]
+
+
+def test_add_all_moves_an_application_it_links_a_rejection_to(inbox, user, client):
+    apps, mail = inbox
+    con = sqlite3.connect(tracker._DB_PATH)     # applied last week, turned down an hour ago
+    con.execute("UPDATE status_history SET changed_at='2020-01-01T00:00:00+00:00' WHERE application_id=?", (apps["catapult"],))
+    con.commit()
+    con.close()
+    mail("a1", "Catapult <jobs@catapult.com>", "Your application to Catapult", "Unfortunately not.",
+         {**_reading("rejected", None, company="Catapult"), "role": "Graduate Software Engineer"})
+    asyncio.run(gmail.sync(user))
+    assert client.post("/gmail/events/track-all").json()["linked"] == 1
+    assert _status(user, apps["catapult"]) == "Rejected"
+
+
+def test_add_all_doesnt_let_an_old_email_undo_a_newer_status(inbox, user, client):
+    apps, mail = inbox
+    tracker.update_status(apps["catapult"], "Interview", user_id=user)
+    mail("a1", "Catapult <jobs@catapult.com>", "Thanks for applying to Catapult", "Received.",
+         {**_reading("received", None, company="Catapult"), "role": "Graduate Software Engineer"}, minutes_ago=5000)
+    asyncio.run(gmail.sync(user))
+    client.post("/gmail/events/track-all")
+    assert _status(user, apps["catapult"]) == "Interview"
