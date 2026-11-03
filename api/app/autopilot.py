@@ -483,14 +483,14 @@ async def _apply(state: _Run, user_id: str, job: dict, verdict: dict, cfg: dict,
         app_id = (tracker.add_application(user_id, tracked, {}, text, {"fit_score": verdict.get("fit_score"),
                                                                        "level_match": verdict.get("level_match", "ok"),
                                                                        "skill_gaps": verdict.get("skill_gaps") or []},
-                                          tailored_cv=json.dumps(cv), status=status)
+                                          tailored_cv=json.dumps(cv), status=status, source="autopilot")
                   or tracker.find_application_id(user_id, job.get("company", ""), job.get("title", "")))
         if app_id:
             note = {"submitted": "Sent by autopilot.", "unconfirmed": "Autopilot clicked submit but saw no confirmation.",
                     "needs_you": "Autopilot filled this in and held it for you."}[outcome]
             if final.get("code_asked"):
                 note = "Autopilot filled this in, but the job site asked for a code it emailed you: apply on its page."
-            tracker.update_status(app_id, status, note, user_id=user_id)
+            tracker.update_status(app_id, status, note, user_id=user_id, source="autopilot")
             tracker.set_application_questions(app_id, questions, user_id=user_id)
     reused = (f"Used the CV and cover letter from the {'practice ' if earlier['practice'] else ''}run of "
               f"{earlier['updated_at'][:10]}. " if earlier else "")

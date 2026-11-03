@@ -1153,6 +1153,38 @@ async def gmail_sync(current_user: Annotated[auth.User, Depends(auth.get_current
     return {"started": True}
 
 
+def _backfill_period(period: str, user_id: str) -> str:
+    if period not in gmail.BACKFILL_DAYS:
+        raise HTTPException(status_code=400, detail="Choose 6 months, 1 year or 2 years")
+    account = tracker.get_gmail_account(user_id)
+    if not account:
+        raise HTTPException(status_code=400, detail="Gmail isn't connected")
+    if account.get("problem"):
+        raise HTTPException(status_code=400, detail=account["problem"])
+    return period
+
+
+@app.get("/gmail/backfill/count")
+async def gmail_backfill_count(period: str, current_user: Annotated[auth.User, Depends(auth.get_current_user)]):
+    """How many job emails that period holds and how many are still unread, before anything is read."""
+    try:
+        return await gmail.backfill_count(current_user.id, _backfill_period(period, current_user.id))
+    except gmail.GmailError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.post("/gmail/backfill", status_code=202)
+async def gmail_backfill_start(body: dict, current_user: Annotated[auth.User, Depends(auth.get_current_user)]):
+    if not gmail.start_backfill(current_user.id, _backfill_period(body.get("period", ""), current_user.id)):
+        raise HTTPException(status_code=409, detail="Older mail is already being read")
+    return {"started": True}
+
+
+@app.delete("/gmail/backfill")
+async def gmail_backfill_stop(current_user: Annotated[auth.User, Depends(auth.get_current_user)]):
+    return {"stopping": gmail.stop_backfill(current_user.id)}
+
+
 @app.delete("/gmail")
 async def gmail_disconnect(current_user: Annotated[auth.User, Depends(auth.get_current_user)]):
     """Revoke Windrush's Gmail access and forget the account."""

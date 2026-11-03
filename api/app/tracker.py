@@ -55,6 +55,19 @@ CREATE TABLE IF NOT EXISTS applications (
 );
 """
 
+# Every status an application has been at. source: you, autopilot, email, or earlier (rebuilt from what was stored
+# before this log began, so its dates are the best known rather than the moment it happened).
+_CREATE_STATUS_HISTORY_TABLE = """
+CREATE TABLE IF NOT EXISTS status_history (
+    id             TEXT PRIMARY KEY,
+    user_id        TEXT NOT NULL,
+    application_id TEXT NOT NULL,
+    status         TEXT NOT NULL,
+    source         TEXT NOT NULL,
+    changed_at     TEXT NOT NULL
+);
+"""
+
 _CREATE_INDEX = """
 CREATE UNIQUE INDEX IF NOT EXISTS idx_dedup
     ON applications(user_id, lower(company), lower(job_title));
@@ -156,6 +169,8 @@ def init_db(db_path: str = "") -> None:
         _gmail_tables(con)
         _suggestion_tables(con)
         con.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_autopilot_job ON autopilot_runs(user_id, job_id)")
+        con.execute(_CREATE_STATUS_HISTORY_TABLE)
+        con.execute("CREATE INDEX IF NOT EXISTS idx_status_history_user ON status_history(user_id, changed_at)")
         # Migrations — safe to run on existing DBs
         for stmt in [
             "ALTER TABLE users ADD COLUMN persona TEXT DEFAULT '{}'",
@@ -181,6 +196,7 @@ def init_db(db_path: str = "") -> None:
             con.execute(_CREATE_INDEX)
         except sqlite3.OperationalError:
             pass
+        _start_status_history(con)
         con.commit()
         con.close()
         logger.info("Tracker DB initialised at %s", _DB_PATH)
@@ -392,6 +408,31 @@ def set_onboarding_complete(user_id: str) -> None:
     con.close()
 
 
+def _log_status(con: sqlite3.Connection, user_id: str, app_id: str, status: str, source: str, at: str) -> None:
+    con.execute("INSERT INTO status_history (id, user_id, application_id, status, source, changed_at) VALUES (?,?,?,?,?,?)",
+                (uuid.uuid4().hex, user_id, app_id, status, source, at))
+
+
+def _start_status_history(con: sqlite3.Connection) -> None:
+    """Applications from before the log began get what can be rebuilt: their applied date, the status changes their
+    emails made, and where they are now."""
+    apps = con.execute("SELECT a.id, a.user_id, a.status, a.date_applied, a.created_at FROM applications a WHERE a.user_id "
+                       "IS NOT NULL AND NOT EXISTS (SELECT 1 FROM status_history h WHERE h.application_id = a.id)").fetchall()
+    for app_id, user_id, status, applied, created in apps:
+        steps = [("Applied", applied, "earlier")] if applied else []
+        steps += [(proposed, received, "email") for proposed, received in con.execute(
+            "SELECT proposed, received_at FROM email_events WHERE application_id=? AND user_id=? AND proposed IS NOT NULL "
+            "AND decision IN ('applied', 'confirmed')", (app_id, user_id))]
+        steps.sort(key=lambda step: step[1])
+        if not steps or steps[-1][0] != status:
+            steps.append((status, steps[-1][1] if steps else created, "earlier"))
+        previous = None
+        for step, at, source in steps:
+            if step != previous:
+                _log_status(con, user_id, app_id, step, source, at)
+            previous = step
+
+
 def add_application(
     user_id: str,
     job: dict,
@@ -400,11 +441,15 @@ def add_application(
     score_data: dict,
     tailored_cv: str = "",
     status: str = "Pending Review",
+    *,
+    source: str = "you",
+    at: str | None = None,
 ) -> str | None:
     """
     Insert a new application row for a specific user.
     Returns the new id, or None if this (company, job_title) already exists for this user.
     score_data: {composite_score, exposure_score, fit_score, skill_gaps, level_match}
+    at: when it reached `status`, if that wasn't now (the date of the email that says so).
     """
     if status not in VALID_STATUSES:
         status = "Pending Review"
@@ -418,10 +463,10 @@ def add_application(
         con.execute(
             """INSERT INTO applications
                (id, user_id, job_id, job_title, company, location, job_url,
-                status, cv_profile, cover_letter, tailored_cv,
+                status, date_applied, cv_profile, cover_letter, tailored_cv,
                 composite_score, exposure_score, fit_score,
                 skill_gaps, level_match, created_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 app_id,
                 user_id,
@@ -431,6 +476,7 @@ def add_application(
                 job.get("location", ""),
                 job.get("url", ""),
                 status,
+                (at or _now())[:10] if status == "Applied" else None,
                 json.dumps(cv_profile),
                 cover_letter,
                 tailored_cv,
@@ -442,6 +488,7 @@ def add_application(
                 _now(),
             ),
         )
+        _log_status(con, user_id, app_id, status, source, at or _now())
         con.commit()
         logger.info("Tracker: added application %s for user %s (%s @ %s)", app_id, user_id, job.get("title"), job.get("company"))
         return app_id
@@ -482,12 +529,18 @@ def list_applications(user_id: str, status: str | None = None) -> list[dict]:
             rows = con.execute(
                 "SELECT * FROM applications WHERE user_id=? ORDER BY created_at DESC", (user_id,)
             ).fetchall()
+        history: dict[str, list[dict]] = {}
+        for step in con.execute("SELECT application_id, status, source, changed_at FROM status_history WHERE user_id=? "
+                                "ORDER BY changed_at, rowid", (user_id,)):
+            history.setdefault(step["application_id"], []).append(
+                {"status": step["status"], "source": step["source"], "changed_at": step["changed_at"]})
         con.close()
         result = []
         for row in rows:
             d = dict(row)
             d["skill_gaps"] = json.loads(d.get("skill_gaps") or "[]")
             d["questions"] = json.loads(d.get("questions") or "[]")
+            d["history"] = history.get(d["id"], [])
             # Don't expose full CV/cover letter in list view
             d.pop("cv_profile", None)
             d.pop("cover_letter", None)
@@ -509,30 +562,75 @@ def find_application_id(user_id: str, company: str, job_title: str) -> str | Non
     return row[0] if row else None
 
 
-def update_status(app_id: str, status: str, notes: str | None = None, *, user_id: str) -> bool:
-    """Update one of `user_id`'s applications. False if the status is invalid or no such row
-    belongs to that user (so ids from other accounts can't be modified)."""
+_BEFORE_APPLYING = ("Saved", "Evaluated", "Pending Review")
+
+
+def update_status(app_id: str, status: str, notes: str | None = None, *, user_id: str, source: str = "you",
+                  at: str | None = None) -> bool:
+    """Update one of `user_id`'s applications, logging the change. False if the status is invalid or no such row
+    belongs to that user (so ids from other accounts can't be modified).
+    at: when it reached `status`, if that wasn't now. source "undo" takes the last change back out of the log, since
+    it never really happened. The applied date is the day it was first applied: saving a note or moving back to
+    Applied keeps it."""
     if status not in VALID_STATUSES:
         logger.warning("Tracker: invalid status %r", status)
         return False
     try:
         con = sqlite3.connect(_DB_PATH)
+        row = con.execute("SELECT status, date_applied FROM applications WHERE id=? AND user_id=?",
+                          (app_id, user_id)).fetchone()
+        if not row:
+            con.close()
+            return False
+        previous, applied = row
         updates = ["status=?"]
         params: list = [status]
-        if status == "Applied":
+        if status == "Applied" and (not applied or previous in _BEFORE_APPLYING):
             updates.append("date_applied=?")
-            params.append(_now()[:10])  # date only
+            params.append((at or _now())[:10])  # date only
         if notes is not None:
             updates.append("notes=?")
             params.append(notes)
         params += [app_id, user_id]
-        cur = con.execute(f"UPDATE applications SET {', '.join(updates)} WHERE id=? AND user_id=?", params)
+        con.execute(f"UPDATE applications SET {', '.join(updates)} WHERE id=? AND user_id=?", params)
+        if status != previous:
+            if source == "undo":
+                con.execute("DELETE FROM status_history WHERE id = (SELECT id FROM status_history WHERE application_id=? "
+                            "AND user_id=? AND status=? ORDER BY changed_at DESC, rowid DESC LIMIT 1)",
+                            (app_id, user_id, previous))
+            else:
+                _log_status(con, user_id, app_id, status, source, at or _now())
         con.commit()
         con.close()
-        return cur.rowcount == 1
+        return True
     except Exception as exc:
         logger.error("Tracker update_status failed: %s", exc)
         return False
+
+
+def latest_status_change(user_id: str, app_id: str) -> str:
+    """When the application last changed status ("" when nothing is logged)."""
+    con = sqlite3.connect(_DB_PATH)
+    row = con.execute("SELECT max(changed_at) FROM status_history WHERE application_id=? AND user_id=?",
+                      (app_id, user_id)).fetchone()
+    con.close()
+    return row[0] or ""
+
+
+def add_past_status(user_id: str, app_id: str, status: str, at: str) -> None:
+    """A step an old email shows the application took, for its history: the current status stays as it is. An email
+    older than the applied date moves that date back to the day it was really applied."""
+    con = sqlite3.connect(_DB_PATH)
+    try:
+        if not con.execute("SELECT 1 FROM status_history WHERE application_id=? AND user_id=? AND status=?",
+                           (app_id, user_id, status)).fetchone():
+            _log_status(con, user_id, app_id, status, "email", at)
+        if status == "Applied":
+            con.execute("UPDATE applications SET date_applied=? WHERE id=? AND user_id=? AND "
+                        "(date_applied IS NULL OR date_applied > ?)", (at[:10], app_id, user_id, at[:10]))
+        con.commit()
+    finally:
+        con.close()
 
 
 def set_job_mark(user_id: str, job_id: str, sponsorship: str | None) -> None:
