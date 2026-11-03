@@ -28,8 +28,15 @@ export interface Job {
   degree?: string;                 // "required" | "preferred" | "not_mentioned" | ""
 }
 
+export interface StatusStep {
+  status: string;
+  source: "you" | "autopilot" | "email" | "earlier";
+  changed_at: string;
+}
+
 export interface Application {
   id: string;
+  history?: StatusStep[];
   job_id: string;
   job_title: string;
   company: string;

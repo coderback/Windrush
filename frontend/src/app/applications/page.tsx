@@ -18,6 +18,13 @@ import type { Application } from "@/lib/types";
 
 type View = "board" | "table";
 type Quick = "review" | "follow" | "quiet";
+type Range = "6m" | "1y" | "2y" | "all";
+
+const RANGES: { key: Range; label: string; days: number }[] = [
+  { key: "6m", label: "6 months", days: 182 }, { key: "1y", label: "1 year", days: 365 },
+  { key: "2y", label: "2 years", days: 730 }, { key: "all", label: "All", days: Infinity },
+];
+const SOURCE: Record<string, string> = { autopilot: "by autopilot", email: "from an email" };
 
 const FOLLOW_UP_DAYS = 7;
 const QUIET_DAYS = 14;
@@ -90,6 +97,7 @@ export default function ApplicationsPage() {
   const [query, setQuery] = useState("");
   const [showClosed, setShowClosed] = useState(false);
   const [quick, setQuick] = useState<Quick | null>(null);
+  const [range, setRange] = useState<Range>("6m");
   const [openId, setOpenId] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -99,8 +107,13 @@ export default function ApplicationsPage() {
   const [savingNotes, setSavingNotes] = useState(false);
   const [notesSaved, setNotesSaved] = useState(false);
 
-  const all = useMemo(() => apps.data ?? [], [apps.data]);
-  const open = all.find((a) => a.id === openId) ?? null;
+  const everything = useMemo(() => apps.data ?? [], [apps.data]);
+  const open = everything.find((a) => a.id === openId) ?? null;
+  const all = useMemo(() => {
+    const days = RANGES.find((r) => r.key === range)!.days;
+    return everything.filter((a) => (daysSince(a.date_applied ?? a.created_at) ?? 0) <= days);
+  }, [everything, range]);
+  const older = everything.length - all.length;
 
   useEffect(() => {
     if (open) {
@@ -169,12 +182,13 @@ export default function ApplicationsPage() {
           <div className="flex flex-col gap-[6px]">
             <h1 className="m-0 text-[26px] font-semibold tracking-[-0.025em]">Applications</h1>
             <p className="m-0 text-[14px] text-ink-2">
-              {activeCount} active, {closedCount} closed.{view === "board" && all.length > 0 ? " Drag a card to change its status." : ""}
+              {activeCount} active, {closedCount} closed{older > 0 ? `, ${older} older not shown` : ""}.{view === "board" && all.length > 0 ? " Drag a card to change its status." : ""}
             </p>
           </div>
           <div className="flex flex-wrap gap-2 items-center">
             <Segmented label="View" value={view} onChange={setView}
               items={[{ key: "board", label: "Board" }, { key: "table", label: "Table" }]} />
+            <Segmented label="Applied within" value={range} onChange={setRange} items={RANGES} />
             <span className="flex items-center gap-2 h-9 px-3 border border-border rounded-control bg-surface text-ink-3 focus-within:border-teal">
               <Icon name="search" size={15} />
               <label htmlFor="app-search" className="sr-only">Search applications</label>
@@ -213,7 +227,7 @@ export default function ApplicationsPage() {
           </div>
         ) : apps.error ? (
           <Callout title="Couldn't load your applications">{apps.error}</Callout>
-        ) : all.length === 0 ? (
+        ) : everything.length === 0 ? (
           <EmptyState action={<Link href="/jobs" className={buttonClass("primary", "sm")}>Browse matches</Link>}>
             No applications yet. Save a job from the feed or let the agent apply, and it shows up here.
           </EmptyState>
@@ -346,13 +360,13 @@ export default function ApplicationsPage() {
                   <span aria-hidden="true" className={cx("w-2 h-2 rounded-full shrink-0", statusMeta(open.status).dot)} />
                   <span className="flex-1">Now: {statusMeta(open.status).label}</span>
                 </li>
-                {open.date_applied && (
-                  <li className="flex gap-[10px] items-baseline text-[13px]">
-                    <span aria-hidden="true" className="w-2 h-2 rounded-full shrink-0 bg-blue" />
-                    <span className="flex-1">Applied</span>
-                    <span className="text-[12px] text-ink-3">{shortDate(open.date_applied)}</span>
+                {[...(open.history ?? [])].reverse().map((step, i) => (
+                  <li key={`${step.changed_at}-${i}`} className="flex gap-[10px] items-baseline text-[13px]">
+                    <span aria-hidden="true" className={cx("w-2 h-2 rounded-full shrink-0", statusMeta(step.status).dot)} />
+                    <span className="flex-1">{statusMeta(step.status).label}{SOURCE[step.source] ? ` ${SOURCE[step.source]}` : ""}</span>
+                    <span className="text-[12px] text-ink-3">{shortDate(step.changed_at)}</span>
                   </li>
-                )}
+                ))}
                 <li className="flex gap-[10px] items-baseline text-[13px]">
                   <span aria-hidden="true" className="w-2 h-2 rounded-full shrink-0 bg-stone" />
                   <span className="flex-1">Added to your applications</span>

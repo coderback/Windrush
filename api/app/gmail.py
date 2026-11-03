@@ -415,7 +415,7 @@ def _apply(user_id: str, email: dict, reading: dict) -> str:
     if target is None:
         decision = "noted"
     elif safe and reading["confidence"] == "high":
-        tracker.update_status(app["id"], target, user_id=user_id)
+        tracker.update_status(app["id"], target, user_id=user_id, source="email", at=email["received_at"])
         decision = "applied"
     else:
         decision = "suggested"
@@ -517,7 +517,7 @@ def confirm(user_id: str, event_id: str, application_id: str | None = None) -> d
         raise GmailError("Choose which application this email is about.")
     target = KIND_STATUS.get(event["kind"])
     if target and target != app["status"]:
-        tracker.update_status(app["id"], target, user_id=user_id)
+        tracker.update_status(app["id"], target, user_id=user_id, source="email", at=event["received_at"])
     tracker.update_email_event(user_id, event_id, decision="confirmed", application_id=app["id"],
                                proposed=target, status_before=app["status"])
     return tracker.get_email_event(user_id, event_id)
@@ -536,9 +536,10 @@ def track(user_id: str, event_id: str, company: str, role: str) -> dict:
         raise GmailError("Give the company and the role.")
     status = KIND_STATUS.get(event["kind"]) or "Applied"
     job = {"job_id": f"email:{event['gmail_id']}", "title": role, "company": company}
-    app_id = (tracker.add_application(user_id, job, {}, "", {}, status="Applied")
+    app_id = (tracker.add_application(user_id, job, {}, "", {}, status="Applied", source="email", at=event["received_at"])
               or tracker.find_application_id(user_id, company, role))
-    tracker.update_status(app_id, status, f"Added from your inbox: {event['subject']}"[:300], user_id=user_id)
+    tracker.update_status(app_id, status, f"Added from your inbox: {event['subject']}"[:300], user_id=user_id,
+                          source="email", at=event["received_at"])
     tracker.update_email_event(user_id, event_id, decision="confirmed", application_id=app_id, proposed=status,
                                status_before=None)
     return tracker.get_email_event(user_id, event_id)
@@ -573,10 +574,15 @@ def track_all(user_id: str) -> dict:
         newest = events[-1]
         status = next((KIND_STATUS[e["kind"]] for e in reversed(events) if e["kind"] in KIND_STATUS), "Applied")
         job = {"job_id": f"email:{newest['gmail_id']}", "title": newest["role"], "company": newest["company"]}
-        app_id = tracker.add_application(user_id, job, {}, "", {}, status="Applied")
+        app_id = tracker.add_application(user_id, job, {}, "", {}, status="Applied", source="email",
+                                         at=events[0]["received_at"])
         if app_id:
             added += 1
-            tracker.update_status(app_id, status, f"Added from your inbox: {newest['subject']}"[:300], user_id=user_id)
+            for e in events:   # each step its emails show, so its history is the path it took
+                if e["kind"] in KIND_STATUS:
+                    tracker.update_status(app_id, KIND_STATUS[e["kind"]], user_id=user_id, source="email", at=e["received_at"])
+            tracker.update_status(app_id, status, f"Added from your inbox: {newest['subject']}"[:300], user_id=user_id,
+                                  source="email", at=newest["received_at"])
         else:   # already tracked under that company and role: link to it, and leave its status to the usual rules
             app_id = tracker.find_application_id(user_id, newest["company"], newest["role"])
             linked += 1
@@ -607,7 +613,7 @@ def undo(user_id: str, event_id: str) -> dict:
         raise GmailError("That application no longer exists.")
     if event["proposed"] and app["status"] != event["proposed"]:
         raise GmailError(f"It has moved on since (it's now {app['status']}): change it on the board instead.")
-    tracker.update_status(app["id"], event["status_before"], user_id=user_id)
+    tracker.update_status(app["id"], event["status_before"], user_id=user_id, source="undo")
     tracker.update_email_event(user_id, event_id, decision="undone")
     return tracker.get_email_event(user_id, event_id)
 

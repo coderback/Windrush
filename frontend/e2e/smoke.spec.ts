@@ -212,6 +212,31 @@ test("changing a status in the application panel saves it, and Esc closes the pa
   api.expectAllMocked();
 });
 
+test("applications show the last 6 months until you widen the range, with how each one got here", async ({ page }) => {
+  await signIn(page);
+  const daysAgo = (n: number) => new Date(Date.now() - n * 86400000).toISOString();
+  const api = await mockApi(page, {
+    ...SHELL,
+    "GET /api/applications": [
+      app("new", "Applied", { date_applied: daysAgo(10).slice(0, 10), history: [
+        { status: "Applied", source: "email", changed_at: daysAgo(10) },
+      ] }),
+      app("old", "Applied", { date_applied: daysAgo(300).slice(0, 10) }),
+    ],
+  });
+  await page.goto("/applications");
+  await expect(page.getByRole("button", { name: /Role new at Company new/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Role old at Company old/ })).toHaveCount(0);
+  await expect(page.getByText("1 older not shown", { exact: false })).toBeVisible();
+
+  await page.getByRole("group", { name: "Applied within" }).getByRole("button", { name: "1 year" }).click();
+  await expect(page.getByRole("button", { name: /Role old at Company old/ })).toBeVisible();
+
+  await page.getByRole("button", { name: /Role new at Company new/ }).click();
+  await expect(page.getByRole("dialog", { name: "Application details" }).getByText("Applied from an email")).toBeVisible();
+  api.expectAllMocked();
+});
+
 test("the review queue lists paused applications and records one you sent yourself", async ({ page }) => {
   await signIn(page);
   const patches: unknown[] = [];
