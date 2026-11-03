@@ -264,9 +264,13 @@ def names_company(email: dict, company: str) -> bool:
     words = " ".join(re.findall(r"[a-z0-9]+", f"{email['sender']} {email['subject']} {email['text']}".lower()))
     if re.search(rf"(?<![a-z0-9]){re.escape(norm)}(?![a-z0-9])", words):
         return True
-    # The sender's own domain: catapult.com, catapultsports.com, catapultcareers.co.uk all name Catapult;
-    # cambridgeconsultants.com doesn't name a company called Cambridge.
-    name = _squash(norm)
+    return _from_company(email, norm)
+
+
+def _from_company(email: dict, company: str) -> bool:
+    """The sender's own domain: catapult.com, catapultsports.com, catapultcareers.co.uk all name Catapult;
+    cambridgeconsultants.com doesn't name a company called Cambridge."""
+    name = _squash(normalise_company_name(company or ""))
     labels = email["sender_address"].split("@")[-1].split(".")
     return len(name) >= 3 and any(label == name or (label.startswith(name) and label[len(name):] in _DOMAIN_SUFFIXES)
                                   for label in labels)
@@ -319,7 +323,9 @@ _CLASSIFY_SYSTEM = (
     "It only counts when it's about an application they actually made. A job they're told fits them, might like or "
     "should apply to is unrelated, even when its title has the word Application in it or it names a company they "
     "applied to. So are invitations to apply, deadline reminders, careers advice, an employer's talent-network "
-    "sign-up, and a recruiter's first approach about a role they haven't applied for, even one offering an interview.\n"
+    "sign-up, and a recruitment agency's first approach about a role they haven't applied for, even one offering an "
+    "interview. An employer's own invitation to its interview or test does count: it means they applied.\n"
+    "company is the employer, never the job board that sent the email; leave company or role empty if it doesn't say.\n"
     "application is the number of the application it is about, from the list given, only when the email names "
     "that company (and, when they applied to several roles there, the role); otherwise null.\n"
     "confidence is high only when the email states its meaning outright and names the company; medium or low "
@@ -553,20 +559,43 @@ async def backfill_count(user_id: str, period: str) -> dict:
     return {"period": period, "total": total, "to_read": len(unread)}
 
 
+_JOB_BOARDS = ("indeed", "linkedin", "glassdoor", "reed", "totaljobs", "cv-library", "cwjobs", "adzuna", "monster")
+_NO_NAME = re.compile(r"^(?:unknown|un?specified.*|not (?:specified|stated|provided|mentioned|named|given).*|n/?a|none|"
+                      r"the (?:company|employer|role|position))?$", re.I)
+_NO_ROLE = "Role not stated"
+
+
+def _with_real_names(email: dict, reading: dict) -> dict:
+    """The model sometimes fills a blank with "Unknown", or takes the job board for the employer. A board's own
+    confirmation that names only the role is still an application: it goes under a name saying the employer wasn't given."""
+    company, role = reading["company"].strip(), reading["role"].strip()
+    company = "" if _NO_NAME.match(company) or _key(company) in _JOB_BOARDS else company
+    role = "" if _NO_NAME.match(role) else role
+    board = next((b for b in _JOB_BOARDS if b in email["sender_address"].split("@")[-1]), None)
+    if (not company and role and board and reading["kind"] == "received"
+            and re.search(r"\bapplication\b", email["subject"], re.I)):
+        return {**reading, "company": f"Employer not named (via {board.title()})", "role": role, "confidence": "high"}
+    return {**reading, "company": company, "role": role}
+
+
 def _shows_an_application(email: dict, reading: dict, companies: set[str]) -> bool:
     """Whether an email about an untracked application is enough to add it unasked. Saying it was received or turned
     down means they applied. An interview, test or offer could be a recruiter's approach, so it also has to come from
-    an applicant tracking system or a company another of these emails already showed they applied to."""
-    if reading["confidence"] != "high" or not _key(normalise_company_name(reading["company"])):
+    an applicant tracking system, the employer's own address, or a company another of these emails already showed they
+    applied to."""
+    company = _key(normalise_company_name(reading["company"]))
+    if reading["confidence"] != "high" or not company:
         return False
     return (reading["kind"] in ("received", "rejected")
             or (reading["kind"] in KIND_STATUS
-                and (from_ats(email) or _key(normalise_company_name(reading["company"])) in companies)))
+                and (from_ats(email) or _from_company(email, reading["company"]) or company in companies)))
 
 
 def _note_past_email(user_id: str, email: dict, reading: dict, companies: set[str]) -> str:
     """Record an older email without asking anything of the user: it goes into its application's history, moving the
     status only when it's a safe step newer than anything known. Returns the decision."""
+    if reading["application"] is None:
+        reading = _with_real_names(email, reading)
     event = {**{k: email[k] for k in ("gmail_id", "thread_id", "received_at", "sender", "subject")},
              "snippet": email["snippet"][:300], "kind": reading["kind"], "company": reading["company"],
              "role": reading["role"], "summary": reading["summary"]}
@@ -747,6 +776,8 @@ def track_all(user_id: str, only: set[str] | None = None) -> dict:
         company = " ".join(e["company"].split())
         company_key = _key(normalise_company_name(company))
         role = e["role"].strip() or (next(iter(roles[company_key])) if len(roles.get(company_key, ())) == 1 else "")
+        if not role and only is not None and company_key not in roles:
+            role = _NO_ROLE     # a run adds what it shows was applied to; asking about each is what it's there to avoid
         if not company_key or not role:
             skipped += 1
             continue

@@ -585,3 +585,36 @@ def test_gmail_saying_slow_down_makes_it_wait_and_carry_on(past, user, google, m
 def test_the_backfill_only_takes_the_periods_it_offers(past, client):
     assert client.post("/gmail/backfill", json={"period": "10y"}).status_code == 400
     assert client.get("/gmail/backfill/count?period=10y").status_code == 400
+
+
+def test_a_job_board_isnt_taken_for_the_employer(past, user):
+    past("m1", "Indeed Apply <indeedapply@indeed.com>", "Indeed Application: Cafe Bar Assistant", "Your application was sent.",
+         _past("received", company="Indeed", role="Cafe Bar Assistant"))
+    past("m2", "Indeed Apply <indeedapply@indeed.com>", "Indeed Application: Front of House", "Your application was sent.",
+         _past("received", company="Unknown", role="Front of House", confidence="medium"))
+    asyncio.run(_finish(user))
+    apps = {a["job_title"]: a["company"] for a in tracker.list_applications(user)}
+    assert apps == {"Cafe Bar Assistant": "Employer not named (via Indeed)", "Front of House": "Employer not named (via Indeed)"}
+
+
+def test_an_application_whose_emails_name_no_role_is_still_added(past, user):
+    past("m1", "Fractile <no-reply@greenhouse.io>", "Thank you for applying to Fractile", "Thanks.",
+         _past("received", company="Fractile", role="unspecified position"))
+    state = asyncio.run(_finish(user))
+    assert _app_named(user, "Fractile")["job_title"] == "Role not stated" and state["added"]["left"] == 0
+
+
+def test_a_role_from_another_email_fills_in_one_that_names_none(past, user):
+    past("m2", "Globex <talent@globex.com>", "Regarding your application", "Unfortunately not.",
+         _past("rejected", role=""), days_ago=20)
+    past("m1", "Globex <no-reply@greenhouse.io>", "Thanks for applying to Globex", "Thanks.", _past("received"), days_ago=40)
+    asyncio.run(_finish(user))
+    app = _app_named(user, "Globex")
+    assert app["job_title"] == "Graduate Engineer" and app["status"] == "Rejected"
+
+
+def test_an_interview_from_the_employers_own_address_adds_the_application(past, user):
+    past("m1", "Apple <no-reply@apple.com>", "Invitation to interview", "We'd like to interview you.",
+         _past("interview", company="Apple", role="Seasonal Specialist"))
+    asyncio.run(_finish(user))
+    assert _app_named(user, "Apple")["status"] == "Interview"
