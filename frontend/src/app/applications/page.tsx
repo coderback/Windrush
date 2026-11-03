@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
+import ApplicationFlow from "@/components/ApplicationFlow";
 import Icon from "@/components/ui/Icon";
 import TopBar, { Page } from "@/components/ui/TopBar";
 import SlideOver from "@/components/ui/SlideOver";
@@ -16,7 +17,7 @@ import { applicationLink } from "@/lib/jobs";
 import { CLOSED, CLOSED_STAGES, OPEN_STAGES, STATUS_CHOICES, stageOf, statusMeta } from "@/lib/status";
 import type { Application } from "@/lib/types";
 
-type View = "board" | "table";
+type View = "board" | "table" | "flow";
 type Quick = "review" | "follow" | "quiet";
 type Range = "6m" | "1y" | "2y" | "all";
 
@@ -190,22 +191,26 @@ export default function ApplicationsPage() {
           </div>
           <div className="flex flex-wrap gap-2 items-center">
             <Segmented label="View" value={view} onChange={setView}
-              items={[{ key: "board", label: "Board" }, { key: "table", label: "Table" }]} />
-            <Segmented label="Applied within" value={range} onChange={setRange} items={RANGES} />
-            <span className="flex items-center gap-2 h-9 px-3 border border-border rounded-control bg-surface text-ink-3 focus-within:border-teal">
-              <Icon name="search" size={15} />
-              <label htmlFor="app-search" className="sr-only">Search applications</label>
-              <input id="app-search" type="search" placeholder="Search" value={query} onChange={(e) => setQuery(e.target.value)}
-                className="w-[140px] border-0 bg-transparent text-[13px] outline-none text-ink placeholder:text-ink-3" />
-            </span>
-            <button type="button" aria-pressed={showClosed} onClick={() => setShowClosed((s) => !s)}
-              className={cx(buttonClass("secondary", "sm", "h-9 font-normal"), showClosed && "bg-muted font-semibold")}>
-              {showClosed ? "Hide closed" : `Show closed (${closedCount})`}
-            </button>
+              items={[{ key: "board", label: "Board" }, { key: "table", label: "Table" }, { key: "flow", label: "How they went" }]} />
+            {view !== "flow" && <Segmented label="Applied within" value={range} onChange={setRange} items={RANGES} />}
+            {view !== "flow" && (
+              <>
+                <span className="flex items-center gap-2 h-9 px-3 border border-border rounded-control bg-surface text-ink-3 focus-within:border-teal">
+                  <Icon name="search" size={15} />
+                  <label htmlFor="app-search" className="sr-only">Search applications</label>
+                  <input id="app-search" type="search" placeholder="Search" value={query} onChange={(e) => setQuery(e.target.value)}
+                    className="w-[140px] border-0 bg-transparent text-[13px] outline-none text-ink placeholder:text-ink-3" />
+                </span>
+                <button type="button" aria-pressed={showClosed} onClick={() => setShowClosed((s) => !s)}
+                  className={cx(buttonClass("secondary", "sm", "h-9 font-normal"), showClosed && "bg-muted font-semibold")}>
+                  {showClosed ? "Hide closed" : `Show closed (${closedCount})`}
+                </button>
+              </>
+            )}
           </div>
         </div>
 
-        <div role="group" aria-label="Quick filters" className="flex flex-wrap items-center gap-2">
+        {view !== "flow" && <div role="group" aria-label="Quick filters" className="flex flex-wrap items-center gap-2">
           <span className="text-[13px] text-ink-3 mr-[2px]">Needs attention</span>
           {QUICK.map((q) => {
             const on = quick === q.key;
@@ -220,7 +225,7 @@ export default function ApplicationsPage() {
               </button>
             );
           })}
-        </div>
+        </div>}
 
         {error && <Callout>{error}</Callout>}
 
@@ -234,6 +239,8 @@ export default function ApplicationsPage() {
           <EmptyState action={<Link href="/jobs" className={buttonClass("primary", "sm")}>Browse matches</Link>}>
             No applications yet. Save a job from the feed or let the agent apply, and it shows up here.
           </EmptyState>
+        ) : view === "flow" ? (
+          <ApplicationFlow apps={everything} />
         ) : view === "board" ? (
           <div className="relative overflow-x-auto pb-[6px] -mx-1 px-1">
             <div className="grid gap-[10px] items-start"
