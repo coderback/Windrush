@@ -1,13 +1,13 @@
 """
 Does Windrush read job emails right, and leave alone what isn't about an application?
 
-20 emails as graduate applicants get them (applicant tracking systems, company recruiters, agencies, job
+23 emails as graduate applicants get them (applicant tracking systems, company recruiters, agencies, job
 boards, newsletters), each labelled with what it means and which application it is about. Every run writes
 evals/last_email_run.json.
 
 The bar: no email is matched to the wrong application; nothing unrelated (job alerts, newsletters, an agency's
 pitch) changes an application; every confident reading that would change a status on its own is correct.
-How many labelled emails were read correctly is reported, and must be at least 17 of 20.
+How many labelled emails were read correctly is reported, and must be at least 20 of 23.
 """
 import asyncio
 import json
@@ -82,6 +82,15 @@ EMAILS = [
      "Software Engineer position.", "interview", "catapult"),
     ("GitHub <noreply@github.com>", "[GitHub] A new SSH key was added to your account",
      "A new public key was added to your account.", "unrelated", None),
+    ("Catapult <noreply@candidates.workablemail.com>", "Graduate Software Engineer - Catapult",
+     "Dear Timothy, thank you for your time and interest in working at Catapult. After careful consideration we regret "
+     "to inform you that we will not be progressing further with your application.", "rejected", "catapult"),
+    ("Monzo <noreply@candidates.workablemail.com>", "Junior Backend Engineer - Monzo",
+     "Bonjour Timothy, nous vous remercions de votre intérêt pour le poste de Junior Backend Engineer chez Monzo. Nous "
+     "avons examiné votre candidature et avons malheureusement décidé de ne pas donner suite.", "rejected", "monzo"),
+    ("Ocado Technology <noreply@jobalerts.ocadogroup.com>", "Ocado Technology Application",
+     "Dear Timothy, thank you for applying for the position of Graduate Software Developer here at Ocado Technology. We "
+     "regret to advise you that the position you have applied for has been filled.", "rejected", "ocado"),
 ]
 
 
@@ -124,4 +133,4 @@ def test_emails_are_read_and_matched_right():
     assert not wrong_app, wrong_app
     assert not unrelated_changed, unrelated_changed
     assert not wrong_auto, wrong_auto
-    assert right >= 17
+    assert right >= 20

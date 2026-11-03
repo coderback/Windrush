@@ -22,7 +22,7 @@ import os
 import re
 import secrets
 import time
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from email.utils import parseaddr
 from urllib.parse import urlencode
 
@@ -54,7 +54,11 @@ _QUOTA_TRIES = 5
 ATS_SENDERS = ("greenhouse.io", "greenhouse-mail.io", "lever.co", "ashbyhq.com", "workable.com", "myworkday.com",
                "workday.com", "smartrecruiters.com", "icims.com", "successfactors.com", "taleo.net", "jobvite.com",
                "bamboohr.com", "teamtailor.com", "recruitee.com", "pinpointhq.com", "eightfold.ai", "hirevue.com",
-               "oraclecloud.com", "applytojob.com")
+               "oraclecloud.com", "applytojob.com",
+               # What they really send from. Workable's replies are titled "Junior Python Engineer - PetLabCo.", with
+               # nothing about an application for the subject search to find, rejections included.
+               "workablemail.com", "teamtailor-mail.com", "pinpoint.email", "tal.net", "brassring.com", "njoyn.com",
+               "ambertrack.global", "beapplied.com", "earlycareerscompany.com")
 _SUBJECT_TERMS = ("application", "applying", "interview", "assessment", '"next steps"', "offer", "unfortunately",
                   "candidacy", '"your interest"')
 _SUBJECT_RE = re.compile(r"applica|applying|applied|interview|assessment|next step|candidacy|offer|unfortunately|"
@@ -300,10 +304,16 @@ _ALERT_SUBJECT = re.compile(
     r"\bfits? you\b|\bapplication deadlines?\b|:\s*up to [£$€]", re.I)
 
 
+_BODY_SAYS_THEY_APPLIED = re.compile(r"thank(?:s| you)(?: so much| very much)? for (?:applying|your application)|"
+                                     r"the position you have applied|we(?:'ve| have) received your application|"
+                                     r"your application (?:for|to|has|was|is)\b", re.I)
+
+
 def is_job_alert(email: dict) -> bool:
     """A job alert or recommendation, by its sender or subject: not about an application they made, so not read at all.
-    LinkedIn sends both alerts and "your application was sent" from one address, so what the subject says comes first."""
-    if _SAYS_THEY_APPLIED.search(email["subject"]):
+    LinkedIn sends both alerts and "your application was sent" from one address, and Leonardo sends its rejections
+    from jobalerts.leonardojobs.co.uk, so what the email says about an application comes first."""
+    if _SAYS_THEY_APPLIED.search(email["subject"]) or _BODY_SAYS_THEY_APPLIED.search(email.get("text") or ""):
         return False
     return bool(_ALERT_SENDER.search(email["sender_address"]) or _ALERT_SUBJECT.search(email["subject"]))
 
@@ -368,6 +378,10 @@ async def read(email: dict, applications: list[dict]) -> dict:
     n = data.get("application")
     app = applications[n - 1] if isinstance(n, int) and 1 <= n <= len(applications) else None
     if app and not names_company(email, app["company"]):
+        app = None
+    # A board's "your application was sent" is one application: at a recruiter, one for another role is another job.
+    if app and kind == "received" and _SENT_BY_BOARD.search(email["subject"]) and str(data.get("role") or "").strip() \
+            and _role_words(data["role"]) != _role_words(app["job_title"]):
         app = None
     confidence = data.get("confidence") if data.get("confidence") in ("high", "medium", "low") else "low"
     return {"kind": kind, "application": app, "confidence": confidence,
@@ -561,7 +575,7 @@ async def backfill_count(user_id: str, period: str) -> dict:
 
 _JOB_BOARDS = ("indeed", "linkedin", "glassdoor", "reed", "totaljobs", "cv-library", "cwjobs", "adzuna", "monster")
 _NO_NAME = re.compile(r"^(?:unknown|un?specified.*|not (?:specified|stated|provided|mentioned|named|given).*|n/?a|none|"
-                      r"the (?:company|employer|role|position))?$", re.I)
+                      r"(?:online )?assessment|the (?:company|employer|role|position))?$", re.I)
 _NO_ROLE = "Role not stated"
 
 
@@ -759,13 +773,75 @@ def _key(text: str) -> str:
     return " ".join(re.findall(r"[a-z0-9]+", str(text or "").lower()))
 
 
+_SENT_BY_BOARD = re.compile(r"your application was sent to", re.I)
+_ROLE_NOISE = frozenset({"graduate", "junior", "senior", "entry", "level", "the", "and", "of", "for", "a", "in", "at", "to",
+                         "uk", "role", "position", "programme", "program", "scheme", "opportunity"})
+_SAME_APPLICATION_DAYS = 120    # a follow-up further from the application than this is about another one
+_APPLIED_AGAIN_DAYS = 14        # a confirmation sooner than this after a later step is the same application's
+
+
+def _role_words(role: str) -> set[str]:
+    """What tells one role at a company from another; a bare number is a requisition or a year."""
+    return {w for w in _key(role).split() if w not in _ROLE_NOISE and not w.isdigit()}
+
+
+def _days_apart(earlier: str, later: str) -> int:
+    return (date.fromisoformat(later[:10]) - date.fromisoformat(earlier[:10])).days
+
+
+def _application_for(email: dict, company_groups: list[list[dict]]) -> list[dict] | None:
+    """The application a follow-up email naming its role differently belongs to: "Full Stack Engineer - Intern" and
+    "Full Stack Developer Intern" at one company a fortnight apart. Its email thread settles it, or else the one
+    application whose role shares its words: with several it could be any, so it isn't guessed. Two confirmations are
+    two applications, however alike their roles."""
+    def could_be(group: list[dict]) -> bool:
+        return (_days_apart(group[-1]["received_at"], email["received_at"]) <= _SAME_APPLICATION_DAYS
+                and not (email["kind"] == "received" and any(e["kind"] == "received" for e in group)))
+
+    possible = [g for g in company_groups if could_be(g)]
+    in_thread = [g for g in possible if email.get("thread_id") and any(e.get("thread_id") == email["thread_id"] for e in g)]
+    if len(in_thread) == 1:
+        return in_thread[0]
+    words = _role_words(email["role"])
+    alike = [g for g in possible if any(words & _role_words(e["role"]) for e in g)]
+    return alike[0] if len(alike) == 1 else None
+
+
+def _steps_shown(events: list[dict]) -> list[tuple[str, str]]:
+    """(status, when) for each step a run of emails shows, oldest first. A confirmation arriving just after a test or a
+    rejection doesn't undo it; one well after it means they applied again."""
+    steps: list[tuple[str, str]] = []
+    for e in events:
+        status = KIND_STATUS.get(e["kind"])
+        if not status or (steps and steps[-1][0] == status):
+            continue
+        if status == "Applied" and steps and _days_apart(steps[-1][1], e["received_at"]) < _APPLIED_AGAIN_DAYS:
+            continue
+        steps.append((status, e["received_at"]))
+    return steps
+
+
+def _catch_up(user_id: str, app_id: str, events: list[dict]) -> None:
+    """Emails linked to an application already tracked move it by the usual rules: forward when they're news, otherwise
+    only into its history."""
+    for e in events:
+        status = KIND_STATUS.get(e["kind"])
+        if not status:
+            continue
+        target, safe = proposed_change(tracker.get_application(user_id, app_id)["status"], e["kind"])
+        if target and safe and e["received_at"] > tracker.latest_status_change(user_id, app_id):
+            tracker.update_status(app_id, target, user_id=user_id, source="email", at=e["received_at"])
+        else:
+            tracker.add_past_status(user_id, app_id, status, e["received_at"])
+
+
 def track_all(user_id: str, only: set[str] | None = None) -> dict:
     """Add every application the unmatched emails are about (or just the emails in `only`, by Gmail id): one per
-    company and role, at the status of its newest email that points to one, with all its emails linked. An email
-    naming no role takes the company's one role from its other emails; when there's none (or several), it is left
-    for the user."""
+    company and role, at the status its emails show, with all its emails linked. An email naming no role takes the
+    company's one role from its other emails; when there's none (or several), it is left for the user."""
     unmatched = [e for e in tracker.list_email_events(user_id, limit=_MAX_BACKFILL + 1000)
                  if e["decision"] == "unmatched" and (only is None or e["gmail_id"] in only)]
+    unmatched.sort(key=lambda e: e["received_at"])
     roles: dict[str, set[str]] = {}
     for e in unmatched:
         if e["role"].strip():
@@ -781,25 +857,33 @@ def track_all(user_id: str, only: set[str] | None = None) -> dict:
         if not company_key or not role:
             skipped += 1
             continue
-        groups.setdefault((company_key, _key(role)), []).append({**e, "company": company, "role": role})
+        email = {**e, "company": company, "role": role}
+        same_role = groups.get((company_key, _key(role)))
+        at_company = [g for (known, _), g in groups.items() if known == company_key]
+        group = same_role if same_role is not None else _application_for(email, at_company)
+        if group is None:
+            group = groups.setdefault((company_key, _key(role)), [])
+        group.append(email)
     added = linked = 0
     for events in groups.values():
-        events.sort(key=lambda e: e["received_at"])
         newest = events[-1]
-        status = next((KIND_STATUS[e["kind"]] for e in reversed(events) if e["kind"] in KIND_STATUS), "Applied")
-        job = {"job_id": f"email:{newest['gmail_id']}", "title": newest["role"], "company": newest["company"]}
+        # Its role as the confirmation gave it, when there is one: follow-ups tend to shorten it.
+        role = next((e["role"] for e in events if e["kind"] == "received"), newest["role"])
+        job = {"job_id": f"email:{newest['gmail_id']}", "title": role, "company": newest["company"]}
         app_id = tracker.add_application(user_id, job, {}, "", {}, status="Applied", source="email",
                                          at=events[0]["received_at"])
         if app_id:
             added += 1
-            for e in events:   # each step its emails show, so its history is the path it took
-                if e["kind"] in KIND_STATUS:
-                    tracker.update_status(app_id, KIND_STATUS[e["kind"]], user_id=user_id, source="email", at=e["received_at"])
-            tracker.update_status(app_id, status, f"Added from your inbox: {newest['subject']}"[:300], user_id=user_id,
-                                  source="email", at=newest["received_at"])
-        else:   # already tracked under that company and role: link to it, and leave its status to the usual rules
-            app_id = tracker.find_application_id(user_id, newest["company"], newest["role"])
+            for status, at in _steps_shown(events):     # so its history is the path it took
+                tracker.update_status(app_id, status, user_id=user_id, source="email", at=at)
+            tracker.update_status(app_id, tracker.get_application(user_id, app_id)["status"],
+                                  f"Added from your inbox: {newest['subject']}"[:300], user_id=user_id, source="email",
+                                  at=newest["received_at"])
+        else:   # already tracked under that company and role: link to it
+            app_id = tracker.find_application_id(user_id, newest["company"], role)
             linked += 1
+            if app_id:
+                _catch_up(user_id, app_id, events)
         for e in events:
             tracker.update_email_event(user_id, e["id"], decision="confirmed", application_id=app_id,
                                        proposed=KIND_STATUS.get(e["kind"]), status_before=None)
