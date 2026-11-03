@@ -3,6 +3,7 @@ import localFont from "next/font/local";
 import "./globals.css";
 import AppShell from "@/components/AppShell";
 import { THEME_SCRIPT } from "@/lib/theme";
+import { DEMO_MODE } from "@/lib/demo";
 
 const geist = localFont({
   src: "./fonts/GeistVF.woff",
@@ -18,8 +19,10 @@ const geistMono = localFont({
 });
 
 export const metadata: Metadata = {
-  title: "Windrush — Career navigator",
-  description: "Find roles that fit you, tailor every application, and never submit without you",
+  title: DEMO_MODE ? "Windrush: read-only demo with sample data" : "Windrush — Career navigator",
+  description: DEMO_MODE
+    ? "Read-only demo of an AI career navigator, with a fictional CV and fictional jobs."
+    : "Find roles that fit you, tailor every application, and never submit without you",
 };
 
 export default function RootLayout({

@@ -1,4 +1,8 @@
+import { DEMO_MODE, demoFetch } from "@/lib/demo";
+
 export async function authFetch(url: string, options: RequestInit = {}) {
+  if (DEMO_MODE) return demoFetch(url, options);
+
   let token = null;
   if (typeof window !== "undefined") {
     token = localStorage.getItem("windrush_token");

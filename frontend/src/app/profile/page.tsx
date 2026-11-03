@@ -1,5 +1,7 @@
 "use client";
 
+import { DemoPersonaNote } from "@/components/DemoNotice";
+import { DEMO_MODE } from "@/lib/demo";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { authFetch } from "../api";
 import Icon from "@/components/ui/Icon";
@@ -336,6 +338,13 @@ export default function ProfilePage() {
           </SectionCard>
         );
       case "login":
+        if (DEMO_MODE) {
+          return (
+            <SectionCard title="Job-board login" intro="Removed from this demo.">
+              <Callout tone="info">The real app can keep a job-site login for the browser agent. This public demo has no such field: it does not collect or store credentials.</Callout>
+            </SectionCard>
+          );
+        }
         return (
           <SectionCard title="Job-board login" intro="Many application sites ask you to create an account. The agent uses this email and password for them.">
             <div className={grid2}>
@@ -611,6 +620,7 @@ export default function ProfilePage() {
         <ExportMenu />
       </TopBar>
       <Page className="gap-[18px] pt-[26px] sm:pt-[26px]">
+        <DemoPersonaNote />
         <div className="flex flex-wrap gap-4 items-stretch">
           <div className="flex-[2_1_420px] flex flex-col gap-[6px] justify-center">
             <h1 className="m-0 text-[26px] font-semibold tracking-[-0.025em]">Your persona</h1>

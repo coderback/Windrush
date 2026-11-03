@@ -1,5 +1,7 @@
 "use client";
 
+import { DemoAgentDisabled } from "@/components/DemoNotice";
+import { DEMO_MODE } from "@/lib/demo";
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
@@ -292,7 +294,7 @@ export default function JobDetailPage() {
   };
 
   const handleApply = async () => {
-    if (!job) return;
+    if (!job || DEMO_MODE) return;
     goTo(4);
     setStarted(true);
     setApplying(true);
@@ -354,7 +356,7 @@ export default function JobDetailPage() {
   };
 
   const instruct = async (word: "submit" | "done" | "skip") => {
-    if (!sessionId) return;
+    if (!sessionId || DEMO_MODE) return;
     setSending(word);
     try {
       await sendInstruction(sessionId, word);
@@ -488,6 +490,7 @@ export default function JobDetailPage() {
   );
 
   const docToolbar = (type: "cv" | "cover_letter") => {
+    if (DEMO_MODE) return <span className="text-[12.5px] text-ink-3">Hand-written sample, not model output. PDF export needs the backend.</span>;
     const streaming = type === "cv" ? streamingCv : streamingLetter;
     const has = type === "cv" ? !!cvDoc : !!letterDoc;
     const busy = type === "cv" ? savingCvPdf : savingLetterPdf;
@@ -557,7 +560,7 @@ export default function JobDetailPage() {
               </div>
               {docToolbar("cv")}
             </div>
-            {cvDoc && !streamingCv && <DocChecks kind="cv" doc={cvDoc} job={job} templateId={templateId} reviewed={reviewed.cv} />}
+            {!DEMO_MODE && cvDoc && !streamingCv && <DocChecks kind="cv" doc={cvDoc} job={job} templateId={templateId} reviewed={reviewed.cv} />}
             {streamingCv ? docSkeleton("Tailoring your CV for this role…") : cvDoc ? (
               <DocEditor kind="cv" templateId={templateId} cv={cvDoc} onCvChange={(c) => { setCvDoc(c); setCvDocId(null); }} />
             ) : (
@@ -585,7 +588,7 @@ export default function JobDetailPage() {
               </div>
               {docToolbar("cover_letter")}
             </div>
-            {letterDoc && !streamingLetter && <DocChecks kind="cover_letter" doc={letterDoc} job={job} templateId={templateId} reviewed={reviewed.letter} />}
+            {!DEMO_MODE && letterDoc && !streamingLetter && <DocChecks kind="cover_letter" doc={letterDoc} job={job} templateId={templateId} reviewed={reviewed.letter} />}
             {streamingLetter ? docSkeleton("Writing your cover letter…") : letterDoc ? (
               <DocEditor kind="cover_letter" templateId={templateId} letter={letterDoc}
                 onLetterChange={(l) => { setLetterDoc(l); setLetterDocId(null); }} />
@@ -630,7 +633,8 @@ export default function JobDetailPage() {
             </fieldset>
             {!letterDoc && <p className="m-0 text-[13px] text-ink-3">No cover letter: the agent leaves any cover-letter field for you.</p>}
             {!job.url && <Callout tone="warn" title="No application link">This job has no link to apply through, so the agent can&apos;t open it.</Callout>}
-            <button type="button" onClick={() => { if (!cvDoc) setCvChoice("original"); handleApply(); }} disabled={applying || !job.url}
+            {DEMO_MODE && <DemoAgentDisabled />}
+            <button type="button" onClick={() => { if (!cvDoc) setCvChoice("original"); handleApply(); }} disabled={DEMO_MODE || applying || !job.url}
               className={buttonClass("commit", "lg", "self-start")}>
               {applying ? <><Spinner /> Starting…</> : <><Icon name="play" size={14} /> Start the agent</>}
             </button>
@@ -736,7 +740,7 @@ export default function JobDetailPage() {
             <FactTile large tint="mint" label="Salary" value={salary ?? "Not listed"} note={salary ? "per year" : "the ad doesn't say"} />
             <FactTile large tint="sky" label="Setting" value={setting ?? "Not stated"} note={job.location || undefined} />
             <FactTile large tint="peach" label="Experience asked" value={exp ?? "Not stated"}
-              note={[level && `${level} level`, job.degree === "required" ? "degree required" : job.degree === "preferred" ? "degree preferred"
+              note={[level && (level.endsWith("level") ? level : `${level} level`), job.degree === "required" ? "degree required" : job.degree === "preferred" ? "degree preferred"
                 : job.degree === "not_mentioned" ? "no degree mentioned" : null].filter(Boolean).join(" · ") || degreeLabel(job.degree)} />
             <FactTile large tint="lilac" label="Visa sponsorship" value={sponsor.verdict}
               note={sponsorship.view?.licensed_sponsor || job.licensed_sponsor ? "Licensed sponsor" : sponsor.verdict === "Offered" ? "Stated in the ad" : "Not on the register"} />

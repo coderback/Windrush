@@ -1,5 +1,6 @@
 "use client";
 
+import { DemoJobsNote } from "@/components/DemoNotice";
 import Link from "next/link";
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -301,6 +302,7 @@ function FeedPage() {
         <PasteLink focus={params.get("paste") === "1"} />
       </TopBar>
       <Page wide="feed" className="gap-[18px] pt-[22px] sm:pt-[22px] pb-12">
+        <DemoJobsNote />
         <SearchBand role={roleInput} onRole={setRoleInput} location={locationInput} onLocation={setLocationInput}
           maxYears={maxYears} onMaxYears={setMaxYears} salary={salary} onSalary={setSalary} onSubmit={search} />
 

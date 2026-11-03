@@ -1,5 +1,6 @@
 "use client";
 
+import { DemoApplicationsNote } from "@/components/DemoNotice";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import ApplicationFlow from "@/components/ApplicationFlow";
@@ -182,6 +183,7 @@ export default function ApplicationsPage() {
         </Link>
       </TopBar>
       <Page wide="full" className="gap-4 pt-6 sm:pt-6 pb-10">
+        <DemoApplicationsNote />
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div className="flex flex-col gap-[6px]">
             <h1 className="m-0 text-[26px] font-semibold tracking-[-0.025em]">Applications</h1>

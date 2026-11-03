@@ -1,5 +1,8 @@
 import type { Persona } from "./types";
 
+// The public demo has no job-board login, so it never asks for one.
+const DEMO_MODE = process.env.NEXT_PUBLIC_DEMO_MODE === "1";
+
 /* Persona strength (HANDOFF gap 3): scored on the client from GET /persona. Each section is
    complete, needs attention, or optional; the strength is the weight of complete required sections. */
 
@@ -77,7 +80,7 @@ export function personaChecks(p: Persona): SectionCheck[] {
 }
 
 export function personaStrength(p: Persona): { pct: number; todos: string[] } {
-  const checks = personaChecks(p);
+  const checks = personaChecks(p).filter((c) => !(DEMO_MODE && c.key === "login"));
   const total = checks.reduce((n, c) => n + c.weight, 0);
   const done = checks.filter((c) => c.state === "complete").reduce((n, c) => n + c.weight, 0);
   const todos = checks

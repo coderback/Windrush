@@ -1,5 +1,6 @@
 "use client";
 
+import { DemoExposureNote } from "@/components/DemoNotice";
 import { useEffect, useMemo, useState } from "react";
 import TopBar, { Page } from "@/components/ui/TopBar";
 import { PillTabs } from "@/components/ui/Tabs";
@@ -110,6 +111,7 @@ export default function CareersPage() {
           </p>
         </div>
 
+        <DemoExposureNote />
         {risks.error && <Callout title="Couldn't score your skills">{risks.error}</Callout>}
 
         {risks.loading ? (

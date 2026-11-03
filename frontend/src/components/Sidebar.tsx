@@ -1,5 +1,6 @@
 "use client";
 
+import { DEMO_MODE } from "@/lib/demo";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -131,6 +132,9 @@ export default function Sidebar() {
     { href: "/careers", label: "AI exposure & roadmap", icon: "trend" },
     { href: "/profile", label: "Persona", icon: "user", badge: suggested },
   ];
+  // The public demo has no agent, autopilot or inbox.
+  const demoHidden = new Set(["/autopilot", "/review", "/inbox"]);
+  const shownWorkspace = DEMO_MODE ? workspace.filter((i) => !demoHidden.has(i.href)) : workspace;
   const isActive = (i: NavItem) => pathname === i.href || pathname.startsWith(i.href + "/");
 
   const p = persona.data;
@@ -161,7 +165,7 @@ export default function Sidebar() {
         </div>
 
         <div id="sidebar-menu" className={cx("flex-col gap-[22px] flex-1", open ? "flex" : "hidden md:flex")}>
-          <NavGroup title="Workspace" items={workspace} isActive={isActive} />
+          <NavGroup title="Workspace" items={shownWorkspace} isActive={isActive} />
           <NavGroup title="Grow" items={grow} isActive={isActive} />
 
           <div className="flex-1" />
@@ -190,10 +194,12 @@ export default function Sidebar() {
                 <span className="text-[13.5px] font-semibold truncate">{name}</span>
                 {line && <span className="text-[12px] text-ink-3 truncate">{line}</span>}
               </span>
+              {!DEMO_MODE && (
               <button type="button" aria-label="Log out" title="Log out" onClick={logout}
                 className="w-[34px] h-[34px] rounded-[8px] text-ink-3 hover:text-ink hover:bg-muted flex items-center justify-center shrink-0">
                 <Icon name="logout" size={17} strokeWidth={1.7} />
               </button>
+              )}
             </div>
             <ThemeSwitch />
           </div>

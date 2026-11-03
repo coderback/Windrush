@@ -2,6 +2,7 @@
 
 import { usePathname } from "next/navigation";
 import Sidebar from "./Sidebar";
+import { DemoBanner } from "./DemoNotice";
 
 const NO_SIDEBAR_ROUTES = ["/login", "/signup", "/onboarding"];
 
@@ -12,15 +13,18 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     !NO_SIDEBAR_ROUTES.some((r) => pathname === r || pathname.startsWith(r + "/"));
 
   if (!showSidebar) {
-    return <>{children}</>;
+    return <><DemoBanner />{children}</>;
   }
 
   return (
-    <div className="md:flex min-h-screen bg-canvas">
-      <Sidebar />
-      <main className="flex-1 min-w-0 flex flex-col min-h-screen">
-        {children}
-      </main>
-    </div>
+    <>
+      <DemoBanner />
+      <div className="md:flex min-h-screen bg-canvas">
+        <Sidebar />
+        <main className="flex-1 min-w-0 flex flex-col min-h-screen">
+          {children}
+        </main>
+      </div>
+    </>
   );
 }

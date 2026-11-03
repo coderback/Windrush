@@ -1,5 +1,6 @@
 "use client";
 
+import { DemoIntro } from "@/components/DemoNotice";
 import Link from "next/link";
 import { useMemo } from "react";
 import Icon from "@/components/ui/Icon";
@@ -143,6 +144,7 @@ export default function DashboardPage() {
         <AnalyseLinkButton />
       </TopBar>
       <Page className="gap-[22px]">
+        <DemoIntro />
         <div className="flex flex-wrap items-end justify-between gap-4">
           <div className="flex flex-col gap-[6px]">
             <h1 className="m-0 text-[28px] font-semibold tracking-[-0.025em]">

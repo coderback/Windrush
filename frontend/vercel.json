@@ -1,0 +1,4 @@
+{
+  "framework": "nextjs",
+  "buildCommand": "NEXT_PUBLIC_DEMO_MODE=1 next build"
+}
