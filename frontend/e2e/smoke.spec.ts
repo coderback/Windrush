@@ -237,6 +237,41 @@ test("applications show the last 6 months until you widen the range, with how ea
   api.expectAllMocked();
 });
 
+test("older job emails are counted before they're read, and the run can be stopped", async ({ page }) => {
+  await signIn(page);
+  const gmail = { configured: true, connected: true, email: "ada@example.com", problem: null, last_sync_at: null,
+    syncing: false, last: null, redirect_uri: "", backfill: null as object | null };
+  const started: unknown[] = [];
+  const api = await mockApi(page, {
+    ...SHELL,
+    "GET /api/gmail": () => gmail,
+    "GET /api/gmail/events": [],
+    "GET /api/gmail/backfill/count": { total: 310, to_read: 280 },
+    "POST /api/gmail/backfill": (request) => {
+      started.push(request.postDataJSON());
+      gmail.backfill = { period: "1y", running: true, stop: false, to_read: 280, read: 12, counts: {}, added: null,
+        error: null, finished_at: null };
+      return { started: true };
+    },
+    "DELETE /api/gmail/backfill": () => {
+      gmail.backfill = { period: "1y", running: false, stop: true, to_read: 280, read: 12, counts: { ignored: 5 },
+        added: { added: 3, linked: 0, emails: 4, left: 0 }, error: null, finished_at: new Date().toISOString() };
+      return { stopping: true };
+    },
+  });
+  await page.goto("/inbox");
+  await expect(page.getByText("310 job emails in this period; 30 already read.", { exact: false })).toBeVisible();
+
+  await page.getByRole("group", { name: "How far back" }).getByRole("button", { name: "1 year" }).click();
+  await page.getByRole("button", { name: "Read 280 emails" }).click();
+  await expect.poll(() => started).toEqual([{ period: "1y" }]);
+  await expect(page.getByText("Read 12 of 280 emails.")).toBeVisible();
+
+  await page.getByRole("button", { name: "Stop" }).click();
+  await expect(page.getByText("3 applications added", { exact: false })).toBeVisible();
+  api.expectAllMocked();
+});
+
 test("the review queue lists paused applications and records one you sent yourself", async ({ page }) => {
   await signIn(page);
   const patches: unknown[] = [];
@@ -594,6 +629,7 @@ test("inbox: setup steps when not configured, then email updates you can confirm
     ...SHELL,
     "GET /api/applications": [app("a1", "Applied"), app("a2", "Applied")],
     "GET /api/gmail": () => current,
+    "GET /api/gmail/backfill/count": { total: 0, to_read: 0 },
     "GET /api/gmail/events": [
       event("1", "suggested"),
       event("2", "unmatched", { application_id: null, app_title: null, app_company: null, app_status: null,

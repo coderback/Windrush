@@ -45,6 +45,10 @@ _MAX_MESSAGES = 150         # read per sync, oldest first; the rest wait for the
 _BODY_CHARS = 2500          # of each email, for the model
 _MAX_APPLICATIONS = 80      # most recent, offered to the model to match
 _EVERY_S = 30 * 60
+BACKFILL_DAYS = {"6m": 182, "1y": 365, "2y": 730}
+_MAX_BACKFILL = 6000        # message ids listed for a backfill
+_QUOTA_WAIT_S = 60          # how long a backfill waits when Gmail says it's going too fast
+_QUOTA_TRIES = 5
 
 # Applicant tracking systems' mail domains: mail from these is about an application, whoever it names.
 ATS_SENDERS = ("greenhouse.io", "greenhouse-mail.io", "lever.co", "ashbyhq.com", "workable.com", "myworkday.com",
@@ -280,6 +284,26 @@ def relevant(email: dict, applications: list[dict]) -> bool:
             or any(names_company(email, a["company"]) for a in applications))
 
 
+# Job alerts and other mail about jobs they haven't applied to. Application-style subjects catch these too: a LinkedIn
+# alert for a "Junior Application Software Engineer", or "3 application deadlines this week".
+_SAYS_THEY_APPLIED = re.compile(r"\byour (?:\w+ )?(?:application|candidacy|interview)\b|"
+                                r"\bthank(?:s| you) for (?:applying|your application|your interest)\b|\byou applied\b", re.I)
+_ALERT_SENDER = re.compile(r"job[-_.]?alert|jobs-listings@|jobs-noreply@linkedin|@match\.indeed\.|alert@indeed\.", re.I)
+_ALERT_SUBJECT = re.compile(
+    r"\bmore (?:new )?jobs\b|\bnew jobs?\b|\bjobs? for you\b|\bjob alert|\bjobs? (?:you|that) (?:may|might|could)\b|"
+    r"\bjobs? match|\b(?:job|role)s? (?:recommend|picked)|\brecommended (?:jobs?|roles?|for you)\b|"
+    r"\b(?:job|role|position) (?:fits?|suits?|matches)\b|\b(?:good|great|strong|perfect) (?:fit|match) for you\b|"
+    r"\bfits? you\b|\bapplication deadlines?\b|:\s*up to [£$€]", re.I)
+
+
+def is_job_alert(email: dict) -> bool:
+    """A job alert or recommendation, by its sender or subject: not about an application they made, so not read at all.
+    LinkedIn sends both alerts and "your application was sent" from one address, so what the subject says comes first."""
+    if _SAYS_THEY_APPLIED.search(email["subject"]):
+        return False
+    return bool(_ALERT_SENDER.search(email["sender_address"]) or _ALERT_SUBJECT.search(email["subject"]))
+
+
 _CLASSIFY_SYSTEM = (
     "You read one email a job seeker received and say what it means for their job applications. You never guess: "
     "you go by what the email plainly says.\n"
@@ -292,6 +316,10 @@ _CLASSIFY_SYSTEM = (
     "- rejected: it says they won't be progressed, the role is filled or closed, or they were unsuccessful;\n"
     "- other: it's about one of their applications but none of the above (still under review, a question for them);\n"
     "- unrelated: anything else, including job alerts, job recommendations, newsletters and marketing.\n"
+    "It only counts when it's about an application they actually made. A job they're told fits them, might like or "
+    "should apply to is unrelated, even when its title has the word Application in it or it names a company they "
+    "applied to. So are invitations to apply, deadline reminders, careers advice, an employer's talent-network "
+    "sign-up, and a recruiter's first approach about a role they haven't applied for, even one offering an interview.\n"
     "application is the number of the application it is about, from the list given, only when the email names "
     "that company (and, when they applied to several roles there, the role); otherwise null.\n"
     "confidence is high only when the email states its meaning outright and names the company; medium or low "
@@ -348,7 +376,7 @@ def _read_without_model(email: dict, applications: list[dict]) -> dict:
     named = [a for a in applications if names_company(email, a["company"])]
     app = named[0] if len({a["company"].lower() for a in named}) == 1 and len(named) == 1 else None
     return {"kind": kind, "application": app, "confidence": "low", "company": (app or {}).get("company", ""),
-            "role": "", "summary": email["subject"][:300]}
+            "role": "", "summary": email["subject"][:300], "by_model": False}
 
 
 def proposed_change(current: str, kind: str) -> tuple[str | None, bool]:
@@ -381,11 +409,11 @@ def _first_sync_start() -> int:
     return int(time.time()) - _FIRST_SYNC_DAYS * 86400
 
 
-async def _message_ids(token: str, query: str) -> list[str]:
+async def _message_ids(token: str, query: str, limit: int = _MAX_LISTED) -> list[str]:
     """Ids of the messages matching `query`, newest first (Gmail's order)."""
     ids, page = [], None
-    while len(ids) < _MAX_LISTED:
-        params = {"q": query, "maxResults": min(100, _MAX_LISTED - len(ids))}
+    while len(ids) < limit:
+        params = {"q": query, "maxResults": min(100, limit - len(ids))}
         if page:
             params["pageToken"] = page
         listing = await _get(token, "/messages", params)
@@ -462,7 +490,7 @@ async def sync(user_id: str) -> dict:
             await asyncio.sleep(_FETCH_GAP_S)
         more = len(unseen) > fetched
         for email in sorted(emails, key=lambda e: e["received_at"]):   # oldest first: later news wins
-            if not relevant(email, applications):
+            if is_job_alert(email) or not relevant(email, applications):
                 decision = "ignored"
                 tracker.add_email_event(user_id, {"gmail_id": email["gmail_id"], "received_at": email["received_at"],
                                                   "sender": "", "subject": "", "kind": "unrelated", "decision": "ignored"})
@@ -500,7 +528,160 @@ def status(user_id: str) -> dict:
     account = tracker.get_gmail_account(user_id)
     return {"configured": configured(), "connected": bool(account), "email": (account or {}).get("email"),
             "problem": (account or {}).get("problem"), "last_sync_at": (account or {}).get("last_sync_at"),
-            "syncing": user_id in _syncing, "last": _last.get(user_id), "redirect_uri": redirect_uri()}
+            "syncing": user_id in _syncing, "last": _last.get(user_id), "redirect_uri": redirect_uri(),
+            "backfill": backfill_status(user_id)}
+
+
+# ── Reading older mail ────────────────────────────────────────────────────────────────────────
+
+_backfills: dict[str, dict] = {}
+
+
+def _past_query(period: str) -> str:
+    """Tracked company names aren't searched for here: over months of mail they mostly find mail that isn't about jobs."""
+    return _query(int(time.time()) - BACKFILL_DAYS[period] * 86400, [])
+
+
+async def _unread_past_ids(user_id: str, period: str) -> tuple[int, list[str]]:
+    """(how many emails match, the ids of those not read yet, oldest first)."""
+    ids = await _message_ids(await _access_token(user_id), _past_query(period), limit=_MAX_BACKFILL)
+    return len(ids), [i for i in reversed(ids) if not tracker.email_seen(user_id, i)]
+
+
+async def backfill_count(user_id: str, period: str) -> dict:
+    total, unread = await _unread_past_ids(user_id, period)
+    return {"period": period, "total": total, "to_read": len(unread)}
+
+
+def _shows_an_application(email: dict, reading: dict, companies: set[str]) -> bool:
+    """Whether an email about an untracked application is enough to add it unasked. Saying it was received or turned
+    down means they applied. An interview, test or offer could be a recruiter's approach, so it also has to come from
+    an applicant tracking system or a company another of these emails already showed they applied to."""
+    if reading["confidence"] != "high" or not _key(normalise_company_name(reading["company"])):
+        return False
+    return (reading["kind"] in ("received", "rejected")
+            or (reading["kind"] in KIND_STATUS
+                and (from_ats(email) or _key(normalise_company_name(reading["company"])) in companies)))
+
+
+def _note_past_email(user_id: str, email: dict, reading: dict, companies: set[str]) -> str:
+    """Record an older email without asking anything of the user: it goes into its application's history, moving the
+    status only when it's a safe step newer than anything known. Returns the decision."""
+    event = {**{k: email[k] for k in ("gmail_id", "thread_id", "received_at", "sender", "subject")},
+             "snippet": email["snippet"][:300], "kind": reading["kind"], "company": reading["company"],
+             "role": reading["role"], "summary": reading["summary"]}
+    target_status = KIND_STATUS.get(reading["kind"])
+    app = reading["application"]
+    if app is None:
+        if _shows_an_application(email, reading, companies):
+            companies.add(_key(normalise_company_name(reading["company"])))
+            tracker.add_email_event(user_id, {**event, "decision": "unmatched", "proposed": target_status})
+            return "unmatched"
+        tracker.add_email_event(user_id, {**event, "decision": "dismissed", "proposed": target_status})
+        return "dismissed"
+    current = (tracker.get_application(user_id, app["id"]) or app)["status"]
+    target, safe = proposed_change(current, reading["kind"])
+    if target and safe and reading["confidence"] == "high" and email["received_at"] > tracker.latest_status_change(user_id, app["id"]):
+        tracker.update_status(app["id"], target, user_id=user_id, source="email", at=email["received_at"])
+        tracker.add_email_event(user_id, {**event, "application_id": app["id"], "proposed": target, "decision": "applied",
+                                          "status_before": current})
+        return "applied"
+    if target_status and reading["confidence"] == "high":
+        tracker.add_past_status(user_id, app["id"], target_status, email["received_at"])
+    tracker.add_email_event(user_id, {**event, "application_id": app["id"], "decision": "noted"})
+    return "noted"
+
+
+async def _fetch_past(user_id: str, message_id: str) -> dict:
+    for attempt in range(_QUOTA_TRIES):
+        try:
+            return parse(await _get(await _access_token(user_id), f"/messages/{message_id}", {"format": "full"}))
+        except _SlowDown:
+            logger.info("gmail backfill: hit the per-user quota; waiting")
+            if attempt < _QUOTA_TRIES - 1:
+                await asyncio.sleep(_QUOTA_WAIT_S)
+    raise GmailError("Gmail kept saying it was too busy. Start it again later: it carries on where it stopped.")
+
+
+async def _read_past(user_id: str, state: dict) -> None:
+    _, ids = await _unread_past_ids(user_id, state["period"])
+    state["to_read"] = len(ids)
+    companies: set[str] = set()
+    to_add: set[str] = set()
+    applications = tracker.list_applications(user_id)
+    try:
+        for message_id in ids:
+            if state["stop"]:
+                break
+            try:
+                email = await _fetch_past(user_id, message_id)
+            except GmailError:
+                raise
+            except Exception as exc:   # gone since it was listed, say: skip it rather than stop
+                logger.warning("gmail backfill: couldn't read a message (%s)", type(exc).__name__)
+                state["read"] += 1
+                continue
+            await asyncio.sleep(_FETCH_GAP_S)
+            named = [a for a in applications if names_company(email, a["company"])]
+            if is_job_alert(email) or not relevant(email, named):
+                decision = "ignored"
+                tracker.add_email_event(user_id, {"gmail_id": email["gmail_id"], "received_at": email["received_at"],
+                                                  "sender": "", "subject": "", "kind": "unrelated", "decision": "ignored"})
+            else:
+                reading = await read(email, named)
+                if not reading.get("by_model", True):
+                    # Left unread rather than recorded as read on a keyword guess, so the next run gets it.
+                    raise GmailError("The model couldn't be reached. Start it again later: it carries on where it stopped.")
+                if reading["kind"] == "unrelated":
+                    decision = _apply(user_id, email, reading)
+                else:
+                    decision = _note_past_email(user_id, email, reading, companies)
+                if decision == "applied":
+                    applications = tracker.list_applications(user_id)
+                if decision == "unmatched":
+                    to_add.add(email["gmail_id"])
+            state["read"] += 1
+            state["counts"][decision] = state["counts"].get(decision, 0) + 1
+    finally:
+        # Also when stopped part way: what it has found so far goes into the tracker, in one go so that each
+        # application's emails become its history.
+        if to_add:
+            state["added"] = track_all(user_id, only=to_add)
+
+
+def start_backfill(user_id: str, period: str) -> bool:
+    if (_backfills.get(user_id) or {}).get("running"):
+        return False
+    state = {"period": period, "running": True, "stop": False, "to_read": None, "read": 0, "counts": {}, "added": None,
+             "error": None, "finished_at": None}
+    _backfills[user_id] = state
+
+    async def go():
+        try:
+            await _read_past(user_id, state)
+        except GmailError as exc:
+            state["error"] = str(exc)
+        except Exception:
+            logger.exception("gmail backfill failed")
+            state["error"] = "Reading older mail failed. Start it again: it carries on where it stopped."
+        finally:
+            state["running"] = False
+            state["finished_at"] = datetime.now(timezone.utc).isoformat()
+    state["task"] = asyncio.create_task(go())
+    return True
+
+
+def stop_backfill(user_id: str) -> bool:
+    state = _backfills.get(user_id)
+    if not state or not state["running"]:
+        return False
+    state["stop"] = True
+    return True
+
+
+def backfill_status(user_id: str) -> dict | None:
+    state = _backfills.get(user_id)
+    return {k: v for k, v in state.items() if k != "task"} if state else None
 
 
 # ── What the user does with an email ──────────────────────────────────────────────────────────
@@ -549,11 +730,13 @@ def _key(text: str) -> str:
     return " ".join(re.findall(r"[a-z0-9]+", str(text or "").lower()))
 
 
-def track_all(user_id: str) -> dict:
-    """Add every application the unmatched emails are about: one per company and role, at the status of its
-    newest email that points to one, with all its emails linked. An email naming no role takes the company's
-    one role from its other emails; when there's none (or several), it is left for the user."""
-    unmatched = [e for e in tracker.list_email_events(user_id) if e["decision"] == "unmatched"]
+def track_all(user_id: str, only: set[str] | None = None) -> dict:
+    """Add every application the unmatched emails are about (or just the emails in `only`, by Gmail id): one per
+    company and role, at the status of its newest email that points to one, with all its emails linked. An email
+    naming no role takes the company's one role from its other emails; when there's none (or several), it is left
+    for the user."""
+    unmatched = [e for e in tracker.list_email_events(user_id, limit=_MAX_BACKFILL + 1000)
+                 if e["decision"] == "unmatched" and (only is None or e["gmail_id"] in only)]
     roles: dict[str, set[str]] = {}
     for e in unmatched:
         if e["role"].strip():

@@ -608,6 +608,31 @@ def update_status(app_id: str, status: str, notes: str | None = None, *, user_id
         return False
 
 
+def latest_status_change(user_id: str, app_id: str) -> str:
+    """When the application last changed status ("" when nothing is logged)."""
+    con = sqlite3.connect(_DB_PATH)
+    row = con.execute("SELECT max(changed_at) FROM status_history WHERE application_id=? AND user_id=?",
+                      (app_id, user_id)).fetchone()
+    con.close()
+    return row[0] or ""
+
+
+def add_past_status(user_id: str, app_id: str, status: str, at: str) -> None:
+    """A step an old email shows the application took, for its history: the current status stays as it is. An email
+    older than the applied date moves that date back to the day it was really applied."""
+    con = sqlite3.connect(_DB_PATH)
+    try:
+        if not con.execute("SELECT 1 FROM status_history WHERE application_id=? AND user_id=? AND status=?",
+                           (app_id, user_id, status)).fetchone():
+            _log_status(con, user_id, app_id, status, "email", at)
+        if status == "Applied":
+            con.execute("UPDATE applications SET date_applied=? WHERE id=? AND user_id=? AND "
+                        "(date_applied IS NULL OR date_applied > ?)", (at[:10], app_id, user_id, at[:10]))
+        con.commit()
+    finally:
+        con.close()
+
+
 def set_job_mark(user_id: str, job_id: str, sponsorship: str | None) -> None:
     """Record the user's call on whether a job sponsors visas (one of JOB_MARKS), or clear it (None)."""
     if sponsorship is not None and sponsorship not in JOB_MARKS:

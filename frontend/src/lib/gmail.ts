@@ -1,5 +1,5 @@
 import { load, requestJson } from "./store";
-import type { EmailEvent, GmailStatus } from "./types";
+import type { BackfillPeriod, EmailEvent, GmailStatus } from "./types";
 
 /* Gmail tracking: read-only access to your job emails keeps your applications up to date (api/app/gmail.py). */
 
@@ -22,6 +22,20 @@ export async function disconnectGmail() {
 
 export async function syncGmail() {
   await requestJson(`${GMAIL_URL}/sync`, post());
+  await load(GMAIL_URL, { force: true });
+}
+
+/** How many job emails a period holds and how many are unread, before anything is read. */
+export const countPastEmails = (period: BackfillPeriod) =>
+  requestJson<{ total: number; to_read: number }>(`${GMAIL_URL}/backfill/count?period=${period}`);
+
+export async function startBackfill(period: BackfillPeriod) {
+  await requestJson(`${GMAIL_URL}/backfill`, post({ period }));
+  await load(GMAIL_URL, { force: true });
+}
+
+export async function stopBackfill() {
+  await requestJson(`${GMAIL_URL}/backfill`, { method: "DELETE" });
   await load(GMAIL_URL, { force: true });
 }
 

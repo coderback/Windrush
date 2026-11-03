@@ -411,3 +411,177 @@ def test_add_all_makes_one_application_per_company_and_role_at_its_latest_status
     assert ("Hooli", "") not in tracked and _status(user, apps["catapult"]) == "Applied"
     left = [e for e in client.get("/gmail/events").json() if e["decision"] == "unmatched"]
     assert [e["gmail_id"] for e in left] == ["a5"]
+
+
+# ── Job alerts, and reading older mail ────────────────────────────────────────────────────────
+
+def _email(sender: str, subject: str) -> dict:
+    return {"sender": sender, "sender_address": sender, "subject": subject, "text": "", "snippet": ""}
+
+
+@pytest.mark.parametrize("sender, subject", [
+    ("jobalerts-noreply@linkedin.com", "Graduate Software Engineer at Catapult and 12 more jobs"),
+    ("jobs-noreply@linkedin.com", "Junior Application Software Engineer at One Big Circle Ltd: up to £45K/year"),
+    ("noreply@jobalert.indeed.com", "Application Support Analyst at Nisbets. 12 more jobs in BS1 1AA"),
+    ("noreply@jobalert.indeed.com", "BS1 1AA: Full Stack Application Developer at Savills and 9 more new jobs"),
+    ("noreply@match.indeed.com", "Junior Managed Application Services Analyst @ Evotix Limited"),
+    ("alert@indeed.com", "Interview-ready roles near you"),
+    ("noreply@gradcracker.com", "3 application deadlines this week"),
+    ("careers@jobalerts-uk.pwc.com", "New opportunities at PwC"),
+    ("hello@board.example", "This job fits you: Application Engineer"),
+    ("hello@board.example", "Graduate roles recommended for you"),
+])
+def test_job_alerts_arent_read_as_applications(sender, subject):
+    assert gmail.is_job_alert(_email(sender, subject))
+
+
+@pytest.mark.parametrize("sender, subject", [
+    ("jobs-noreply@linkedin.com", "Timothy Oluwatobi, your application was sent to Clearwater"),
+    ("jobs-noreply@linkedin.com", "Your application to Full Stack Engineer (AI systems) at Digital Waffle"),
+    ("jobs-noreply@linkedin.com", "Your application was viewed by Neurochase"),
+    ("indeedapply@indeed.com", "Indeed Application: Junior Marketing Assistant"),
+    ("noreply@indeed.com", "An update on your application from No Code Sage"),
+    ("no-reply@greenhouse.io", "Thank you for applying to Catapult"),
+    ("noreply@jobalert.example", "Your Baringa application"),
+    ("careers@hirevue.com", "Your interview with Optiver"),
+])
+def test_real_application_emails_arent_taken_for_alerts(sender, subject):
+    assert not gmail.is_job_alert(_email(sender, subject))
+
+
+def test_a_sync_never_sends_a_job_alert_to_the_model(inbox, user, google, readings):
+    apps, mail = inbox
+    mail("m1", "LinkedIn <jobs-noreply@linkedin.com>", "Application Engineer at Catapult: up to £45K/year", "See the job.",
+         _reading("interview", 1))                       # were it read, this would move Catapult on
+    asyncio.run(gmail.sync(user))
+    assert _status(user, apps["catapult"]) == "Applied"
+
+
+async def _finish(user):
+    gmail.start_backfill(user, "6m")
+    await gmail._backfills[user]["task"]
+    return gmail.backfill_status(user)
+
+
+@pytest.fixture
+def past(google, readings, client, user, monkeypatch):
+    monkeypatch.setattr(gmail, "start_sync", lambda uid: True)
+    gmail._backfills.clear()
+    _connect(client)
+
+    def mail(mid, sender, subject, body, reading=None, days_ago=30):
+        google.messages[mid] = message(mid, sender, subject, body, days_ago * 24 * 60)
+        readings[subject] = reading
+    return mail
+
+
+def _past(kind, n=None, company="Globex", role="Graduate Engineer", confidence="high"):
+    return {"kind": kind, "application": n, "confidence": confidence, "company": company, "role": role, "summary": ""}
+
+
+def _app_named(user, company):
+    return next((a for a in tracker.list_applications(user) if a["company"] == company), None)
+
+
+def test_older_mail_adds_applications_it_shows_were_made_with_the_path_they_took(past, user):
+    past("m1", "Globex <no-reply@greenhouse.io>", "Thanks for applying to Globex", "Thank you for applying.",
+         _past("received"), days_ago=60)
+    past("m2", "Globex <talent@globex.com>", "Interview at Globex", "We'd like to interview you.",
+         _past("interview"), days_ago=45)
+    past("m3", "Globex <talent@globex.com>", "Your application to Globex", "Unfortunately not.",
+         _past("rejected"), days_ago=30)
+    state = asyncio.run(_finish(user))
+
+    app = _app_named(user, "Globex")
+    assert state["added"]["added"] == 1 and state["read"] == 3 and not state["error"]
+    assert app["status"] == "Rejected" and app["job_id"].startswith("email:")
+    assert [(s["status"], s["source"]) for s in app["history"]] == [
+        ("Applied", "email"), ("Interview", "email"), ("Rejected", "email")]
+    assert app["date_applied"] == app["history"][0]["changed_at"][:10]
+    assert app["history"][0]["changed_at"] < app["history"][1]["changed_at"] < app["history"][2]["changed_at"]
+
+
+def test_a_recruiters_approach_doesnt_add_an_application(past, user, client):
+    past("m1", "Sarah <sarah@techrecruit.co.uk>", "Interview this week?", "Could I arrange an interview?",
+         _past("interview", company="Fintech Co"))
+    state = asyncio.run(_finish(user))
+    assert _app_named(user, "Fintech Co") is None and state["counts"] == {"dismissed": 1}
+    assert [e["decision"] for e in client.get("/gmail/events").json()] == ["dismissed"]
+
+
+def test_an_unsure_reading_doesnt_add_an_application(past, user):
+    past("m1", "Globex <no-reply@greenhouse.io>", "Your application", "Thanks.", _past("received", confidence="medium"))
+    asyncio.run(_finish(user))
+    assert _app_named(user, "Globex") is None
+
+
+def test_older_mail_skips_job_alerts_without_the_model(past, user):
+    past("m1", "LinkedIn <jobalerts-noreply@linkedin.com>", "Application Engineer at Globex and 5 more jobs", "Jobs.",
+         _past("received"))
+    state = asyncio.run(_finish(user))
+    assert state["counts"] == {"ignored": 1} and _app_named(user, "Globex") is None
+
+
+def test_an_old_email_fills_in_history_without_moving_the_application_back(past, user):
+    app_id = _app(user, "Catapult", "Graduate Software Engineer", "Rejected")
+    past("m1", "Catapult <jobs@catapult.com>", "Interview at Catapult", "Catapult would like to interview you.",
+         _past("interview", 1, company="Catapult"))
+    state = asyncio.run(_finish(user))
+    app = _app_named(user, "Catapult")
+    assert app["status"] == "Rejected" and state["counts"] == {"noted": 1}
+    assert "Interview" in [s["status"] for s in app["history"]]
+    assert app["id"] == app_id
+
+
+def test_an_earlier_confirmation_moves_the_applied_date_back(past, user):
+    _app(user, "Catapult", "Graduate Software Engineer", "Applied")
+    past("m1", "Catapult <jobs@catapult.com>", "Thanks for applying to Catapult", "Catapult received it.",
+         _past("received", 1, company="Catapult"), days_ago=90)
+    asyncio.run(_finish(user))
+    app = _app_named(user, "Catapult")
+    assert app["date_applied"] < time.strftime("%Y-%m-%d") and app["status"] == "Applied"
+
+
+def test_a_run_carries_on_where_the_last_stopped(past, user, client):
+    past("m1", "Globex <no-reply@greenhouse.io>", "Thanks for applying to Globex", "Thanks.", _past("received"))
+    asyncio.run(_finish(user))
+    past("m2", "Initech <no-reply@greenhouse.io>", "Thanks for applying to Initech", "Thanks.",
+         _past("received", company="Initech"))
+    assert client.get("/gmail/backfill/count?period=6m").json() == {"period": "6m", "total": 2, "to_read": 1}
+    assert asyncio.run(_finish(user))["read"] == 1
+
+
+def test_stopping_keeps_what_it_found(past, user, google):
+    past("m1", "Globex <no-reply@greenhouse.io>", "Thanks for applying to Globex", "Thanks.", _past("received"), days_ago=40)
+    past("m2", "Initech <no-reply@greenhouse.io>", "Thanks for applying to Initech", "Thanks.",
+         _past("received", company="Initech"), days_ago=20)
+    google.messages = dict(reversed(list(google.messages.items())))     # Gmail lists the newest first
+    real_read = gmail.read
+
+    async def stop_after_first(email, applications):
+        gmail.stop_backfill(user)
+        return await real_read(email, applications)
+    gmail.read = stop_after_first
+    try:
+        state = asyncio.run(_finish(user))
+    finally:
+        gmail.read = real_read
+    assert state["read"] == 1 and _app_named(user, "Globex") and not _app_named(user, "Initech")
+
+
+def test_a_model_that_cant_be_reached_stops_the_run_and_leaves_the_email_unread(past, user):
+    past("m1", "Globex <no-reply@greenhouse.io>", "Thanks for applying to Globex", "Thanks.", None)
+    state = asyncio.run(_finish(user))
+    assert "model" in state["error"] and not tracker.email_seen(user, "m1")
+
+
+def test_gmail_saying_slow_down_makes_it_wait_and_carry_on(past, user, google, monkeypatch):
+    monkeypatch.setattr(gmail, "_QUOTA_WAIT_S", 0)
+    past("m1", "Globex <no-reply@greenhouse.io>", "Thanks for applying to Globex", "Thanks.", _past("received"))
+    google.slow_down.add("/messages/m1")
+    assert asyncio.run(_finish(user))["read"] == 1 and _app_named(user, "Globex")
+
+
+def test_the_backfill_only_takes_the_periods_it_offers(past, client):
+    assert client.post("/gmail/backfill", json={"period": "10y"}).status_code == 400
+    assert client.get("/gmail/backfill/count?period=10y").status_code == 400

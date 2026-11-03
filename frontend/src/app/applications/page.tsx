@@ -48,7 +48,10 @@ function dateLine(a: Application): string {
     case "Pending Review": return `Filled ${longAgo(a.created_at) ?? ""}`;
     case "Saved":
     case "Evaluated": return `Saved ${longAgo(a.created_at) ?? ""}`;
-    default: return a.date_applied ? `Applied ${shortDate(a.date_applied)}` : `Added ${shortDate(a.created_at) ?? ""}`;
+    default: {
+      const line = a.date_applied ? `Applied ${shortDate(a.date_applied)}` : `Added ${shortDate(a.created_at) ?? ""}`;
+      return a.job_id.startsWith("email:") ? `${line}, from email` : line;
+    }
   }
 }
 

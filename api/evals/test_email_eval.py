@@ -1,13 +1,13 @@
 """
 Does Windrush read job emails right, and leave alone what isn't about an application?
 
-16 emails as graduate applicants get them (applicant tracking systems, company recruiters, agencies, job
+20 emails as graduate applicants get them (applicant tracking systems, company recruiters, agencies, job
 boards, newsletters), each labelled with what it means and which application it is about. Every run writes
 evals/last_email_run.json.
 
 The bar: no email is matched to the wrong application; nothing unrelated (job alerts, newsletters, an agency's
 pitch) changes an application; every confident reading that would change a status on its own is correct.
-How many labelled emails were read correctly is reported, and must be at least 13 of 16.
+How many labelled emails were read correctly is reported, and must be at least 17 of 20.
 """
 import asyncio
 import json
@@ -57,6 +57,14 @@ EMAILS = [
     ("LinkedIn Job Alerts <jobalerts-noreply@linkedin.com>", "Graduate Software Engineer at Catapult and 12 more jobs",
      "Jobs you may be interested in: Graduate Software Engineer - Catapult - London. Junior Developer - Monzo.",
      "unrelated", None),
+    ("LinkedIn <jobs-listing-alerts@linkedin.com>", "Graduate Application Engineer at Monzo",
+     "This job fits your profile. Monzo is hiring a Graduate Application Engineer in London. Apply now.", "unrelated", None),
+    ("Ocado Careers <talent@ocadogroup.com>", "We think you'd be great for this role at Ocado",
+     "Hi Timothy, based on your profile we think this Graduate Developer role suits you. Apply by Friday.", "unrelated", None),
+    ("Gradcracker <noreply@gradcracker.com>", "3 application deadlines this week",
+     "These graduate schemes close soon: Monzo, Ocado and Catapult.", "unrelated", None),
+    ("LinkedIn <jobs-noreply@linkedin.com>", "Timothy, your application was sent to Globex Corporation",
+     "Your application was sent to Globex Corporation. Software Engineer, London.", "received", None),
     ("Indeed <alert@indeed.com>", "New jobs for Graduate Software Engineer in Bristol",
      "Ocado Technology is hiring a Graduate Software Developer. Apply now with your Indeed CV.", "unrelated", None),
     ("Baringa <news@baringa.com>", "Baringa Insights: The future of energy markets",
@@ -116,4 +124,4 @@ def test_emails_are_read_and_matched_right():
     assert not wrong_app, wrong_app
     assert not unrelated_changed, unrelated_changed
     assert not wrong_auto, wrong_auto
-    assert right >= 13
+    assert right >= 17

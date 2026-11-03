@@ -310,6 +310,22 @@ export interface GmailStatus {
   syncing: boolean;
   last: { finished_at: string; counts: Record<string, number>; error?: string } | null;
   redirect_uri: string;
+  backfill?: Backfill | null;
+}
+
+export type BackfillPeriod = "6m" | "1y" | "2y";
+
+export interface Backfill {
+  period: BackfillPeriod;
+  running: boolean;
+  stop: boolean;
+  /** How many emails it has to read; null until it has listed them. */
+  to_read: number | null;
+  read: number;
+  counts: Record<string, number>;
+  added: { added: number; linked: number; emails: number; left: number } | null;
+  error: string | null;
+  finished_at: string | null;
 }
 
 export type EmailKind = "received" | "assessment" | "interview" | "offer" | "rejected" | "other";
