@@ -9,13 +9,14 @@ import { TabPanel, UnderlineTabs } from "@/components/ui/Tabs";
 import {
   buttonClass, Callout, Card, Chip, CompanyMark, EmptyState, inputClass, Skeleton, Spinner, StatusChip, type ChipTone,
 } from "@/components/ui/kit";
+import { Segmented } from "@/components/ui/Tabs";
 import { load, useResource } from "@/lib/store";
 import { longAgo, shortDate } from "@/lib/format";
 import {
-  confirmEmail, connectGmail, disconnectGmail, dismissEmail, EVENTS_URL, GMAIL_URL, syncGmail, trackAllEmails, trackEmail,
-  undoEmail, type TrackAllResult,
+  confirmEmail, connectGmail, countPastEmails, disconnectGmail, dismissEmail, EVENTS_URL, GMAIL_URL, startBackfill,
+  stopBackfill, syncGmail, trackAllEmails, trackEmail, undoEmail, type TrackAllResult,
 } from "@/lib/gmail";
-import type { Application, EmailEvent, EmailKind, GmailStatus } from "@/lib/types";
+import type { Application, Backfill, BackfillPeriod, EmailEvent, EmailKind, GmailStatus } from "@/lib/types";
 
 type Tab = "needs" | "updated" | "other";
 
@@ -111,6 +112,87 @@ function Connection({ status }: { status: GmailStatus }) {
         can be undone; anything less certain waits here for you. It keeps each job email&apos;s sender, subject and a
         short snippet, nothing of other mail.
       </span>
+    </Card>
+  );
+}
+
+const PERIODS: { key: BackfillPeriod; label: string }[] = [
+  { key: "6m", label: "6 months" }, { key: "1y", label: "1 year" }, { key: "2y", label: "2 years" },
+];
+
+function OlderMail({ state }: { state: Backfill | null | undefined }) {
+  const [period, setPeriod] = useState<BackfillPeriod>("6m");
+  const [count, setCount] = useState<{ total: number; to_read: number } | null>(null);
+  const [counting, setCounting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const running = state?.running ?? false;
+
+  useEffect(() => {
+    let live = true;
+    setCount(null);
+    setCounting(true);
+    setError(null);
+    countPastEmails(period)
+      .then((c) => { if (live) setCount(c); })
+      .catch((e) => { if (live) setError(e instanceof Error ? e.message : "Couldn't count your emails."); })
+      .finally(() => { if (live) setCounting(false); });
+    return () => { live = false; };
+  }, [period, running]);
+
+  const act = async (fn: () => Promise<void>) => {
+    setError(null);
+    try {
+      await fn();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "That didn't work.");
+    }
+  };
+
+  return (
+    <Card className="p-5 flex flex-col gap-3">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="flex flex-col gap-1 min-w-0 max-w-[70ch]">
+          <h2 className="m-0 text-[16px] font-semibold">Older job emails</h2>
+          <span className="text-[13px] text-ink-2">
+            Read further back to fill in applications you made before connecting Gmail. Job alerts and recommendations
+            are skipped. An application is only added when an email shows you applied, marked as from email.
+          </span>
+        </div>
+        {!running && <Segmented label="How far back" value={period} onChange={setPeriod} items={PERIODS} />}
+      </div>
+      {running && state ? (
+        <div className="flex flex-col gap-2">
+          <span className="text-[13px]" role="status">
+            {state.stop ? "Stopping…" : state.to_read == null ? "Listing your emails…" : `Read ${state.read} of ${state.to_read} emails.`}
+          </span>
+          {!!state.to_read && (
+            <progress value={state.read} max={state.to_read} aria-label="Emails read" className="w-full h-2 accent-teal" />
+          )}
+          <button type="button" onClick={() => act(stopBackfill)} disabled={state.stop} className={buttonClass("secondary", "sm", "self-start")}>
+            Stop
+          </button>
+        </div>
+      ) : (
+        <div className="flex flex-wrap items-center gap-3">
+          <button type="button" onClick={() => act(() => startBackfill(period))} disabled={!count?.to_read}
+            className={buttonClass("primary", "sm")}>
+            {count ? `Read ${count.to_read} emails` : "Read emails"}
+          </button>
+          <span className="text-[12.5px] text-ink-3">
+            {counting ? "Counting…" : count ? `${count.total} job emails in this period; ${count.total - count.to_read} already read. Each one is sent to the model, as your new mail is.` : ""}
+          </span>
+        </div>
+      )}
+      {state && !running && !state.error && state.finished_at && (
+        <Callout tone="info">
+          Read {state.read} emails: {state.added?.added ?? 0} applications added
+          {state.counts.ignored ? `, ${state.counts.ignored} alerts and unrelated emails skipped` : ""}
+          {state.counts.dismissed ? `, ${state.counts.dismissed} too unclear to add (under Other)` : ""}
+          {state.added?.left ? `, ${state.added.left} need you because they name no role` : ""}.
+        </Callout>
+      )}
+      {state?.error && !running && <Callout>{state.error}</Callout>}
+      {error && <Callout>{error}</Callout>}
     </Card>
   );
 }
@@ -284,7 +366,7 @@ function Inbox() {
   const [tab, setTab] = useState<Tab>("needs");
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const syncing = status.data?.syncing ?? false;
+  const syncing = (status.data?.syncing || status.data?.backfill?.running) ?? false;
 
   useEffect(() => {
     if (!syncing) return;
@@ -350,6 +432,7 @@ function Inbox() {
         {error && <Callout>{error}</Callout>}
 
         {s ? <Connection status={s} /> : <Skeleton className="h-[120px] rounded-card" />}
+        {live && <OlderMail state={s?.backfill} />}
 
         {(live || (events.data?.length ?? 0) > 0) && (
           <Card className="p-5 flex flex-col gap-4">
