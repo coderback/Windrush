@@ -70,7 +70,7 @@ export function DemoExposureNote() {
     <Box>
       <strong className="font-semibold text-ink">Saved scores for fictional skills.</strong> These numbers are real output of the
       project&apos;s scoring code (Anthropic Economic Index and O*NET task data, plus its built-in table), run once on these skills.
-      They are rough lookups, not forecasts. The real app also has a model write a one-line explanation of each score; those are
+      They are rough lookups, not forecasts: a skill at exactly 55, or a job title at exactly 50, found no match in the data and got the default. The real app also has a model write a one-line explanation of each score; those are
       left out because this demo makes no LLM calls, and the roadmap is off for the same reason.
     </Box>
   );
