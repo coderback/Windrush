@@ -1,13 +1,13 @@
 """
 Does Windrush read job emails right, and leave alone what isn't about an application?
 
-23 emails as graduate applicants get them (applicant tracking systems, company recruiters, agencies, job
+24 emails as graduate applicants get them (applicant tracking systems, company recruiters, agencies, job
 boards, newsletters), each labelled with what it means and which application it is about. Every run writes
 evals/last_email_run.json.
 
 The bar: no email is matched to the wrong application; nothing unrelated (job alerts, newsletters, an agency's
 pitch) changes an application; every confident reading that would change a status on its own is correct.
-How many labelled emails were read correctly is reported, and must be at least 20 of 23.
+How many labelled emails were read correctly is reported, and must be at least 21 of 24.
 """
 import asyncio
 import json
@@ -91,6 +91,9 @@ EMAILS = [
     ("Ocado Technology <noreply@jobalerts.ocadogroup.com>", "Ocado Technology Application",
      "Dear Timothy, thank you for applying for the position of Graduate Software Developer here at Ocado Technology. We "
      "regret to advise you that the position you have applied for has been filled.", "rejected", "ocado"),
+    ("Monzo <noreply@candidates.workablemail.com>", "Complete our anonymous survey - Monzo",
+     "Monzo Hi Timothy, Thanks for applying to Monzo. To improve our hiring practices, we are asking that you complete "
+     "our anonymous survey. It's optional, but your help would be greatly appreciated.", "other", "monzo"),
 ]
 
 
@@ -133,4 +136,4 @@ def test_emails_are_read_and_matched_right():
     assert not wrong_app, wrong_app
     assert not unrelated_changed, unrelated_changed
     assert not wrong_auto, wrong_auto
-    assert right >= 20
+    assert right >= 21
