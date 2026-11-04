@@ -328,7 +328,8 @@ _CLASSIFY_SYSTEM = (
     "- interview: it invites them to, or arranges, an interview, call or assessment centre with people;\n"
     "- offer: it offers them the job;\n"
     "- rejected: it says they won't be progressed, the role is filled or closed, or they were unsuccessful;\n"
-    "- other: it's about one of their applications but none of the above (still under review, a question for them);\n"
+    "- other: it's about one of their applications but none of the above (still under review, a question for them, "
+    "or an optional survey about how the employer's hiring went: that isn't a step in the application);\n"
     "- unrelated: anything else, including job alerts, job recommendations, newsletters and marketing.\n"
     "It only counts when it's about an application they actually made. A job they're told fits them, might like or "
     "should apply to is unrelated, even when its title has the word Application in it or it names a company they "
@@ -356,6 +357,18 @@ _FALLBACK = (
 )
 
 
+# "To improve our hiring practices, please complete our anonymous survey": the model reads this right most times, not
+# every time, and a wrong read moves the application on by itself. An email that also asks for a test keeps its reading.
+_HIRING_WORDS = r"\b(?:hiring|recruit\w*|candidate experience|application experience)\b"
+_HIRING_SURVEY = re.compile(rf"\bsurvey\b.{{0,200}}{_HIRING_WORDS}|{_HIRING_WORDS}.{{0,200}}\bsurvey\b", re.I | re.S)
+_ASKS_FOR_A_TEST = re.compile(r"assessment|\btests?\b|coding challenge|hackerrank|codility|video interview", re.I)
+
+
+def _is_hiring_survey(email: dict) -> bool:
+    text = f"{email['subject']}\n{email.get('text') or email.get('snippet') or ''}"
+    return bool(_HIRING_SURVEY.search(text)) and not _ASKS_FOR_A_TEST.search(text)
+
+
 def _numbered(applications: list[dict]) -> str:
     return "\n".join(f"{n}. {a['company']} - {a['job_title']} (status: {a['status']})"
                      for n, a in enumerate(applications, 1))
@@ -375,6 +388,8 @@ async def read(email: dict, applications: list[dict]) -> dict:
     if data is None:
         return _read_without_model(email, applications)
     kind = data.get("kind") if data.get("kind") in KIND_STATUS or data.get("kind") in ("other", "unrelated") else "other"
+    if kind == "assessment" and _is_hiring_survey(email):
+        kind = "other"
     n = data.get("application")
     app = applications[n - 1] if isinstance(n, int) and 1 <= n <= len(applications) else None
     if app and not names_company(email, app["company"]):

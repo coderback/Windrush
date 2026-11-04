@@ -767,3 +767,44 @@ def test_add_all_doesnt_let_an_old_email_undo_a_newer_status(inbox, user, client
     asyncio.run(gmail.sync(user))
     client.post("/gmail/events/track-all")
     assert _status(user, apps["catapult"]) == "Interview"
+
+
+# ── A survey about the hiring process isn't a step in the application ─────
+
+_SURVEY = "Hi Timothy, Thanks for applying to Zego. To improve our hiring practices, we are asking that you complete our " \
+          "anonymous survey. It's optional, but your help would be greatly appreciated."
+
+
+def _read_survey_as(monkeypatch, kind, subject, text):
+    async def model(system, user, **kwargs):
+        return {"kind": kind, "application": 1, "confidence": "high", "company": "Zego", "role": "", "summary": "x"}
+    monkeypatch.setattr(agent, "_llm_json", model)
+    email = {**_email("noreply@candidates.workablemail.com", subject), "text": text, "received_at": "2026-09-01T18:15:51+00:00"}
+    apps = [{"id": "a", "company": "Zego", "job_title": "Software Engineer", "status": "Applied"}]
+    return asyncio.run(gmail.read(email, apps))
+
+
+def test_a_hiring_survey_read_survey_as_an_assessment_changes_nothing(monkeypatch):
+    reading = _read_survey_as(monkeypatch, "assessment", "Complete our anonymous survey - Zego", _SURVEY)
+    assert reading["kind"] == "other"
+    assert gmail.proposed_change("Applied", reading["kind"]) == (None, False)
+
+
+@pytest.mark.parametrize("subject, text", [
+    ("Zego: your online assessment", "Please complete the assessment by Friday. Afterwards, a short survey about our hiring process is optional."),
+    ("Next steps at Zego", "Please complete this coding challenge. We also run a recruitment survey."),
+    ("Your Zego video interview", "Record your video interview by Friday. Our candidate experience survey follows."),
+])
+def test_a_real_test_that_also_mentions_a_survey_stays_an_assessment(monkeypatch, subject, text):
+    assert _read_survey_as(monkeypatch, "assessment", subject, text)["kind"] == "assessment"
+
+
+def test_a_questionnaire_for_the_job_stays_an_assessment(monkeypatch):
+    text = "Please complete these few short questions to finish your application for the Software Engineer role."
+    assert _read_survey_as(monkeypatch, "assessment", "Finish your application", text)["kind"] == "assessment"
+
+
+def test_a_survey_only_ever_stops_an_assessment_reading(monkeypatch):
+    # A rejection that happens to ask for feedback on the hiring process is still a rejection
+    text = "Unfortunately we won't be progressing your application. Please take our survey on our hiring process."
+    assert _read_survey_as(monkeypatch, "rejected", "Your application to Zego", text)["kind"] == "rejected"
