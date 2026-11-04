@@ -109,10 +109,9 @@ JOB = {"job_id": "1", "title": "Graduate Engineer", "company": "Acme", "descript
 
 @pytest.mark.parametrize("tool, tool_input", [
     ("extract_cv_profile", {"cv_text": "Ada Byron, Python developer"}),
-    ("score_ai_risk", {"skills": ["Python"]}),
     ("score_job_fit", {"jobs": [JOB], "persona": PERSONA}),
     ("generate_cover_letter", {"job": JOB, "persona": PERSONA}),
-    ("generate_skill_roadmap", {"skill_risks": [{"skill": "Python", "exposure_score": 78}], "persona": PERSONA}),
+    ("generate_skill_roadmap", {"persona": PERSONA}),
     ("generate_tailored_cv", {"job": JOB, "persona": PERSONA}),
 ])
 def test_every_feature_sends_reasoning_model_params_on_azure(on_azure, fake_client, monkeypatch, tool, tool_input):
@@ -231,7 +230,7 @@ def test_unfinished_answers_are_logged(on_azure, monkeypatch, caplog, reason):
 def test_roadmap_targets_the_persona_titles_when_none_is_given(on_azure, fake_client):
     persona = {**PERSONA, "preferences": {"target_titles": ["Graduate Data Engineer", "Junior Data Engineer"]}}
     asyncio.run(agent.execute_tool("generate_skill_roadmap",
-                                   {"skill_risks": [{"skill": "Python", "exposure_score": 78}], "persona": persona}))
+                                   {"persona": persona}))
     prompt = " ".join(m["content"] for m in fake_client.calls[0]["messages"])
     assert "Target role: Graduate Data Engineer, Junior Data Engineer" in prompt
 

@@ -1,228 +1,167 @@
+"""The published AI exposure of a job: the Anthropic Economic Index's score for the occupation its title belongs to.
+
+Nothing here is estimated. A title is matched to an occupation by O*NET's own list of job titles, and the score is the
+one Anthropic publishes for that occupation. When the title doesn't clearly belong to one occupation, or the index saw
+too little usage to score it (it publishes a zero, which doesn't mean safe), the answer is "not enough data": None.
+"""
 import csv
+import html
 import json
 import os
 import re
+from functools import lru_cache
+from pathlib import Path
 
-import numpy as np
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics.pairwise import cosine_similarity
+_DATA = Path(__file__).resolve().parents[2] / "data"  # /data in the container, data/ in a checkout
 
-# --- Economic Index (occupation-level ONET lookup) ---
-_index_path = os.environ.get("ECONOMIC_INDEX_PATH", "/data/economic_index.json")
-try:
-    with open(_index_path) as f:
-        ECONOMIC_INDEX: dict = json.load(f)
-except FileNotFoundError:
-    ECONOMIC_INDEX = {}
 
-# --- Task penetration ---
-# Non-zero tasks drive TF-IDF scoring; all tasks drive keyword scoring.
-_task_path = os.environ.get("TASK_PENETRATION_PATH", "/data/task_penetration.csv")
-_tasks: list[str] = []          # non-zero penetration only (TF-IDF corpus)
-_penetrations: list[float] = [] # matching non-zero penetrations
-_all_tasks: list[str] = []      # full corpus (keyword search)
-_all_penetrations: list[float] = []
+def _load_json(variable: str, name: str) -> dict:
+    try:
+        with open(os.environ.get(variable) or _DATA / name, encoding="utf-8") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return {}
 
-try:
-    with open(_task_path, newline="", encoding="utf-8") as f:
-        for row in csv.DictReader(f):
-            p = float(row["penetration"])
-            _all_tasks.append(row["task"])
-            _all_penetrations.append(p)
-            if p > 0:
-                _tasks.append(row["task"])
-                _penetrations.append(p)
-except FileNotFoundError:
-    pass
 
-_PENETRATIONS = np.array(_penetrations) if _penetrations else np.array([])
-_VECTORIZER: TfidfVectorizer | None = None
-_TASK_MATRIX = None
+ECONOMIC_INDEX: dict = _load_json("ECONOMIC_INDEX_PATH", "economic_index.json")
+EVIDENCE: dict = _load_json("OCCUPATION_EVIDENCE_PATH", "occupation_evidence.json")
 
-if _tasks:
-    _VECTORIZER = TfidfVectorizer(ngram_range=(1, 2), stop_words="english")
-    _TASK_MATRIX = _VECTORIZER.fit_transform(_tasks)
-
-# --- Occupation name matching helpers ---
-
-# Words stripped before matching job titles against ONET occupation names
-_TITLE_NOISE = frozenset({
-    "graduate", "junior", "senior", "lead", "principal", "associate",
-    "trainee", "entry", "level", "new", "intern", "programme", "program",
-    "2025", "2026", "2027", "fy27", "fy26", "fy25", "the", "and", "or",
-    "for", "with", "except",
+# Say nothing about the occupation: left out of both sides before comparing
+_NOISE = frozenset({
+    "graduate", "grad", "junior", "jr", "senior", "sr", "lead", "principal", "staff", "associate", "trainee", "apprentice",
+    "apprenticeship", "intern", "internship", "entry", "level", "new", "programme", "program", "scheme", "placement",
+    "fresh", "early", "career", "careers", "year", "job", "jobs", "ii", "iii", "iv", "the", "and", "of", "for", "in", "with",
+    "at", "a", "an",
 })
 
-# Words too common across ONET occupation names to be discriminative on their own.
-# Domain words (software, financial, data, teaching) are kept — role words that
-# appear in dozens of occupations are filtered so they can't drive a solo match.
-_WEAK_WORDS = frozenset({
-    "machine", "service", "process", "processing", "workers", "worker",
-    "operators", "operator", "other", "general", "special", "all",
-    "engineer", "engineering",   # appears in 40+ occupations spanning all domains
-})
+# Titles O*NET leaves out or spreads across several occupations, placed the way the US occupation definitions do.
+# Only the occupation is chosen here: the score is still the published one.
+_SOFTWARE, _WEB, _SECURITY = "15-1252", "15-1254", "15-1212"
+_RESEARCH_SCIENTIST, _DATA_SCIENTIST, _DATABASE = "15-1221", "15-2051", "15-1243"
+_ROLES = {
+    "backend": _SOFTWARE, "back end": _SOFTWARE, "full stack": _SOFTWARE, "fullstack": _SOFTWARE, "devops": _SOFTWARE,
+    "site reliability": _SOFTWARE, "sre": _SOFTWARE, "platform engineer": _SOFTWARE, "infrastructure engineer": _SOFTWARE,
+    "cloud engineer": _SOFTWARE, "software engineer": _SOFTWARE, "software developer": _SOFTWARE, "software engineering": _SOFTWARE,
+    "software development": _SOFTWARE, "quant developer": _SOFTWARE, "quantitative developer": _SOFTWARE,
+    "frontend": _WEB, "front end": _WEB, "web developer": _WEB,
+    "machine learning engineer": _RESEARCH_SCIENTIST, "ml engineer": _RESEARCH_SCIENTIST, "ai engineer": _RESEARCH_SCIENTIST,
+    "ai ml engineer": _RESEARCH_SCIENTIST, "research engineer": _RESEARCH_SCIENTIST, "research scientist": _RESEARCH_SCIENTIST,
+    "data scientist": _DATA_SCIENTIST, "data science": _DATA_SCIENTIST, "data analyst": _DATA_SCIENTIST,
+    "data engineer": _DATABASE, "analytics engineer": _DATABASE,
+    "security engineer": _SECURITY, "cyber security": _SECURITY, "cybersecurity": _SECURITY, "cyber security engineer": _SECURITY,
+    "quantitative analyst": "13-2099", "quantitative researcher": "13-2099", "quant researcher": "13-2099", "quant analyst": "13-2099",
+    "business analyst": "13-1111", "financial analyst": "13-2051", "investment analyst": "13-2051",
+    "back end engineer": _SOFTWARE, "back end developer": _SOFTWARE, "forward deployed engineer": _SOFTWARE,
+    "deployment engineer": _SOFTWARE, "mlops": _SOFTWARE, "ml ops": _SOFTWARE, "python engineer": _SOFTWARE,
+    "python developer": _SOFTWARE, "java engineer": _SOFTWARE, "java developer": _SOFTWARE, "c++ engineer": _SOFTWARE,
+    "c++ developer": _SOFTWARE, "computer vision engineer": _RESEARCH_SCIENTIST, "machine learning researcher": _RESEARCH_SCIENTIST,
+    "ml researcher": _RESEARCH_SCIENTIST, "electronic engineer": "17-2072", "fire engineer": "17-2111",
+    "mechanical engineering": "17-2141",
+}
+
+# Entries in O*NET's list that send a title somewhere it plainly doesn't belong, seen on real job titles:
+# "AI Consultant" to detectives, "Stack Engineer" to mechanical engineers, "Developer Advocate" to urban planners.
+_UNRELIABLE = {"stack engineer", "developer advocate", "ai consultant", "market maker", "automation specialist",
+               "structure engineer", "algorithm developer"}
+
+# A field of work, not a job: O*NET lists "Engineering" under aerospace engineers and "Marketing" under one occupation
+_A_FIELD = re.compile(r"(ing|tion|sion|ment|ance|ence|ology|ity|analytic|technology|science|service|chain)$")
 
 
-def _stem(word: str) -> str:
-    """Lightweight suffix normalisation — collapses common English plurals/agents."""
-    if len(word) > 5 and word.endswith("ers"):
-        return word[:-1]   # 'programmers' → 'programmer' (drop 's' not 'ers')
-    if len(word) > 4 and word.endswith("s") and not word.endswith("ss"):
-        return word[:-1]   # 'developers' → 'developer', 'analysts' → 'analyst'
-    return word
+def _words(text: str) -> tuple[str, ...]:
+    """A title's meaningful words, singular."""
+    words = re.sub(r"[^a-z0-9+#]+", " ", html.unescape(text).lower()).split()
+    kept = (w for w in words if w not in _NOISE and not re.fullmatch(r"\d+|fy\d+", w))
+    return tuple(w[:-1] if len(w) > 3 and w.endswith("s") and not w.endswith("ss") else w for w in kept)
 
 
-def _title_words(text: str) -> set[str]:
-    """Stemmed, noise-stripped content words from a title/occupation string."""
-    words = re.sub(r"[^a-z0-9\s]", " ", text.lower()).split()
-    return {
-        _stem(w) for w in words
-        if w not in _TITLE_NOISE and w not in _WEAK_WORDS and len(w) > 2
-    }
+def _load_titles() -> dict[tuple[str, ...], str]:
+    """Each title that belongs to exactly one occupation. One O*NET gives to several says nothing on its own."""
+    occupations: dict[tuple[str, ...], set[str]] = {}
+    unreliable = {_words(phrase) for phrase in _UNRELIABLE}
+    try:
+        with open(os.environ.get("OCCUPATION_TITLES_PATH") or _DATA / "occupation_titles.csv", newline="", encoding="utf-8") as f:
+            for row in csv.DictReader(f):
+                words = _words(row["title"])
+                if words and words not in unreliable and not _A_FIELD.search(words[-1]):
+                    occupations.setdefault(words, set()).add(row["soc"])
+    except FileNotFoundError:
+        pass
+    titles = {words: next(iter(codes)) for words, codes in occupations.items() if len(codes) == 1}
+    titles.update({_words(phrase): code for phrase, code in _ROLES.items()})
+    return titles
 
 
-def _onet_word_overlap(title: str) -> tuple[str, dict] | None:
-    """Find best ONET occupation by stemmed content-word overlap.
+_TITLES = _load_titles()
+_ROLE_WORDS = {_words(phrase) for phrase in _ROLES}
+_LONGEST = max((len(t) for t in _TITLES), default=0)
 
-    Minimum overlap scales with query length: queries with ≥ 3 content words
-    require ≥ 2 shared words to avoid single-generic-word false positives
-    (e.g. 'machine' in 'Machine Learning Engineer' matching 'Machine Operators').
-    """
-    query_words = _title_words(title)
-    if not query_words:
+
+def _occupation_code(title: str) -> str | None:
+    words = _words(title)
+    if not words:
         return None
-
-    # Scale minimum required overlap with query length
-    min_overlap = 2 if len(query_words) >= 3 else 1
-
-    best_code: str | None = None
-    best_data: dict | None = None
-    best_overlap = 0
-
-    for code, data in ECONOMIC_INDEX.items():
-        occ_words = _title_words(data.get("occupation_name", ""))
-        overlap = len(query_words & occ_words)
-        if overlap > best_overlap:
-            best_overlap = overlap
-            best_code = code
-            best_data = data
-
-    return (best_code, best_data) if best_overlap >= min_overlap else None
+    if words in _TITLES:
+        return _TITLES[words]
+    # A longer title holding known ones ("Technology Programme (Data Engineer)"). Longest first, and they have to agree:
+    # "Software Engineer / Data Scientist" is two occupations, so it isn't scored.
+    found: set[str] = set()
+    free = [True] * len(words)
+    for size in range(min(_LONGEST, len(words)), 0, -1):
+        for start in range(len(words) - size + 1):
+            span = words[start:start + size]
+            # A single word is too thin to go on unless it's a role word: "Sales Engineer" isn't "engineer"
+            if span in _TITLES and all(free[start:start + size]) and (size > 1 or span in _ROLE_WORDS):
+                found.add(_TITLES[span])
+                free[start:start + size] = [False] * size
+    return found.pop() if len(found) == 1 else None
 
 
-def _keyword_task_score(term: str) -> float | None:
-    """Average penetration across ALL tasks that contain `term` as a phrase.
-
-    Uses the full task corpus (including zero-penetration tasks) so skills
-    linked to low-AI-penetration work score lower than ones linked to
-    high-penetration work.
-
-    Note: ONET task descriptions are phrased generically and do NOT name
-    specific programming languages or tools. This function is meaningful
-    only for multi-word occupational phrases that do appear in task text
-    (e.g. "machine learning", "financial analysis").
-    """
-    if not _all_tasks:
+@lru_cache(maxsize=20_000)
+def occupation_for(title: str) -> dict | None:
+    """{code, name, exposure} of the occupation a title belongs to, or None when it doesn't clearly belong to one.
+    exposure is 0-1, or None when the index has too little usage to score the occupation."""
+    code = _occupation_code(title or "")
+    entry = ECONOMIC_INDEX.get(code) if code else None
+    if not entry:
         return None
-
-    key = term.lower().strip()
-    # Require word-boundary match for short terms to avoid false positives
-    if len(key) <= 5:
-        pattern = re.compile(r"\b" + re.escape(key) + r"\b")
-        indices = [i for i, t in enumerate(_all_tasks) if pattern.search(t.lower())]
-    else:
-        indices = [i for i, t in enumerate(_all_tasks) if key in t.lower()]
-
-    if len(indices) < 3:   # too few matches → unreliable
-        return None
-
-    avg = sum(_all_penetrations[i] for i in indices) / len(indices)
-    return float(round(avg, 4))
+    return {"code": code, "name": entry["occupation_name"], "exposure": entry.get("overall_exposure") or None}
 
 
-def _tfidf_score(skill: str) -> float | None:
-    """TF-IDF semantic match against non-zero O*NET task penetration scores.
-
-    Requires ALL content words from the skill name to appear in the matched
-    task text to prevent false positives.
-    """
-    if _VECTORIZER is None or _TASK_MATRIX is None:
-        return None
-
-    _sklearn_stops = _VECTORIZER.get_stop_words()
-    content_words = [
-        w.lower() for w in skill.split()
-        if len(w) > 2 and w.lower() not in _sklearn_stops
-    ]
-    if not content_words:
-        return None
-
-    vec = _VECTORIZER.transform([skill])
-    sims = cosine_similarity(vec, _TASK_MATRIX)[0]
-    top_idx = np.argsort(sims)[-20:][::-1]
-    if sims[top_idx[0]] < 0.15:
-        return None
-
-    valid = [
-        i for i in top_idx
-        if sims[i] >= 0.15 and all(w in _tasks[i].lower() for w in content_words)
-    ]
-    if not valid:
-        return None
-
-    valid = valid[:5]
-    weights = sims[valid]
-    scores = _PENETRATIONS[valid]
-    return float(round(np.average(scores, weights=weights), 4))
+def occupation_exposure(title: str) -> float | None:
+    """The published score of a job title's occupation, 0-1, or None for not enough data."""
+    occupation = occupation_for(title)
+    return occupation["exposure"] if occupation else None
 
 
-def lookup_onet(onet_code: str) -> dict:
-    return ECONOMIC_INDEX.get(onet_code, {"occupation_name": "Unknown", "overall_exposure": 0.5})
+def exposure_fields(title: str) -> dict:
+    """What a job carries: its score, and the occupation it comes from so a wrong match can be seen."""
+    occupation = occupation_for(title)
+    return {"exposure_score": occupation["exposure"] if occupation else None,
+            "exposure_occupation": occupation["name"] if occupation else None}
 
 
-def occupation_exposure(title: str) -> float:
-    """Return exposure for a job title — used when job_searcher shapes jobs and the fixture.
-
-    Uses word-overlap matching so titles like 'Graduate Software Engineer'
-    correctly resolve to 'Software Developers' instead of defaulting to 0.5.
-    """
-    match = _onet_word_overlap(title)
-    if match:
-        return float(match[1].get("overall_exposure", 0.5))
-    return 0.5
+def target_evidence(titles: list[str]) -> dict | None:
+    """What people hand to AI in the first of these roles the index has task data for."""
+    for title in titles:
+        occupation = occupation_for(title)
+        if occupation and occupation["code"] in EVIDENCE:
+            return {"role": title, "occupation": occupation["name"], **EVIDENCE[occupation["code"]]}
+    return None
 
 
-def lookup_by_title(title: str) -> dict:
-    """4-tier data-driven exposure lookup.
-
-    Tier 1: Keyword search across all O*NET tasks — reliable for multi-word
-            occupational phrases that appear in task descriptions
-            (e.g. 'machine learning', 'financial analysis').
-            Single-word tech tool names (Python, Docker, React) do NOT appear
-            in ONET task text; they fall through to lower tiers.
-
-    Tier 2: TF-IDF semantic match against 1,354 non-zero O*NET task penetrations.
-
-    Tier 3: ONET occupation word-overlap match — strips noise words (graduate,
-            junior, senior…) and finds the occupation with the most shared
-            content words. Effective for job-title-phrased skills.
-
-    Tier 4: Default 0.5 (no data to differentiate).
-    """
-    # Tier 1 — keyword task search (meaningful for multi-word occupational terms)
-    score = _keyword_task_score(title)
-    if score is not None:
-        return {"occupation_name": title, "overall_exposure": score}
-
-    # Tier 2 — TF-IDF
-    score = _tfidf_score(title)
-    if score is not None:
-        return {"occupation_name": title, "overall_exposure": score}
-
-    # Tier 3 — ONET word-overlap
-    match = _onet_word_overlap(title)
-    if match:
-        return {"onet_code": match[0], **match[1]}
-
-    # Tier 4
-    return {"occupation_name": title, "overall_exposure": 0.5}
+def career_exposure(persona: dict) -> dict:
+    """The published score of each role someone is aiming for or has done, and the evidence for their target."""
+    targets = [t for t in (persona.get("preferences") or {}).get("target_titles") or [] if t]
+    past = [h.get("title") for h in persona.get("history") or [] if h.get("title")]
+    roles, seen = [], set()
+    for kind, titles in (("target", targets), ("past", past)):
+        for title in titles:
+            if title.lower() in seen:
+                continue
+            seen.add(title.lower())
+            occupation = occupation_for(title)
+            exposure = occupation["exposure"] if occupation else None
+            roles.append({"title": title, "kind": kind, "occupation": occupation["name"] if occupation else None,
+                          "exposure": round(exposure * 100) if exposure else None})
+    return {"roles": roles, "evidence": target_evidence(targets)}

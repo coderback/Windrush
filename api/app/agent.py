@@ -15,7 +15,7 @@ from . import azure_config, doc_check, doc_render
 from .company_names import normalise_company_name as _normalise_company_name
 from . import http_client
 from . import tracker
-from .risk_scorer import lookup_by_title
+from .risk_scorer import target_evidence
 from .browser_agent import apply_with_browser
 
 logger = logging.getLogger("windrush.agent")
@@ -102,42 +102,12 @@ def _chat_params(**params) -> dict:
     return out
 
 
-_HARDCODED_EXPOSURE: dict[str, float] = {
-    # Programming languages
-    "python": 0.78, "javascript": 0.71, "typescript": 0.68, "java": 0.69,
-    "c++": 0.62, "c#": 0.65, "go": 0.60, "rust": 0.55, "r": 0.76,
-    "matlab": 0.72, "scala": 0.63, "kotlin": 0.64, "swift": 0.61,
-    # AI / ML
-    "machine learning": 0.82, "deep learning": 0.79, "nlp": 0.84,
-    "natural language processing": 0.84, "computer vision": 0.81,
-    "tensorflow": 0.75, "pytorch": 0.76, "keras": 0.74,
-    "large language models": 0.88, "llm": 0.88, "generative ai": 0.86,
-    "reinforcement learning": 0.77, "neural networks": 0.80,
-    "data science": 0.81, "data analysis": 0.80, "statistics": 0.74,
-    # Web / backend
-    "react": 0.65, "node.js": 0.67, "django": 0.66, "fastapi": 0.64,
-    "rest api": 0.70, "graphql": 0.67, "sql": 0.72, "nosql": 0.68,
-    "postgresql": 0.70, "mongodb": 0.67, "redis": 0.63,
-    # DevOps / infra
-    "docker": 0.58, "kubernetes": 0.52, "aws": 0.61, "azure": 0.60,
-    "gcp": 0.59, "terraform": 0.54, "ci/cd": 0.56, "git": 0.55,
-    "cloud computing": 0.60, "microservices": 0.58,
-    # Lower-exposure / hardware / specialised
-    "fpga": 0.32, "embedded systems": 0.40, "hardware design": 0.35,
-    "robotics": 0.48, "signal processing": 0.44, "compiler design": 0.38,
-    "systems design": 0.38, "distributed systems": 0.42,
-    "cryptography": 0.36, "security": 0.41, "networking": 0.43,
-    # Soft / domain
-    "research": 0.45, "technical leadership": 0.28, "agile": 0.42,
-    "project management": 0.50, "communication": 0.30,
-    # Job titles
-    "software engineer": 0.62, "software developer": 0.65,
-    "data engineer": 0.72, "ml engineer": 0.80, "ai engineer": 0.82,
-    "graduate software engineer": 0.62, "backend engineer": 0.64,
-    "frontend engineer": 0.66, "full stack engineer": 0.65,
-    "data scientist": 0.81, "research engineer": 0.58,
-    "devops engineer": 0.55, "platform engineer": 0.53,
-}
+def _evidence_prompt(evidence: dict) -> str:
+    tasks = lambda key: "; ".join(t["task"] for t in evidence[key])
+    return (f"Usage evidence for {evidence['occupation']} (Anthropic Economic Index, chat conversations, {evidence['month']}):\n"
+            f"Handed to AI most: {tasks('most_handed_to_ai')}\n"
+            f"Handed to AI least: {tasks('least_handed_to_ai')}\n")
+
 
 async def _llm(system: str, user: str, max_tokens: int = 2048) -> str:
     """Simple single-turn LLM call for internal tool use (CV parsing, cover letter, roadmap)."""
@@ -1113,48 +1083,6 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
         )
         return data or {}
 
-    elif name == "score_ai_risk":
-        skills = tool_input.get("skills", [])
-        if not skills:
-            return {"skill_risks": []}
-
-        # First, get raw scores from our index/hardcoded list
-        raw_results = []
-        for skill in skills:
-            key = skill.lower().strip()
-            if key in _HARDCODED_EXPOSURE:
-                exposure = _HARDCODED_EXPOSURE[key]
-            else:
-                data = lookup_by_title(skill)
-                raw = data.get("overall_exposure", 0.0)
-                exposure = round(raw, 2) if raw and raw != 0.5 else 0.55
-            
-            raw_results.append({
-                "skill": skill,
-                "exposure_score": round(exposure * 100),
-                "risk_label": "High" if exposure >= 0.65 else ("Medium" if exposure >= 0.35 else "Low")
-            })
-
-        # Use LLM to generate reasoning for these scores
-        text = await _llm(
-            system=(
-                "You are an AI workforce expert. Provide a concise, one-sentence reasoning for the AI exposure risk of each skill. "
-                "Focus on why the skill is either easily automated or requires human-centric reasoning/physicality. "
-                "Return ONLY valid JSON with a 'skill_risks' array. "
-                "Each object MUST have: skill, exposure_score, risk_label, and reasoning. "
-                "Keep the scores/labels from the input, just add reasoning. "
-                "Output ONLY JSON."
-            ),
-            user=f"Skills and Scores: {json.dumps(raw_results)}",
-            max_tokens=2048,
-        )
-
-        text = text.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
-        try:
-            return json.loads(text or f'{{"skill_risks": {json.dumps(raw_results)}}}')
-        except json.JSONDecodeError:
-            return {"skill_risks": raw_results}
-
     elif name == "score_job_fit":
         jobs = tool_input.get("jobs", [])
         persona = tool_input.get("persona", {})
@@ -1386,17 +1314,12 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
         }
 
     elif name == "generate_skill_roadmap":
-        skill_risks = tool_input.get("skill_risks", [])
         persona = tool_input.get("persona", {})
         # Without an explicit target, plan for the roles the user is aiming at, not their last employer's industry.
-        target_job_title = tool_input.get("target_job_title") or ", ".join(
-            (persona.get("preferences") or {}).get("target_titles") or [])
-
-        confirmed_high = [s for s in skill_risks if s.get("exposure_score", s.get("exposure", 0) * 100) > 65]
-        confirmed_low  = [s for s in skill_risks if 0 < s.get("exposure_score", s.get("exposure", 0) * 100) <= 35]
-        all_skills_str = ", ".join(
-            f"{s['skill']} ({s.get('exposure_score', round(s.get('exposure', 0) * 100))}%)" for s in skill_risks
-        )
+        target_titles = (persona.get("preferences") or {}).get("target_titles") or []
+        target_job_title = tool_input.get("target_job_title") or ", ".join(target_titles)
+        evidence = target_evidence([tool_input["target_job_title"]] if tool_input.get("target_job_title") else target_titles)
+        all_skills_str = ", ".join(s for group in persona.get("skills", []) for s in group.get("skills", []))
 
         core = persona.get("core_info", {})
         name_str = f"{core.get('first_name', '')} {core.get('last_name', '')}".strip() or "the candidate"
@@ -1427,8 +1350,10 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
                 "STRICT RULES: "
                 "1. Plan for the TARGET role when one is given: every recommendation must make the candidate more competitive for that role across the employers who hire for it. Past employers' industries are background only — a short internship or placement does not define the candidate's industry. "
                 "2. Build ON their existing technical strengths — deepen and extend, do not replace them. "
-                "3. For each skill at confirmed high AI risk, suggest a way to apply it at a level AI cannot yet reach "
-                "(novel research, production systems, domain-specific expertise, technical leadership). "
+                "3. If usage evidence is given, favour work people hand to AI least over work they hand to it most, and "
+                "apply their strengths above the level of the tasks handed over most (novel research, production systems, "
+                "domain-specific expertise, technical leadership). The evidence is one month of chat use and generic task "
+                "descriptions, so treat it as a hint: never quote its figures or call a skill safe or at risk. "
                 "4. Do NOT recommend generic soft skills (leadership, communication, PM) unless the candidate is "
                 "already working in a non-technical or hybrid role. "
                 "5. Do NOT recommend skills the candidate already lists. "
@@ -1441,9 +1366,8 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
                 f"Experience: {exp_str}\n"
                 f"Current job titles: {', '.join(job_titles)}\n"
                 f"Target role: {target_job_title or 'not specified'}\n\n"
-                f"All skills with AI exposure scores: {all_skills_str}\n"
-                + (f"Confirmed high AI-exposure (score > 65%): {', '.join(s['skill'] for s in confirmed_high)}\n" if confirmed_high else "")
-                + (f"Confirmed lower AI-exposure (safer foundation): {', '.join(s['skill'] for s in confirmed_low)}\n" if confirmed_low else "")
+                f"Skills they already list: {all_skills_str}\n"
+                + (_evidence_prompt(evidence) if evidence else "")
                 + "\nGenerate 6 skill development recommendations that deepen this candidate's technical profile and make them more competitive for their target role."
             ),
             max_tokens=2048,
@@ -1625,7 +1549,6 @@ async def run_apply(
     job_id: str,
     job_url: str = "",
     cover_letter: str = "",
-    skill_risks: list | None = None,
     session_id: str = "",
     instruction_queue: asyncio.Queue | None = None,
     frame_queue: asyncio.Queue | None = None,
@@ -1637,7 +1560,6 @@ async def run_apply(
 ) -> AsyncGenerator[str, None]:
     """Apply phase: browser automation. `answerer` answers the form's questions (see answers.py)."""
     persona = tracker.get_user_persona(user_id)
-    skill_risks = skill_risks or []
 
     yield _sse("start", {"message": "Starting browser application with your Persona…", "session_id": session_id})
 

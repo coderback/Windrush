@@ -243,6 +243,7 @@ from . import seniority
 from . import sponsorship as signals
 from .company_names import normalise_company_name
 from .job_attributes import ATTRIBUTES_VERSION
+from .risk_scorer import exposure_fields
 
 # Tags recognised in the `tags` filter (must match what _extract_tags writes). Role tags are
 # OR'd ("ml or data"); domain tags are AND'd ("fintech and sponsorship"). Any other tag is
@@ -723,6 +724,8 @@ def get_jobs(
             job["semantic_score"] = 0.0
 
     page = candidates[offset: offset + limit]
+    for job in page:
+        job.update(exposure_fields(job.get("title", "")))
     return page, len(candidates) > offset + limit
 
 
@@ -968,6 +971,7 @@ def get_job(job_db_id: str) -> dict | None:
         return None
     job = dict(row)
     job.pop("semantic_vector", None)
+    job.update(exposure_fields(job["title"]))
     sponsor = licensed_sponsor(job.get("sponsor_key") or "")
     job["licensed_sponsor"] = bool(sponsor)
     job["sponsor_name"] = sponsor[0] if sponsor else ""

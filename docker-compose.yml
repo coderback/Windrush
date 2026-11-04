@@ -37,7 +37,6 @@ services:
       - OLLAMA_MODEL=${OLLAMA_MODEL:-qwen3.5:4b}
       - EMBEDDING_MODEL=nomic-embed-text
       - ECONOMIC_INDEX_PATH=/data/economic_index.json
-      - TASK_PENETRATION_PATH=/data/task_penetration.csv
       - ADZUNA_APP_ID=${ADZUNA_APP_ID}
       - ADZUNA_API_KEY=${ADZUNA_API_KEY}
       - BRAVE_SEARCH_API_KEY=${BRAVE_SEARCH_API_KEY:-}

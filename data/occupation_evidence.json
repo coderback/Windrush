@@ -1,0 +1,3033 @@
+{
+ "11-2011": {
+  "most_handed_to_ai": [
+   {
+    "task": "Monitor and analyze sales promotion results to determine cost effectiveness of promotion campaigns.",
+    "handed_to_ai": 64
+   },
+   {
+    "task": "Conduct research on consumer opinions and buying habits, and identify target audiences for products, services, or technologies.",
+    "handed_to_ai": 51
+   }
+  ],
+  "least_handed_to_ai": [
+   {
+    "task": "Plan and prepare advertising and promotional material to increase sales of products or services, working with customers, company officials, sales departments, and advertising agencies.",
+    "handed_to_ai": 28
+   },
+   {
+    "task": "Develop communications materials, advertisements, presentations, or public relations initiatives to promote awareness of products and services.",
+    "handed_to_ai": 32
+   }
+  ],
+  "tasks_seen": 4,
+  "tasks_listed": 30,
+  "month": "2026-05"
+ },
+ "11-2021": {
+  "most_handed_to_ai": [
+   {
+    "task": "Compile lists describing product or service offerings.",
+    "handed_to_ai": 57
+   },
+   {
+    "task": "Initiate market research studies, or analyze their findings.",
+    "handed_to_ai": 51
+   },
+   {
+    "task": "Identify, develop, or evaluate marketing strategy, based on knowledge of establishment objectives, market characteristics, and cost and markup factors.",
+    "handed_to_ai": 38
+   }
+  ],
+  "least_handed_to_ai": [
+   {
+    "task": "Evaluate the financial aspects of product development, such as budgets, expenditures, research and development appropriations, or return-on-investment and profit-loss projections.",
+    "handed_to_ai": 30
+   },
+   {
+    "task": "Formulate, direct, or coordinate marketing activities or policies to promote products or services, working with advertising or promotion managers.",
+    "handed_to_ai": 35
+   },
+   {
+    "task": "Advise business or other groups on local, national, or international factors affecting the buying or selling of products or services.",
+    "handed_to_ai": 37
+   }
+  ],
+  "tasks_seen": 6,
+  "tasks_listed": 20,
+  "month": "2026-05"
+ },
+ "11-3012": {
+  "most_handed_to_ai": [
+   {
+    "task": "Prepare and review operational reports and schedules to ensure accuracy and efficiency.",
+    "handed_to_ai": 94
+   },
+   {
+    "task": "Manage paper or electronic filing systems by recording information, updating paperwork, or maintaining documents, such as attendance records or correspondence.",
+    "handed_to_ai": 88
+   }
+  ],
+  "least_handed_to_ai": [
+   {
+    "task": "Analyze internal processes and recommend and implement procedural or policy changes to improve operations, such as supply changes or the disposal of records.",
+    "handed_to_ai": 37
+   },
+   {
+    "task": "Read through contracts, regulations, and procedural guidelines to ensure comprehension and compliance.",
+    "handed_to_ai": 57
+   }
+  ],
+  "tasks_seen": 4,
+  "tasks_listed": 18,
+  "month": "2026-05"
+ },
+ "11-3021": {
+  "most_handed_to_ai": [
+   {
+    "task": "Prepare and review operational reports or project progress reports.",
+    "handed_to_ai": 87
+   },
+   {
+    "task": "Provide users with technical support for computer problems.",
+    "handed_to_ai": 60
+   }
+  ],
+  "least_handed_to_ai": [
+   {
+    "task": "Develop and interpret organizational goals, policies, and procedures.",
+    "handed_to_ai": 36
+   },
+   {
+    "task": "Develop computer information resources, providing for data security and control, strategic computing, and disaster recovery.",
+    "handed_to_ai": 54
+   }
+  ],
+  "tasks_seen": 4,
+  "tasks_listed": 17,
+  "month": "2026-05"
+ },
+ "11-3031": {
+  "most_handed_to_ai": [
+   {
+    "task": "Prepare operational or risk reports for management analysis.",
+    "handed_to_ai": 84
+   },
+   {
+    "task": "Review reports of securities transactions or price lists to analyze market conditions.",
+    "handed_to_ai": 73
+   },
+   {
+    "task": "Review collection reports to determine the status of collections and the amounts of outstanding balances.",
+    "handed_to_ai": 65
+   }
+  ],
+  "least_handed_to_ai": [
+   {
+    "task": "Develop or direct development of offering documents or marketing materials.",
+    "handed_to_ai": 29
+   },
+   {
+    "task": "Present investment information, such as product risks, fees, or fund performance statistics.",
+    "handed_to_ai": 29
+   },
+   {
+    "task": "Advise management on short-term and long-term financial objectives, policies, and actions.",
+    "handed_to_ai": 33
+   }
+  ],
+  "tasks_seen": 14,
+  "tasks_listed": 59,
+  "month": "2026-05"
+ },
+ "11-3051": {
+  "most_handed_to_ai": [
+   {
+    "task": "Prepare reports on operations and system productivity or efficiency.",
+    "handed_to_ai": 94
+   },
+   {
+    "task": "Compile and record operational data on forms or in log books.",
+    "handed_to_ai": 80
+   }
+  ],
+  "least_handed_to_ai": [
+   {
+    "task": "Participate in the development of product specifications.",
+    "handed_to_ai": 35
+   },
+   {
+    "task": "Review quality documentation necessary for regulatory submissions and inspections.",
+    "handed_to_ai": 44
+   }
+  ],
+  "tasks_seen": 5,
+  "tasks_listed": 116,
+  "month": "2026-05"
+ },
+ "11-9121": {
+  "most_handed_to_ai": [
+   {
+    "task": "Dispense medical devices or drugs, and calculate dosages and provide instructions as necessary.",
+    "handed_to_ai": 74
+   },
+   {
+    "task": "Review project activities and prepare and review research, testing, or operational reports.",
+    "handed_to_ai": 70
+   },
+   {
+    "task": "Code, evaluate, or interpret collected study data.",
+    "handed_to_ai": 40
+   }
+  ],
+  "least_handed_to_ai": [
+   {
+    "task": "Design or coordinate successive phases of problem analysis, solution proposals, or testing.",
+    "handed_to_ai": 31
+   },
+   {
+    "task": "Develop advertising and other informational materials to be used in subject recruitment.",
+    "handed_to_ai": 36
+   },
+   {
+    "task": "Advise or assist in obtaining patents or meeting other legal requirements.",
+    "handed_to_ai": 37
+   }
+  ],
+  "tasks_seen": 6,
+  "tasks_listed": 70,
+  "month": "2026-05"
+ },
+ "11-9179": {
+  "most_handed_to_ai": [
+   {
+    "task": "Respond to customer inquiries or complaints.",
+    "handed_to_ai": 83
+   },
+   {
+    "task": "Maintain client databases.",
+    "handed_to_ai": 77
+   }
+  ],
+  "least_handed_to_ai": [
+   {
+    "task": "Develop marketing campaigns to promote a healthy lifestyle or participation in fitness or wellness programs.",
+    "handed_to_ai": 31
+   },
+   {
+    "task": "Develop or implement marketing strategies.",
+    "handed_to_ai": 36
+   }
+  ],
+  "tasks_seen": 5,
+  "tasks_listed": 45,
+  "month": "2026-05"
+ },
+ "11-9199": {
+  "most_handed_to_ai": [
+   {
+    "task": "Prepare or assist in the preparation of applications for environmental, building, or other required permits.",
+    "handed_to_ai": 58
+   },
+   {
+    "task": "Contribute to the development or implementation of business unit strategic and operating plans.",
+    "handed_to_ai": 48
+   },
+   {
+    "task": "Review civil design, engineering, or construction technical documentation to ensure compliance with applicable government or industrial codes, standards, requirements, or regulations.",
+    "handed_to_ai": 48
+   }
+  ],
+  "least_handed_to_ai": [
+   {
+    "task": "Provide regulatory guidance to departments or development project teams regarding design, development, evaluation, or marketing of products.",
+    "handed_to_ai": 25
+   },
+   {
+    "task": "Discuss emerging compliance issues to ensure that management and employees are informed about compliance reporting systems, policies, and practices.",
+    "handed_to_ai": 31
+   },
+   {
+    "task": "Advise internal management or business partners on the implementation or operation of compliance programs.",
+    "handed_to_ai": 34
+   }
+  ],
+  "tasks_seen": 8,
+  "tasks_listed": 137,
+  "month": "2026-05"
+ },
+ "13-1023": {
+  "most_handed_to_ai": [
+   {
+    "task": "Review catalogs, industry periodicals, directories, trade journals, and Internet sites and consult with other department personnel to locate necessary goods and services.",
+    "handed_to_ai": 81
+   },
+   {
+    "task": "Maintain and review computerized or manual records of purchased items, costs, deliveries, product performance, and inventories.",
+    "handed_to_ai": 74
+   }
+  ],
+  "least_handed_to_ai": [
+   {
+    "task": "Research and evaluate suppliers, based on price, quality, selection, service, support, availability, reliability, production and distribution capabilities, and the supplier's reputation and history.",
+    "handed_to_ai": 58
+   },
+   {
+    "task": "Monitor changes affecting supply and demand, tracking market conditions, price trends, or futures markets.",
+    "handed_to_ai": 65
+   }
+  ],
+  "tasks_seen": 4,
+  "tasks_listed": 19,
+  "month": "2026-05"
+ },
+ "13-1041": {
+  "most_handed_to_ai": [
+   {
+    "task": "Prepare reports of activities, evaluations, recommendations, or decisions.",
+    "handed_to_ai": 73
+   },
+   {
+    "task": "Prepare correspondence, reports of inspections or investigations, or recommendations for action.",
+    "handed_to_ai": 71
+   },
+   {
+    "task": "Coordinate, prepare, or review regulatory submissions for domestic or international projects.",
+    "handed_to_ai": 51
+   }
+  ],
+  "least_handed_to_ai": [
+   {
+    "task": "Recommend changes to company procedures in response to changes in regulations or standards.",
+    "handed_to_ai": 28
+   },
+   {
+    "task": "Advise project teams on subjects such as premarket regulatory requirements, export and labeling requirements, or clinical study compliance issues.",
+    "handed_to_ai": 32
+   },
+   {
+    "task": "Advise licensees or other individuals or groups concerning licensing, permit, or passport regulations.",
+    "handed_to_ai": 36
+   }
+  ],
+  "tasks_seen": 9,
+  "tasks_listed": 146,
+  "month": "2026-05"
+ },
+ "13-1081": {
+  "most_handed_to_ai": [
+   {
+    "task": "Enter logistics-related data into databases.",
+    "handed_to_ai": 87
+   },
+   {
+    "task": "Report project plans, progress, and results.",
+    "handed_to_ai": 81
+   },
+   {
+    "task": "Develop an understanding of customers' needs and take actions to ensure that such needs are met.",
+    "handed_to_ai": 66
+   }
+  ],
+  "least_handed_to_ai": [
+   {
+    "task": "Develop proposals that include documentation for estimates.",
+    "handed_to_ai": 30
+   },
+   {
+    "task": "Propose logistics solutions for customers.",
+    "handed_to_ai": 37
+   },
+   {
+    "task": "Explain proposed solutions to customers, management, or other interested parties through written proposals and oral presentations.",
+    "handed_to_ai": 37
+   }
+  ],
+  "tasks_seen": 10,
+  "tasks_listed": 83,
+  "month": "2026-05"
+ },
+ "13-1082": {
+  "most_handed_to_ai": [
+   {
+    "task": "Report project status, such as budget, resources, technical issues, or customer satisfaction, to managers.",
+    "handed_to_ai": 78
+   },
+   {
+    "task": "Develop or update project plans including information such as objectives, technologies, schedules, funding, and staffing.",
+    "handed_to_ai": 54
+   }
+  ],
+  "least_handed_to_ai": [
+   {
+    "task": "Propose, review, or approve modifications to project plans.",
+    "handed_to_ai": 34
+   },
+   {
+    "task": "Produce and distribute project documents.",
+    "handed_to_ai": 49
+   }
+  ],
+  "tasks_seen": 5,
+  "tasks_listed": 20,
+  "month": "2026-05"
+ },
+ "13-1111": {
+  "most_handed_to_ai": [
+   {
+    "task": "Gather and organize information on problems or procedures.",
+    "handed_to_ai": 92
+   },
+   {
+    "task": "Design, evaluate, recommend, and approve changes of forms and reports.",
+    "handed_to_ai": 54
+   }
+  ],
+  "least_handed_to_ai": [
+   {
+    "task": "Analyze data gathered and develop solutions or alternative methods of proceeding.",
+    "handed_to_ai": 35
+   },
+   {
+    "task": "Document findings of study and prepare recommendations for implementation of new systems, procedures, or organizational changes.",
+    "handed_to_ai": 36
+   }
+  ],
+  "tasks_seen": 4,
+  "tasks_listed": 11,
+  "month": "2026-05"
+ },
+ "13-1161": {
+  "most_handed_to_ai": [
+   {
+    "task": "Collect and analyze Web metrics, such as visits, time on site, page views per visit, transaction volume and revenue, traffic mix, click-through rates, conversion rates, cost per acquisition, or cost per click.",
+    "handed_to_ai": 68
+   },
+   {
+    "task": "Implement online customer service processes to ensure positive and consistent user experiences.",
+    "handed_to_ai": 65
+   },
+   {
+    "task": "Optimize Web site exposure by analyzing search engine patterns to direct online placement of keywords or other content.",
+    "handed_to_ai": 64
+   }
+  ],
+  "least_handed_to_ai": [
+   {
+    "task": "Develop and implement procedures for identifying advertising needs.",
+    "handed_to_ai": 33
+   },
+   {
+    "task": "Collect and analyze data on customer demographics, preferences, needs, and buying habits to identify potential markets and factors affecting product demand.",
+    "handed_to_ai": 40
+   },
+   {
+    "task": "Identify and develop commercial or technical specifications, such as usability, pricing, checkout, or data security, to promote transactional internet-enabled commerce functionality.",
+    "handed_to_ai": 41
+   }
+  ],
+  "tasks_seen": 14,
+  "tasks_listed": 49,
+  "month": "2026-05"
+ },
+ "13-1199": {
+  "most_handed_to_ai": [
+   {
+    "task": "Create or maintain database of customer accounts.",
+    "handed_to_ai": 84
+   },
+   {
+    "task": "Prepare reports summarizing operational results, financial performance, or accomplishments of specified objectives, goals, or plans.",
+    "handed_to_ai": 77
+   },
+   {
+    "task": "Correspond with online customers via electronic mail, telephone, or other electronic messaging to address questions or complaints about products, policies, or shipping methods.",
+    "handed_to_ai": 55
+   }
+  ],
+  "least_handed_to_ai": [
+   {
+    "task": "Devise, select, or purchase domain name and web address.",
+    "handed_to_ai": 23
+   },
+   {
+    "task": "Create or distribute offline promotional material, such as brochures, pamphlets, business cards, stationary, or signage.",
+    "handed_to_ai": 34
+   },
+   {
+    "task": "Provide system design and integration recommendations.",
+    "handed_to_ai": 34
+   }
+  ],
+  "tasks_seen": 16,
+  "tasks_listed": 92,
+  "month": "2026-05"
+ },
+ "13-2011": {
+  "most_handed_to_ai": [
+   {
+    "task": "Prepare, examine, or analyze accounting records, financial statements, or other financial reports to assess accuracy, completeness, and conformance to reporting and procedural standards.",
+    "handed_to_ai": 58
+   },
+   {
+    "task": "Prepare adjusting journal entries.",
+    "handed_to_ai": 54
+   }
+  ],
+  "least_handed_to_ai": [
+   {
+    "task": "Analyze business operations, trends, costs, revenues, financial commitments, and obligations to project future revenues and expenses or to provide advice.",
+    "handed_to_ai": 33
+   },
+   {
+    "task": "Prepare, analyze, or verify annual reports, financial statements, and other records, using accepted accounting and statistical procedures to assess financial condition and facilitate financial planning.",
+    "handed_to_ai": 53
+   }
+  ],
+  "tasks_seen": 4,
+  "tasks_listed": 29,
+  "month": "2026-05"
+ },
+ "13-2051": {
+  "most_handed_to_ai": [
+   {
+    "task": "Present oral or written reports on general economic trends, individual corporations, and entire industries.",
+    "handed_to_ai": 62
+   },
+   {
+    "task": "Recommend investments and investment timing to companies, investment firm staff, or the public.",
+    "handed_to_ai": 57
+   },
+   {
+    "task": "Interpret data on price, yield, stability, future investment-risk trends, economic influences, and other factors affecting investment programs.",
+    "handed_to_ai": 52
+   }
+  ],
+  "least_handed_to_ai": [
+   {
+    "task": "Monitor developments in the fields of industrial technology, business, finance, and economic theory.",
+    "handed_to_ai": 26
+   },
+   {
+    "task": "Advise clients on aspects of capitalization, such as amounts, sources, or timing.",
+    "handed_to_ai": 33
+   },
+   {
+    "task": "Inform investment decisions by analyzing financial information to forecast business, industry, or economic conditions.",
+    "handed_to_ai": 38
+   }
+  ],
+  "tasks_seen": 10,
+  "tasks_listed": 26,
+  "month": "2026-05"
+ },
+ "13-2052": {
+  "most_handed_to_ai": [
+   {
+    "task": "Guide clients in the gathering of information, such as bank account records, income tax returns, life and disability insurance records, pension plans, or wills.",
+    "handed_to_ai": 62
+   },
+   {
+    "task": "Monitor financial market trends to ensure that client plans are responsive.",
+    "handed_to_ai": 62
+   }
+  ],
+  "least_handed_to_ai": [
+   {
+    "task": "Prepare or interpret for clients information, such as investment performance reports, financial document summaries, or income projections.",
+    "handed_to_ai": 33
+   },
+   {
+    "task": "Recommend to clients strategies in cash management, insurance coverage, investment planning, or other areas to help them achieve their financial goals.",
+    "handed_to_ai": 40
+   }
+  ],
+  "tasks_seen": 5,
+  "tasks_listed": 21,
+  "month": "2026-05"
+ },
+ "13-2054": {
+  "most_handed_to_ai": [
+   {
+    "task": "Produce reports or presentations that outline findings, explain risk positions, or recommend changes.",
+    "handed_to_ai": 53
+   },
+   {
+    "task": "Identify key risks and mitigating factors of potential investments, such as asset types and values, legal and ownership structures, professional reputations, customer bases, or industry segments.",
+    "handed_to_ai": 47
+   },
+   {
+    "task": "Analyze areas of potential risk to the assets, earning capacity, or success of organizations.",
+    "handed_to_ai": 46
+   }
+  ],
+  "least_handed_to_ai": [
+   {
+    "task": "Provide statistical modeling advice to other departments.",
+    "handed_to_ai": 14
+   },
+   {
+    "task": "Recommend ways to control or reduce risk.",
+    "handed_to_ai": 38
+   },
+   {
+    "task": "Devise scenario analyses reflecting possible severe market events.",
+    "handed_to_ai": 42
+   }
+  ],
+  "tasks_seen": 6,
+  "tasks_listed": 30,
+  "month": "2026-05"
+ },
+ "13-2071": {
+  "most_handed_to_ai": [
+   {
+    "task": "Create debt management plans, spending plans, or budgets to assist clients to meet financial goals.",
+    "handed_to_ai": 39
+   },
+   {
+    "task": "Prepare written documents to establish contracts with or communicate financial recommendations to clients.",
+    "handed_to_ai": 36
+   }
+  ],
+  "least_handed_to_ai": [
+   {
+    "task": "Explain general financial topics to clients, such as credit report ratings, bankruptcy laws, consumer protection laws, wage attachments, or collection actions.",
+    "handed_to_ai": 7
+   },
+   {
+    "task": "Advise clients or respond to inquiries about financial matters in person or via phone, email, Web site, or Internet chat.",
+    "handed_to_ai": 35
+   }
+  ],
+  "tasks_seen": 5,
+  "tasks_listed": 23,
+  "month": "2026-05"
+ },
+ "13-2099": {
+  "most_handed_to_ai": [
+   {
+    "task": "Recommend actions in fraud cases.",
+    "handed_to_ai": 52
+   },
+   {
+    "task": "Prepare requirements documentation for use by software developers.",
+    "handed_to_ai": 51
+   },
+   {
+    "task": "Prepare written reports of investigation findings.",
+    "handed_to_ai": 41
+   }
+  ],
+  "least_handed_to_ai": [
+   {
+    "task": "Define or recommend model specifications or data collection methods.",
+    "handed_to_ai": 21
+   },
+   {
+    "task": "Provide application or analytical support to researchers or traders on issues such as valuations or data.",
+    "handed_to_ai": 22
+   },
+   {
+    "task": "Interpret results of financial analysis procedures.",
+    "handed_to_ai": 34
+   }
+  ],
+  "tasks_seen": 6,
+  "tasks_listed": 44,
+  "month": "2026-05"
+ },
+ "15-1211": {
+  "most_handed_to_ai": [
+   {
+    "task": "Troubleshoot program and system malfunctions to restore normal functioning.",
+    "handed_to_ai": 90
+   },
+   {
+    "task": "Provide staff and users with assistance solving computer-related problems, such as malfunctions and program problems.",
+    "handed_to_ai": 87
+   },
+   {
+    "task": "Expand or modify system to serve new purposes or improve work flow.",
+    "handed_to_ai": 69
+   }
+  ],
+  "least_handed_to_ai": [
+   {
+    "task": "Analyze information processing or computation needs and plan and design computer systems, using techniques such as structured analysis, data modeling, and information engineering.",
+    "handed_to_ai": 39
+   },
+   {
+    "task": "Define the goals of the system and devise flow charts and diagrams describing logical operational steps of programs.",
+    "handed_to_ai": 44
+   },
+   {
+    "task": "Use the computer in the analysis and solution of business problems, such as development of integrated production and inventory control and cost analysis systems.",
+    "handed_to_ai": 51
+   }
+  ],
+  "tasks_seen": 9,
+  "tasks_listed": 39,
+  "month": "2026-05"
+ },
+ "15-1221": {
+  "most_handed_to_ai": [
+   {
+    "task": "Analyze problems to develop solutions involving computer hardware and software.",
+    "handed_to_ai": 75
+   },
+   {
+    "task": "Apply theoretical expertise and innovation to create or apply new technology, such as adapting principles for applying computers to new uses.",
+    "handed_to_ai": 43
+   }
+  ],
+  "least_handed_to_ai": [
+   {
+    "task": "Develop and interpret organizational goals, policies, and procedures.",
+    "handed_to_ai": 31
+   },
+   {
+    "task": "Evaluate project plans and proposals to assess feasibility issues.",
+    "handed_to_ai": 36
+   }
+  ],
+  "tasks_seen": 4,
+  "tasks_listed": 15,
+  "month": "2026-05"
+ },
+ "15-1231": {
+  "most_handed_to_ai": [
+   {
+    "task": "Install new hardware or software systems or components, ensuring integration with existing network systems.",
+    "handed_to_ai": 96
+   },
+   {
+    "task": "Troubleshoot network or connectivity problems for users or user groups.",
+    "handed_to_ai": 93
+   },
+   {
+    "task": "Configure security settings or access permissions for groups or individuals.",
+    "handed_to_ai": 79
+   }
+  ],
+  "least_handed_to_ai": [
+   {
+    "task": "Create or revise user instructions, procedures, or manuals.",
+    "handed_to_ai": 61
+   },
+   {
+    "task": "Analyze and report computer network security breaches or attempted breaches.",
+    "handed_to_ai": 64
+   },
+   {
+    "task": "Configure and define parameters for installation or testing of local area network (LAN), wide area network (WAN), hubs, routers, switches, controllers, multiplexers, or related networking equipment.",
+    "handed_to_ai": 74
+   }
+  ],
+  "tasks_seen": 6,
+  "tasks_listed": 26,
+  "month": "2026-05"
+ },
+ "15-1232": {
+  "most_handed_to_ai": [
+   {
+    "task": "Oversee the daily performance of computer systems.",
+    "handed_to_ai": 100
+   },
+   {
+    "task": "Maintain records of daily data communication transactions, problems and remedial actions taken, or installation activities.",
+    "handed_to_ai": 99
+   },
+   {
+    "task": "Install and perform minor repairs to hardware, software, or peripheral equipment, following design or installation specifications.",
+    "handed_to_ai": 94
+   }
+  ],
+  "least_handed_to_ai": [
+   {
+    "task": "Prepare evaluations of software or hardware, and recommend improvements or upgrades.",
+    "handed_to_ai": 39
+   },
+   {
+    "task": "Read technical manuals, confer with users, or conduct computer diagnostics to investigate and resolve problems or to provide technical assistance and support.",
+    "handed_to_ai": 53
+   },
+   {
+    "task": "Answer user inquiries regarding computer software or hardware operation to resolve problems.",
+    "handed_to_ai": 66
+   }
+  ],
+  "tasks_seen": 6,
+  "tasks_listed": 16,
+  "month": "2026-05"
+ },
+ "15-1243": {
+  "most_handed_to_ai": [
+   {
+    "task": "Test software systems or applications for software enhancements or new products.",
+    "handed_to_ai": 90
+   },
+   {
+    "task": "Provide or coordinate troubleshooting support for data warehouses.",
+    "handed_to_ai": 78
+   },
+   {
+    "task": "Design databases to support business applications, ensuring system scalability, security, performance, and reliability.",
+    "handed_to_ai": 62
+   }
+  ],
+  "least_handed_to_ai": [
+   {
+    "task": "Design database applications, such as interfaces, data transfer mechanisms, global temporary tables, data partitions, and function-based indexes to enable efficient access of the generic database structure.",
+    "handed_to_ai": 36
+   },
+   {
+    "task": "Create supporting documentation, such as metadata and diagrams of entity relationships, business processes, and process flow.",
+    "handed_to_ai": 44
+   },
+   {
+    "task": "Develop and document database architectures.",
+    "handed_to_ai": 51
+   }
+  ],
+  "tasks_seen": 11,
+  "tasks_listed": 43,
+  "month": "2026-05"
+ },
+ "15-1244": {
+  "most_handed_to_ai": [
+   {
+    "task": "Diagnose, troubleshoot, and resolve hardware, software, or other network and system problems, and replace defective components when necessary.",
+    "handed_to_ai": 97
+   },
+   {
+    "task": "Confer with network users about solutions to existing system problems.",
+    "handed_to_ai": 85
+   }
+  ],
+  "least_handed_to_ai": [
+   {
+    "task": "Recommend changes to improve systems and network configurations, and determine hardware or software requirements related to such changes.",
+    "handed_to_ai": 46
+   },
+   {
+    "task": "Train people in computer system use.",
+    "handed_to_ai": 58
+   }
+  ],
+  "tasks_seen": 4,
+  "tasks_listed": 20,
+  "month": "2026-05"
+ },
+ "15-1251": {
+  "most_handed_to_ai": [
+   {
+    "task": "Conduct trial runs of programs and software applications to be sure they will produce the desired information and that the instructions are correct.",
+    "handed_to_ai": 89
+   },
+   {
+    "task": "Compile and write documentation of program development and subsequent revisions, inserting comments in the coded instructions so others can understand the program.",
+    "handed_to_ai": 77
+   },
+   {
+    "task": "Correct errors by making appropriate changes and rechecking the program to ensure that the desired results are produced.",
+    "handed_to_ai": 74
+   }
+  ],
+  "least_handed_to_ai": [
+   {
+    "task": "Prepare detailed workflow charts and diagrams that describe input, output, and logical operation, and convert them into a series of instructions coded in a computer language.",
+    "handed_to_ai": 51
+   },
+   {
+    "task": "Develop Web sites.",
+    "handed_to_ai": 52
+   },
+   {
+    "task": "Write, analyze, review, and rewrite programs, using workflow chart and diagram, and applying knowledge of computer capabilities, subject matter, and symbolic logic.",
+    "handed_to_ai": 62
+   }
+  ],
+  "tasks_seen": 9,
+  "tasks_listed": 17,
+  "month": "2026-05"
+ },
+ "15-1252": {
+  "most_handed_to_ai": [
+   {
+    "task": "Modify existing software to correct errors, adapt it to new hardware, or upgrade interfaces and improve performance.",
+    "handed_to_ai": 69
+   },
+   {
+    "task": "Analyze information to determine, recommend, and plan installation of a new system or modification of an existing system.",
+    "handed_to_ai": 50
+   },
+   {
+    "task": "Prepare reports or correspondence concerning project specifications, activities, or status.",
+    "handed_to_ai": 49
+   }
+  ],
+  "least_handed_to_ai": [
+   {
+    "task": "Design, develop and modify software systems, using scientific analysis and mathematical models to predict and measure outcomes and consequences of design.",
+    "handed_to_ai": 42
+   },
+   {
+    "task": "Analyze user needs and software requirements to determine feasibility of design within time and cost constraints.",
+    "handed_to_ai": 44
+   },
+   {
+    "task": "Consult with customers or other departments on project status, proposals, or technical issues, such as software system design or maintenance.",
+    "handed_to_ai": 47
+   }
+  ],
+  "tasks_seen": 6,
+  "tasks_listed": 19,
+  "month": "2026-05"
+ },
+ "15-1253": {
+  "most_handed_to_ai": [
+   {
+    "task": "Monitor program performance to ensure efficient and problem-free operations.",
+    "handed_to_ai": 100
+   },
+   {
+    "task": "Identify, analyze, and document problems with program function, output, online screen, or content.",
+    "handed_to_ai": 81
+   },
+   {
+    "task": "Perform initial debugging procedures by reviewing configuration files, logs, or code pieces to determine breakdown source.",
+    "handed_to_ai": 71
+   }
+  ],
+  "least_handed_to_ai": [
+   {
+    "task": "Provide feedback and recommendations to developers on software usability and functionality.",
+    "handed_to_ai": 41
+   },
+   {
+    "task": "Identify program deviance from standards, and suggest modifications to ensure compliance.",
+    "handed_to_ai": 45
+   },
+   {
+    "task": "Collaborate with field staff or customers to evaluate or diagnose problems and recommend possible solutions.",
+    "handed_to_ai": 66
+   }
+  ],
+  "tasks_seen": 7,
+  "tasks_listed": 30,
+  "month": "2026-05"
+ },
+ "15-1254": {
+  "most_handed_to_ai": [
+   {
+    "task": "Perform or direct Web site updates.",
+    "handed_to_ai": 77
+   },
+   {
+    "task": "Recommend and implement performance improvements.",
+    "handed_to_ai": 61
+   },
+   {
+    "task": "Develop or implement procedures for ongoing Web site revision.",
+    "handed_to_ai": 60
+   }
+  ],
+  "least_handed_to_ai": [
+   {
+    "task": "Develop system interaction or sequence diagrams.",
+    "handed_to_ai": 39
+   },
+   {
+    "task": "Analyze user needs to determine technical requirements.",
+    "handed_to_ai": 44
+   },
+   {
+    "task": "Select programming languages, design tools, or applications.",
+    "handed_to_ai": 45
+   }
+  ],
+  "tasks_seen": 10,
+  "tasks_listed": 29,
+  "month": "2026-05"
+ },
+ "15-1255": {
+  "most_handed_to_ai": [
+   {
+    "task": "Identify problems uncovered by testing or customer feedback, and correct problems or refer problems to appropriate personnel for correction.",
+    "handed_to_ai": 87
+   },
+   {
+    "task": "Develop Web site maps, application models, image templates, or page templates that meet project goals, user needs, or industry standards.",
+    "handed_to_ai": 57
+   },
+   {
+    "task": "Prepare two-dimensional concept layouts or three-dimensional mock-ups.",
+    "handed_to_ai": 45
+   }
+  ],
+  "least_handed_to_ai": [
+   {
+    "task": "Develop new visual design concepts and modify concepts based on stakeholder feedback.",
+    "handed_to_ai": 19
+   },
+   {
+    "task": "Develop and document style guidelines for Web site content.",
+    "handed_to_ai": 36
+   },
+   {
+    "task": "Direct and execute pre-production activities, such as creating moodboards or storyboards and establishing a project timeline.",
+    "handed_to_ai": 39
+   }
+  ],
+  "tasks_seen": 10,
+  "tasks_listed": 54,
+  "month": "2026-05"
+ },
+ "15-1299": {
+  "most_handed_to_ai": [
+   {
+    "task": "Monitor system operation to detect potential problems.",
+    "handed_to_ai": 100
+   },
+   {
+    "task": "Perform ongoing hardware and software maintenance operations, including installing or upgrading hardware or software.",
+    "handed_to_ai": 95
+   },
+   {
+    "task": "Determine sources of Web page or server problems, and take action to correct such problems.",
+    "handed_to_ai": 92
+   }
+  ],
+  "least_handed_to_ai": [
+   {
+    "task": "Provide advice on project costs, design concepts, or design changes.",
+    "handed_to_ai": 24
+   },
+   {
+    "task": "Investigate system component suitability for specified purposes, and make recommendations regarding component use.",
+    "handed_to_ai": 34
+   },
+   {
+    "task": "Evaluate current or emerging technologies to consider factors such as cost, portability, compatibility, or usability.",
+    "handed_to_ai": 36
+   }
+  ],
+  "tasks_seen": 49,
+  "tasks_listed": 215,
+  "month": "2026-05"
+ },
+ "15-2021": {
+  "most_handed_to_ai": [
+   {
+    "task": "Address the relationships of quantities, magnitudes, and forms through the use of numbers and symbols.",
+    "handed_to_ai": 62
+   },
+   {
+    "task": "Perform computations and apply methods of numerical analysis to data.",
+    "handed_to_ai": 57
+   }
+  ],
+  "least_handed_to_ai": [
+   {
+    "task": "Assemble sets of assumptions, and explore the consequences of each set.",
+    "handed_to_ai": 19
+   },
+   {
+    "task": "Develop computational methods for solving problems that occur in areas of science and engineering or that come from applications in business or industry.",
+    "handed_to_ai": 52
+   }
+  ],
+  "tasks_seen": 5,
+  "tasks_listed": 11,
+  "month": "2026-05"
+ },
+ "15-2031": {
+  "most_handed_to_ai": [
+   {
+    "task": "Observe the current system in operation, and gather and analyze information about each of the component problems, using a variety of sources.",
+    "handed_to_ai": 88
+   },
+   {
+    "task": "Define data requirements, and gather and validate information, applying judgment and statistical tests.",
+    "handed_to_ai": 62
+   },
+   {
+    "task": "Analyze information obtained from management to conceptualize and define operational problems.",
+    "handed_to_ai": 57
+   }
+  ],
+  "least_handed_to_ai": [
+   {
+    "task": "Study and analyze information about alternative courses of action to determine which plan will offer the best outcomes.",
+    "handed_to_ai": 34
+   },
+   {
+    "task": "Formulate mathematical or simulation models of problems, relating constants and variables, restrictions, alternatives, conflicting objectives, and their numerical parameters.",
+    "handed_to_ai": 36
+   },
+   {
+    "task": "Perform validation and testing of models to ensure adequacy, and reformulate models, as necessary.",
+    "handed_to_ai": 38
+   }
+  ],
+  "tasks_seen": 8,
+  "tasks_listed": 17,
+  "month": "2026-05"
+ },
+ "15-2041": {
+  "most_handed_to_ai": [
+   {
+    "task": "Prepare data for processing by organizing information, checking for inaccuracies, and adjusting and weighting the raw data.",
+    "handed_to_ai": 61
+   },
+   {
+    "task": "Write program code to analyze data with statistical analysis software.",
+    "handed_to_ai": 56
+   },
+   {
+    "task": "Process large amounts of data for statistical modeling and graphic analysis, using computers.",
+    "handed_to_ai": 54
+   }
+  ],
+  "least_handed_to_ai": [
+   {
+    "task": "Determine whether statistical methods are appropriate, based on user needs or research questions of interest.",
+    "handed_to_ai": 23
+   },
+   {
+    "task": "Develop and test experimental designs, sampling techniques, and analytical methods.",
+    "handed_to_ai": 26
+   },
+   {
+    "task": "Plan data collection methods for specific projects, and determine the types and sizes of sample groups to be used.",
+    "handed_to_ai": 27
+   }
+  ],
+  "tasks_seen": 16,
+  "tasks_listed": 44,
+  "month": "2026-05"
+ },
+ "15-2051": {
+  "most_handed_to_ai": [
+   {
+    "task": "Maintain or update business intelligence tools, databases, dashboards, systems, or methods.",
+    "handed_to_ai": 89
+   },
+   {
+    "task": "Generate data queries, based on validation checks or errors and omissions identified during data entry, to resolve identified problems.",
+    "handed_to_ai": 79
+   },
+   {
+    "task": "Identify or monitor current and potential customers, using business intelligence tools.",
+    "handed_to_ai": 66
+   }
+  ],
+  "least_handed_to_ai": [
+   {
+    "task": "Recommend data-driven solutions to key stakeholders.",
+    "handed_to_ai": 30
+   },
+   {
+    "task": "Identify relationships and trends or any factors that could affect the results of research.",
+    "handed_to_ai": 35
+   },
+   {
+    "task": "Identify and analyze industry or geographic trends with business strategy implications.",
+    "handed_to_ai": 36
+   }
+  ],
+  "tasks_seen": 25,
+  "tasks_listed": 54,
+  "month": "2026-05"
+ },
+ "15-2099": {
+  "most_handed_to_ai": [
+   {
+    "task": "Perform routine system administrative functions, such as troubleshooting, back-ups, or upgrades.",
+    "handed_to_ai": 96
+   },
+   {
+    "task": "Write computer programs or scripts to be used in querying databases.",
+    "handed_to_ai": 69
+   },
+   {
+    "task": "Analyze or manipulate bioinformatics data using software packages, statistical applications, or data mining techniques.",
+    "handed_to_ai": 60
+   }
+  ],
+  "least_handed_to_ai": [
+   {
+    "task": "Participate in the preparation of reports or scientific publications.",
+    "handed_to_ai": 33
+   },
+   {
+    "task": "Extend existing software programs, web-based interactive tools, or database queries as sequence management and analysis needs evolve.",
+    "handed_to_ai": 40
+   },
+   {
+    "task": "Conduct quality analyses of data inputs and resulting analyses or predictions.",
+    "handed_to_ai": 56
+   }
+  ],
+  "tasks_seen": 6,
+  "tasks_listed": 19,
+  "month": "2026-05"
+ },
+ "17-1011": {
+  "most_handed_to_ai": [
+   {
+    "task": "Prepare operating and maintenance manuals, studies, or reports.",
+    "handed_to_ai": 57
+   },
+   {
+    "task": "Prepare contract documents for building contractors.",
+    "handed_to_ai": 53
+   }
+  ],
+  "least_handed_to_ai": [
+   {
+    "task": "Plan layouts of structural architectural projects.",
+    "handed_to_ai": 35
+   },
+   {
+    "task": "Prepare information regarding design, structure specifications, materials, color, equipment, estimated costs, or construction time.",
+    "handed_to_ai": 36
+   }
+  ],
+  "tasks_seen": 4,
+  "tasks_listed": 24,
+  "month": "2026-05"
+ },
+ "17-2061": {
+  "most_handed_to_ai": [
+   {
+    "task": "Store, retrieve, and manipulate data for analysis of system capabilities and requirements.",
+    "handed_to_ai": 62
+   },
+   {
+    "task": "Provide training and support to system designers and users.",
+    "handed_to_ai": 46
+   }
+  ],
+  "least_handed_to_ai": [
+   {
+    "task": "Analyze user needs and recommend appropriate hardware.",
+    "handed_to_ai": 32
+   },
+   {
+    "task": "Provide technical support to designers, marketing and sales departments, suppliers, engineers and other team members throughout the product development and implementation process.",
+    "handed_to_ai": 42
+   }
+  ],
+  "tasks_seen": 4,
+  "tasks_listed": 18,
+  "month": "2026-05"
+ },
+ "17-2072": {
+  "most_handed_to_ai": [
+   {
+    "task": "Prepare, review, or maintain maintenance schedules, design documentation, or operational reports or charts.",
+    "handed_to_ai": 57
+   },
+   {
+    "task": "Prepare documentation containing information such as confidential descriptions or specifications of proprietary hardware or software, product development or introduction schedules, product costs, or information about product performance weaknesses.",
+    "handed_to_ai": 49
+   }
+  ],
+  "least_handed_to_ai": [
+   {
+    "task": "Provide technical support or instruction to staff or customers regarding electronics equipment standards.",
+    "handed_to_ai": 33
+   },
+   {
+    "task": "Prepare necessary criteria, procedures, reports, or plans for successful conduct of the project with consideration given to site preparation, facility validation, installation, quality assurance, or testing.",
+    "handed_to_ai": 40
+   }
+  ],
+  "tasks_seen": 5,
+  "tasks_listed": 41,
+  "month": "2026-05"
+ },
+ "17-2112": {
+  "most_handed_to_ai": [
+   {
+    "task": "Troubleshoot new or existing product problems involving designs, materials, or processes.",
+    "handed_to_ai": 67
+   },
+   {
+    "task": "Analyze validation test data to determine whether systems or processes have met validation criteria or to identify root causes of production problems.",
+    "handed_to_ai": 64
+   },
+   {
+    "task": "Determine root causes of failures or recommend changes in designs, tolerances, or processing methods, using statistical procedures.",
+    "handed_to_ai": 62
+   }
+  ],
+  "least_handed_to_ai": [
+   {
+    "task": "Design validation study features, such as sampling, testing, or analytical methodologies.",
+    "handed_to_ai": 29
+   },
+   {
+    "task": "Develop or implement human performance research, investigation, or analysis protocols.",
+    "handed_to_ai": 30
+   },
+   {
+    "task": "Review product designs for manufacturability or completeness.",
+    "handed_to_ai": 30
+   }
+  ],
+  "tasks_seen": 13,
+  "tasks_listed": 91,
+  "month": "2026-05"
+ },
+ "17-2141": {
+  "most_handed_to_ai": [
+   {
+    "task": "Investigate equipment failures or difficulties to diagnose faulty operation and recommend remedial actions.",
+    "handed_to_ai": 86
+   },
+   {
+    "task": "Prepare or present technical or project status reports.",
+    "handed_to_ai": 69
+   },
+   {
+    "task": "Recommend design modifications to eliminate machine or system malfunctions.",
+    "handed_to_ai": 61
+   }
+  ],
+  "least_handed_to_ai": [
+   {
+    "task": "Develop or test models of alternate designs or processing methods to assess feasibility, sustainability, operating condition effects, potential new applications, or necessity of modification.",
+    "handed_to_ai": 30
+   },
+   {
+    "task": "Provide technical direction to other engineers or engineering support personnel.",
+    "handed_to_ai": 43
+   },
+   {
+    "task": "Write performance requirements for product development or engineering projects.",
+    "handed_to_ai": 51
+   }
+  ],
+  "tasks_seen": 8,
+  "tasks_listed": 79,
+  "month": "2026-05"
+ },
+ "17-2199": {
+  "most_handed_to_ai": [
+   {
+    "task": "Provide technical direction or support to installation teams during installation, start-up, testing, system commissioning, or performance monitoring.",
+    "handed_to_ai": 72
+   },
+   {
+    "task": "Implement or test design solutions.",
+    "handed_to_ai": 62
+   },
+   {
+    "task": "Analyze system performance or operational requirements.",
+    "handed_to_ai": 60
+   }
+  ],
+  "least_handed_to_ai": [
+   {
+    "task": "Provide scientific or technical guidance or expertise to scientists, engineers, technologists, technicians, or others, using knowledge of chemical, analytical, or biological processes as applied to micro and nanoscale systems.",
+    "handed_to_ai": 21
+   },
+   {
+    "task": "Prepare reports, deliver presentations, or participate in program review activities to communicate engineering results or recommendations.",
+    "handed_to_ai": 28
+   },
+   {
+    "task": "Provide consultation or training on topics such as mechatronics or automated control.",
+    "handed_to_ai": 28
+   }
+  ],
+  "tasks_seen": 12,
+  "tasks_listed": 179,
+  "month": "2026-05"
+ },
+ "17-3025": {
+  "most_handed_to_ai": [
+   {
+    "task": "Maintain project logbook records or computer program files.",
+    "handed_to_ai": 98
+   },
+   {
+    "task": "Review work plans to schedule activities.",
+    "handed_to_ai": 72
+   }
+  ],
+  "least_handed_to_ai": [
+   {
+    "task": "Review technical documents to ensure completeness and conformance to requirements.",
+    "handed_to_ai": 34
+   },
+   {
+    "task": "Develop work plans, including writing specifications or establishing material, manpower, or facilities needs.",
+    "handed_to_ai": 66
+   }
+  ],
+  "tasks_seen": 4,
+  "tasks_listed": 26,
+  "month": "2026-05"
+ },
+ "17-3026": {
+  "most_handed_to_ai": [
+   {
+    "task": "Aid in planning work assignments in accordance with worker performance, machine capacity, production schedules, or anticipated delays.",
+    "handed_to_ai": 68
+   },
+   {
+    "task": "Recommend corrective or preventive actions to assure or improve product quality or reliability.",
+    "handed_to_ai": 50
+   }
+  ],
+  "least_handed_to_ai": [
+   {
+    "task": "Create or interpret engineering drawings, schematic diagrams, formulas, or blueprints for management or engineering staff.",
+    "handed_to_ai": 25
+   },
+   {
+    "task": "Analyze, estimate, or report production costs.",
+    "handed_to_ai": 32
+   }
+  ],
+  "tasks_seen": 4,
+  "tasks_listed": 55,
+  "month": "2026-05"
+ },
+ "17-3027": {
+  "most_handed_to_ai": [
+   {
+    "task": "Recommend product or component design improvements, based on test data or observations.",
+    "handed_to_ai": 40
+   },
+   {
+    "task": "Provide technical support to other employees regarding mechanical design, fabrication, testing, or documentation.",
+    "handed_to_ai": 35
+   }
+  ],
+  "least_handed_to_ai": [
+   {
+    "task": "Interpret engineering sketches, specifications, or drawings.",
+    "handed_to_ai": 21
+   },
+   {
+    "task": "Recommend tests or testing conditions in accordance with designs, customer requirements, or industry standards to ensure test validity.",
+    "handed_to_ai": 32
+   }
+  ],
+  "tasks_seen": 4,
+  "tasks_listed": 48,
+  "month": "2026-05"
+ },
+ "19-1029": {
+  "most_handed_to_ai": [
+   {
+    "task": "Develop new software applications or customize existing applications to meet specific scientific project needs.",
+    "handed_to_ai": 66
+   },
+   {
+    "task": "Program and use computers to store, process, and analyze data.",
+    "handed_to_ai": 65
+   },
+   {
+    "task": "Create novel computational approaches and analytical tools as required by research goals.",
+    "handed_to_ai": 61
+   }
+  ],
+  "least_handed_to_ai": [
+   {
+    "task": "Study basic principles of plant and animal life, such as origin, relationship, development, anatomy, and function.",
+    "handed_to_ai": 10
+   },
+   {
+    "task": "Write grants and papers or attend fundraising events to seek research funds.",
+    "handed_to_ai": 27
+   },
+   {
+    "task": "Consult with researchers to analyze problems, recommend technology-based solutions, or determine computational strategies.",
+    "handed_to_ai": 36
+   }
+  ],
+  "tasks_seen": 10,
+  "tasks_listed": 87,
+  "month": "2026-05"
+ },
+ "19-3011": {
+  "most_handed_to_ai": [
+   {
+    "task": "Monitor or analyze market and environmental trends.",
+    "handed_to_ai": 53
+   },
+   {
+    "task": "Provide advice and consultation on economic relationships to businesses, public and private agencies, and other employers.",
+    "handed_to_ai": 30
+   }
+  ],
+  "least_handed_to_ai": [
+   {
+    "task": "Explain economic impact of policies to the public.",
+    "handed_to_ai": 23
+   },
+   {
+    "task": "Review documents written by others.",
+    "handed_to_ai": 25
+   }
+  ],
+  "tasks_seen": 4,
+  "tasks_listed": 34,
+  "month": "2026-05"
+ },
+ "19-3032": {
+  "most_handed_to_ai": [
+   {
+    "task": "Assess employee performance.",
+    "handed_to_ai": 52
+   },
+   {
+    "task": "Counsel workers about job and career-related issues.",
+    "handed_to_ai": 46
+   },
+   {
+    "task": "Identify training and development needs.",
+    "handed_to_ai": 44
+   }
+  ],
+  "least_handed_to_ai": [
+   {
+    "task": "Facilitate organizational development and change.",
+    "handed_to_ai": 30
+   },
+   {
+    "task": "Advise management concerning personnel, managerial, and marketing policies and practices and their potential effects on organizational effectiveness and efficiency.",
+    "handed_to_ai": 35
+   },
+   {
+    "task": "Provide advice on best practices and implementation for selection.",
+    "handed_to_ai": 39
+   }
+  ],
+  "tasks_seen": 6,
+  "tasks_listed": 25,
+  "month": "2026-05"
+ },
+ "19-3033": {
+  "most_handed_to_ai": [
+   {
+    "task": "Collect information about individuals or clients, using interviews, case histories, observational techniques, and other assessment methods.",
+    "handed_to_ai": 65
+   },
+   {
+    "task": "Refer clients to other specialists, institutions, or support services as necessary.",
+    "handed_to_ai": 43
+   },
+   {
+    "task": "Provide occupational, educational, or other information to individuals so that they can make educational or vocational plans.",
+    "handed_to_ai": 38
+   }
+  ],
+  "least_handed_to_ai": [
+   {
+    "task": "Provide consulting services, including educational programs, outreach programs, or prevention talks to schools, social service agencies, businesses, or the general public.",
+    "handed_to_ai": 26
+   },
+   {
+    "task": "Advise clients on how they could be helped by counseling.",
+    "handed_to_ai": 32
+   },
+   {
+    "task": "Interact with clients to assist them in gaining insight, defining goals, and planning action to achieve effective personal, social, educational, or vocational development and adjustment.",
+    "handed_to_ai": 33
+   }
+  ],
+  "tasks_seen": 8,
+  "tasks_listed": 30,
+  "month": "2026-05"
+ },
+ "19-3094": {
+  "most_handed_to_ai": [
+   {
+    "task": "Collect, analyze, and interpret data, such as election results and public opinion surveys, reporting on findings, recommendations, and conclusions.",
+    "handed_to_ai": 39
+   },
+   {
+    "task": "Interpret and analyze policies, public issues, legislation, or the operations of governments, businesses, and organizations.",
+    "handed_to_ai": 24
+   }
+  ],
+  "least_handed_to_ai": [
+   {
+    "task": "Advise political science students.",
+    "handed_to_ai": 22
+   },
+   {
+    "task": "Forecast political, economic, and social trends.",
+    "handed_to_ai": 22
+   }
+  ],
+  "tasks_seen": 5,
+  "tasks_listed": 14,
+  "month": "2026-05"
+ },
+ "19-4061": {
+  "most_handed_to_ai": [
+   {
+    "task": "Verify the accuracy and validity of data entered in databases, correcting any errors.",
+    "handed_to_ai": 63
+   },
+   {
+    "task": "Design and create special programs for tasks such as statistical analysis and data entry and cleaning.",
+    "handed_to_ai": 61
+   }
+  ],
+  "least_handed_to_ai": [
+   {
+    "task": "Provide assistance with the preparation of project-related reports, manuscripts, and presentations.",
+    "handed_to_ai": 30
+   },
+   {
+    "task": "Prepare tables, graphs, fact sheets, and written reports summarizing research results.",
+    "handed_to_ai": 42
+   }
+  ],
+  "tasks_seen": 5,
+  "tasks_listed": 22,
+  "month": "2026-05"
+ },
+ "19-4099": {
+  "most_handed_to_ai": [
+   {
+    "task": "Develop specialized computer software routines to customize and integrate image analysis.",
+    "handed_to_ai": 65
+   },
+   {
+    "task": "Perform visual inspections of finished products.",
+    "handed_to_ai": 48
+   },
+   {
+    "task": "Compile laboratory test data and perform appropriate analyses.",
+    "handed_to_ai": 47
+   }
+  ],
+  "least_handed_to_ai": [
+   {
+    "task": "Evaluate new technologies and methods to make recommendations regarding their use.",
+    "handed_to_ai": 27
+   },
+   {
+    "task": "Identify quality problems and recommend solutions.",
+    "handed_to_ai": 40
+   },
+   {
+    "task": "Prepare documentation or presentations, including charts, photos, or graphs.",
+    "handed_to_ai": 46
+   }
+  ],
+  "tasks_seen": 6,
+  "tasks_listed": 47,
+  "month": "2026-05"
+ },
+ "21-1012": {
+  "most_handed_to_ai": [
+   {
+    "task": "Evaluate students' or individuals' abilities, interests, and personality characteristics, using tests, records, interviews, or professional sources.",
+    "handed_to_ai": 50
+   },
+   {
+    "task": "Counsel individuals or groups to help them understand and overcome personal, social, or behavioral problems affecting their educational or vocational situations.",
+    "handed_to_ai": 44
+   }
+  ],
+  "least_handed_to_ai": [
+   {
+    "task": "Counsel students regarding educational issues, such as course and program selection, class scheduling and registration, school adjustment, truancy, study habits, and career planning.",
+    "handed_to_ai": 26
+   },
+   {
+    "task": "Provide students with information on topics such as college degree programs and admission requirements, financial aid opportunities, trade and technical schools, and apprenticeship programs.",
+    "handed_to_ai": 27
+   }
+  ],
+  "tasks_seen": 5,
+  "tasks_listed": 35,
+  "month": "2026-05"
+ },
+ "21-1014": {
+  "most_handed_to_ai": [
+   {
+    "task": "Collect information about clients through interviews, observation, or tests.",
+    "handed_to_ai": 58
+   },
+   {
+    "task": "Perform crisis interventions with clients.",
+    "handed_to_ai": 49
+   },
+   {
+    "task": "Develop and implement treatment plans based on clinical experience and knowledge.",
+    "handed_to_ai": 47
+   }
+  ],
+  "least_handed_to_ai": [
+   {
+    "task": "Encourage clients to express their feelings and discuss what is happening in their lives, helping them to develop insight into themselves or their relationships.",
+    "handed_to_ai": 36
+   },
+   {
+    "task": "Guide clients in the development of skills or strategies for dealing with their problems.",
+    "handed_to_ai": 37
+   },
+   {
+    "task": "Evaluate clients' physical or mental condition, based on review of client information.",
+    "handed_to_ai": 41
+   }
+  ],
+  "tasks_seen": 6,
+  "tasks_listed": 27,
+  "month": "2026-05"
+ },
+ "21-1094": {
+  "most_handed_to_ai": [
+   {
+    "task": "Advise clients or community groups on issues related to self-care, such as diabetes management.",
+    "handed_to_ai": 38
+   },
+   {
+    "task": "Advise clients or community groups on issues related to improving general health, such as diet or exercise.",
+    "handed_to_ai": 36
+   },
+   {
+    "task": "Advise clients or community groups on issues related to sanitation or hygiene, such as flossing or hand washing.",
+    "handed_to_ai": 34
+   }
+  ],
+  "least_handed_to_ai": [
+   {
+    "task": "Advise clients or community groups on issues related to risk or prevention of conditions, such as lead poisoning, human immunodeficiency virus (HIV), prenatal substance abuse, or domestic violence.",
+    "handed_to_ai": 22
+   },
+   {
+    "task": "Advise clients or community groups on issues related to diagnostic screenings, such as breast cancer screening, pap smears, glaucoma tests, or diabetes screenings.",
+    "handed_to_ai": 28
+   },
+   {
+    "task": "Provide feedback to health service providers regarding improving service accessibility or acceptability.",
+    "handed_to_ai": 31
+   }
+  ],
+  "tasks_seen": 7,
+  "tasks_listed": 28,
+  "month": "2026-05"
+ },
+ "21-2011": {
+  "most_handed_to_ai": [
+   {
+    "task": "Respond to requests for assistance during emergencies or crises.",
+    "handed_to_ai": 60
+   },
+   {
+    "task": "Pray and promote spirituality.",
+    "handed_to_ai": 49
+   }
+  ],
+  "least_handed_to_ai": [
+   {
+    "task": "Study and interpret religious laws, doctrines, or traditions.",
+    "handed_to_ai": 26
+   },
+   {
+    "task": "Counsel individuals or groups concerning their spiritual, emotional, or personal needs.",
+    "handed_to_ai": 43
+   }
+  ],
+  "tasks_seen": 5,
+  "tasks_listed": 21,
+  "month": "2026-05"
+ },
+ "23-1011": {
+  "most_handed_to_ai": [
+   {
+    "task": "Evaluate findings and develop strategies and arguments in preparation for presentation of cases.",
+    "handed_to_ai": 39
+   },
+   {
+    "task": "Prepare, draft, and review legal documents, such as wills, deeds, patent applications, mortgages, leases, and contracts.",
+    "handed_to_ai": 39
+   },
+   {
+    "task": "Advise clients concerning business transactions, claim liability, advisability of prosecuting or defending lawsuits, or legal rights and obligations.",
+    "handed_to_ai": 34
+   }
+  ],
+  "least_handed_to_ai": [
+   {
+    "task": "Interpret laws, rulings and regulations for individuals and businesses.",
+    "handed_to_ai": 25
+   },
+   {
+    "task": "Study Constitution, statutes, decisions, regulations, and ordinances of quasi-judicial bodies to determine ramifications for cases.",
+    "handed_to_ai": 32
+   },
+   {
+    "task": "Analyze the probable outcomes of cases, using knowledge of legal precedents.",
+    "handed_to_ai": 34
+   }
+  ],
+  "tasks_seen": 6,
+  "tasks_listed": 22,
+  "month": "2026-05"
+ },
+ "25-1011": {
+  "most_handed_to_ai": [
+   {
+    "task": "Compile, administer, and grade examinations, or assign this work to others.",
+    "handed_to_ai": 60
+   },
+   {
+    "task": "Prepare course materials, such as syllabi, homework assignments, and handouts.",
+    "handed_to_ai": 43
+   },
+   {
+    "task": "Evaluate and grade students' class work, assignments, and papers.",
+    "handed_to_ai": 31
+   }
+  ],
+  "least_handed_to_ai": [
+   {
+    "task": "Initiate, facilitate, and moderate classroom discussions.",
+    "handed_to_ai": 23
+   },
+   {
+    "task": "Advise students on academic and vocational curricula and career issues.",
+    "handed_to_ai": 30
+   },
+   {
+    "task": "Prepare and deliver lectures to undergraduate or graduate students on topics such as financial accounting, principles of marketing, and operations management.",
+    "handed_to_ai": 30
+   }
+  ],
+  "tasks_seen": 6,
+  "tasks_listed": 25,
+  "month": "2026-05"
+ },
+ "25-1194": {
+  "most_handed_to_ai": [
+   {
+    "task": "Develop teaching aids, such as instructional software, multimedia visual aids, or study materials.",
+    "handed_to_ai": 66
+   },
+   {
+    "task": "Develop curricula and plan course content and methods of instruction.",
+    "handed_to_ai": 39
+   }
+  ],
+  "least_handed_to_ai": [
+   {
+    "task": "Provide individualized instruction and tutorial or remedial instruction.",
+    "handed_to_ai": 21
+   },
+   {
+    "task": "Observe and evaluate students' work to determine progress, provide feedback, and make suggestions for improvement.",
+    "handed_to_ai": 25
+   }
+  ],
+  "tasks_seen": 5,
+  "tasks_listed": 20,
+  "month": "2026-05"
+ },
+ "25-3031": {
+  "most_handed_to_ai": [
+   {
+    "task": "Grade students' assignments and exams.",
+    "handed_to_ai": 49
+   },
+   {
+    "task": "Counsel students with adjustment or academic problems.",
+    "handed_to_ai": 45
+   }
+  ],
+  "least_handed_to_ai": [
+   {
+    "task": "Answer students' questions.",
+    "handed_to_ai": 22
+   },
+   {
+    "task": "Tutor or assist students individually or in small groups.",
+    "handed_to_ai": 26
+   }
+  ],
+  "tasks_seen": 4,
+  "tasks_listed": 18,
+  "month": "2026-05"
+ },
+ "25-3041": {
+  "most_handed_to_ai": [
+   {
+    "task": "Develop teaching or training materials, such as handouts, study materials, or quizzes.",
+    "handed_to_ai": 54
+   },
+   {
+    "task": "Review class material with students by discussing text, working solutions to problems, or reviewing worksheets or other assignments.",
+    "handed_to_ai": 32
+   },
+   {
+    "task": "Research or recommend textbooks, software, equipment, or other learning materials to complement tutoring.",
+    "handed_to_ai": 30
+   }
+  ],
+  "least_handed_to_ai": [
+   {
+    "task": "Assess students' progress throughout tutoring sessions.",
+    "handed_to_ai": 20
+   },
+   {
+    "task": "Provide feedback to students, using positive reinforcement techniques to encourage, motivate, or build confidence in students.",
+    "handed_to_ai": 27
+   },
+   {
+    "task": "Teach students study skills, note-taking skills, and test-taking strategies.",
+    "handed_to_ai": 29
+   }
+  ],
+  "tasks_seen": 7,
+  "tasks_listed": 19,
+  "month": "2026-05"
+ },
+ "25-9031": {
+  "most_handed_to_ai": [
+   {
+    "task": "Design learning products, including Web-based aids or electronic performance support systems.",
+    "handed_to_ai": 64
+   },
+   {
+    "task": "Edit instructional materials, such as books, simulation exercises, lesson plans, instructor guides, and tests.",
+    "handed_to_ai": 60
+   },
+   {
+    "task": "Design instructional aids for stand-alone or instructor-led classroom or online use.",
+    "handed_to_ai": 55
+   }
+  ],
+  "least_handed_to_ai": [
+   {
+    "task": "Provide analytical support for the design and development of training curricula, learning strategies, educational policies, or courseware standards.",
+    "handed_to_ai": 21
+   },
+   {
+    "task": "Present and make recommendations regarding course design, technology, and instruction delivery options.",
+    "handed_to_ai": 23
+   },
+   {
+    "task": "Advise and teach students.",
+    "handed_to_ai": 23
+   }
+  ],
+  "tasks_seen": 9,
+  "tasks_listed": 30,
+  "month": "2026-05"
+ },
+ "25-9044": {
+  "most_handed_to_ai": [
+   {
+    "task": "Prepare or proctor examinations.",
+    "handed_to_ai": 66
+   },
+   {
+    "task": "Develop teaching materials, such as syllabi, visual aids, answer keys, supplementary notes, or course Web sites.",
+    "handed_to_ai": 53
+   },
+   {
+    "task": "Evaluate and grade examinations, assignments, or papers, and record grades.",
+    "handed_to_ai": 48
+   }
+  ],
+  "least_handed_to_ai": [
+   {
+    "task": "Teach undergraduate-level courses.",
+    "handed_to_ai": 13
+   },
+   {
+    "task": "Lead discussion sections, tutorials, or laboratory sections.",
+    "handed_to_ai": 18
+   },
+   {
+    "task": "Tutor or mentor students who need additional instruction.",
+    "handed_to_ai": 20
+   }
+  ],
+  "tasks_seen": 7,
+  "tasks_listed": 20,
+  "month": "2026-05"
+ },
+ "27-1011": {
+  "most_handed_to_ai": [
+   {
+    "task": "Confer with clients to determine objectives, budget, background information, and presentation approaches, styles, and techniques.",
+    "handed_to_ai": 57
+   },
+   {
+    "task": "Prepare detailed storyboards showing sequence and timing of story development for television production.",
+    "handed_to_ai": 49
+   },
+   {
+    "task": "Formulate basic layout design or presentation approach and specify material details, such as style and size of type, photographs, graphics, animation, video, and sound.",
+    "handed_to_ai": 46
+   }
+  ],
+  "least_handed_to_ai": [
+   {
+    "task": "Conceptualize and help design interfaces for multimedia games, products, and devices.",
+    "handed_to_ai": 32
+   },
+   {
+    "task": "Mark up, paste, and complete layouts and write typography instructions to prepare materials for typesetting or printing.",
+    "handed_to_ai": 39
+   },
+   {
+    "task": "Research current trends and new technology, such as printing production techniques, computer software, and design trends.",
+    "handed_to_ai": 42
+   }
+  ],
+  "tasks_seen": 6,
+  "tasks_listed": 16,
+  "month": "2026-05"
+ },
+ "27-1014": {
+  "most_handed_to_ai": [
+   {
+    "task": "Develop briefings, brochures, multimedia presentations, web pages, promotional products, technical illustrations, and computer artwork for use in products, technical manuals, literature, newsletters, and slide shows.",
+    "handed_to_ai": 57
+   },
+   {
+    "task": "Create two-dimensional and three-dimensional images depicting objects in motion or illustrating a process, using computer animation or modeling programs.",
+    "handed_to_ai": 55
+   }
+  ],
+  "least_handed_to_ai": [
+   {
+    "task": "Apply story development, directing, cinematography, and editing to animation to create storyboards that show the flow of the animation and map out key scenes and characters.",
+    "handed_to_ai": 47
+   },
+   {
+    "task": "Design complex graphics and animation, using independent judgment, creativity, and computer equipment.",
+    "handed_to_ai": 53
+   }
+  ],
+  "tasks_seen": 4,
+  "tasks_listed": 13,
+  "month": "2026-05"
+ },
+ "27-1021": {
+  "most_handed_to_ai": [
+   {
+    "task": "Research production specifications, costs, production materials, and manufacturing methods and provide cost estimates and itemized production requirements.",
+    "handed_to_ai": 44
+   },
+   {
+    "task": "Evaluate feasibility of design ideas, based on factors such as appearance, safety, function, serviceability, budget, production costs/methods, and market characteristics.",
+    "handed_to_ai": 35
+   }
+  ],
+  "least_handed_to_ai": [
+   {
+    "task": "Modify and refine designs, using working models, to conform with customer specifications, production limitations, or changes in design trends.",
+    "handed_to_ai": 15
+   },
+   {
+    "task": "Advise corporations on issues involving corporate image projects or problems.",
+    "handed_to_ai": 26
+   }
+  ],
+  "tasks_seen": 4,
+  "tasks_listed": 17,
+  "month": "2026-05"
+ },
+ "27-1024": {
+  "most_handed_to_ai": [
+   {
+    "task": "Use computer software to generate new images.",
+    "handed_to_ai": 63
+   },
+   {
+    "task": "Create designs, concepts, and sample layouts, based on knowledge of layout principles and esthetic design concepts.",
+    "handed_to_ai": 57
+   },
+   {
+    "task": "Research the target audience of projects.",
+    "handed_to_ai": 52
+   }
+  ],
+  "least_handed_to_ai": [
+   {
+    "task": "Write or edit copy for clients.",
+    "handed_to_ai": 27
+   },
+   {
+    "task": "Research new software or design concepts.",
+    "handed_to_ai": 41
+   },
+   {
+    "task": "Determine size and arrangement of illustrative material and copy, and select style and size of type.",
+    "handed_to_ai": 51
+   }
+  ],
+  "tasks_seen": 6,
+  "tasks_listed": 19,
+  "month": "2026-05"
+ },
+ "27-2012": {
+  "most_handed_to_ai": [
+   {
+    "task": "Develop promotions for current programs and specials.",
+    "handed_to_ai": 43
+   },
+   {
+    "task": "Choose settings and locations for films and determine how scenes will be shot in these settings.",
+    "handed_to_ai": 34
+   }
+  ],
+  "least_handed_to_ai": [
+   {
+    "task": "Compose and edit scripts or provide screenwriters with story outlines from which scripts can be written.",
+    "handed_to_ai": 25
+   },
+   {
+    "task": "Develop ideas for programs and features that a station could produce.",
+    "handed_to_ai": 33
+   }
+  ],
+  "tasks_seen": 4,
+  "tasks_listed": 83,
+  "month": "2026-05"
+ },
+ "27-3023": {
+  "most_handed_to_ai": [
+   {
+    "task": "Write online blog entries that address news developments or offer additional information, opinions, or commentary on news events.",
+    "handed_to_ai": 51
+   },
+   {
+    "task": "Write columns, editorials, commentaries, or reviews that interpret events or offer opinions.",
+    "handed_to_ai": 41
+   },
+   {
+    "task": "Select material most pertinent to presentation, and organize this material into appropriate formats.",
+    "handed_to_ai": 39
+   }
+  ],
+  "least_handed_to_ai": [
+   {
+    "task": "Revise work to meet editorial approval or to fit time or space requirements.",
+    "handed_to_ai": 12
+   },
+   {
+    "task": "Review written, audio, or video copy, and correct errors in content, grammar, or punctuation, following prescribed editorial style and formatting guidelines.",
+    "handed_to_ai": 24
+   },
+   {
+    "task": "Determine a published or broadcasted story's emphasis, length, and format, organizing material accordingly.",
+    "handed_to_ai": 29
+   }
+  ],
+  "tasks_seen": 7,
+  "tasks_listed": 30,
+  "month": "2026-05"
+ },
+ "27-3031": {
+  "most_handed_to_ai": [
+   {
+    "task": "Post and update content on the company's Web site and social media outlets.",
+    "handed_to_ai": 79
+   },
+   {
+    "task": "Prepare or edit organizational publications, such as employee newsletters or stockholders' reports, for internal or external audiences.",
+    "handed_to_ai": 39
+   },
+   {
+    "task": "Develop plans or materials to communicate organizational activities that are beneficial to the environment, public safety, or other important social issues.",
+    "handed_to_ai": 38
+   }
+  ],
+  "least_handed_to_ai": [
+   {
+    "task": "Write press releases or other media communications to promote clients.",
+    "handed_to_ai": 33
+   },
+   {
+    "task": "Coach client representatives in effective communication with the public or with employees.",
+    "handed_to_ai": 36
+   },
+   {
+    "task": "Study the objectives, promotional policies, or needs of organizations to develop public relations strategies that will influence public opinion or promote ideas, products, or services.",
+    "handed_to_ai": 37
+   }
+  ],
+  "tasks_seen": 6,
+  "tasks_listed": 18,
+  "month": "2026-05"
+ },
+ "27-3041": {
+  "most_handed_to_ai": [
+   {
+    "task": "Write text, such as stories, articles, editorials, or newsletters.",
+    "handed_to_ai": 40
+   },
+   {
+    "task": "Prepare, rewrite and edit copy to improve readability, or supervise others who do this work.",
+    "handed_to_ai": 35
+   },
+   {
+    "task": "Verify facts, dates, and statistics, using standard reference sources.",
+    "handed_to_ai": 34
+   }
+  ],
+  "least_handed_to_ai": [
+   {
+    "task": "Read, evaluate and edit manuscripts or other materials submitted for publication, and confer with authors regarding changes in content, style or organization, or publication.",
+    "handed_to_ai": 10
+   },
+   {
+    "task": "Read copy or proof to detect and correct errors in spelling, punctuation, and syntax.",
+    "handed_to_ai": 29
+   },
+   {
+    "task": "Develop story or content ideas, considering reader or audience appeal.",
+    "handed_to_ai": 30
+   }
+  ],
+  "tasks_seen": 6,
+  "tasks_listed": 21,
+  "month": "2026-05"
+ },
+ "27-3042": {
+  "most_handed_to_ai": [
+   {
+    "task": "Maintain records and files of work and revisions.",
+    "handed_to_ai": 75
+   },
+   {
+    "task": "Develop or maintain online help documentation.",
+    "handed_to_ai": 54
+   },
+   {
+    "task": "Assist in laying out material for publication.",
+    "handed_to_ai": 53
+   }
+  ],
+  "least_handed_to_ai": [
+   {
+    "task": "Review published materials and recommend revisions or changes in scope, format, content, and methods of reproduction and binding.",
+    "handed_to_ai": 30
+   },
+   {
+    "task": "Edit, standardize, or make changes to material prepared by other writers or establishment personnel.",
+    "handed_to_ai": 34
+   },
+   {
+    "task": "Select photographs, drawings, sketches, diagrams, and charts to illustrate material.",
+    "handed_to_ai": 40
+   }
+  ],
+  "tasks_seen": 7,
+  "tasks_listed": 15,
+  "month": "2026-05"
+ },
+ "27-3043": {
+  "most_handed_to_ai": [
+   {
+    "task": "Write articles, bulletins, sales letters, speeches, and other related informative, marketing and promotional material.",
+    "handed_to_ai": 44
+   },
+   {
+    "task": "Write advertising material for use by publication, broadcast, or internet media to promote the sale of goods and services.",
+    "handed_to_ai": 41
+   },
+   {
+    "task": "Write narrative, dramatic, lyric, or other types of poetry for publication.",
+    "handed_to_ai": 39
+   }
+  ],
+  "least_handed_to_ai": [
+   {
+    "task": "Revise written material to meet personal standards and to satisfy needs of clients, publishers, directors, or producers.",
+    "handed_to_ai": 16
+   },
+   {
+    "task": "Invent names for products and write the slogans that appear on packaging, brochures and other promotional material.",
+    "handed_to_ai": 23
+   },
+   {
+    "task": "Edit or rewrite existing written material as necessary, and submit written material for approval by supervisor, editor, or publisher.",
+    "handed_to_ai": 28
+   }
+  ],
+  "tasks_seen": 15,
+  "tasks_listed": 36,
+  "month": "2026-05"
+ },
+ "27-3091": {
+  "most_handed_to_ai": [
+   {
+    "task": "Adapt software and accompanying technical documents to another language and culture.",
+    "handed_to_ai": 74
+   },
+   {
+    "task": "Read written materials, such as legal documents, scientific works, or news reports, and rewrite material into specified languages.",
+    "handed_to_ai": 71
+   }
+  ],
+  "least_handed_to_ai": [
+   {
+    "task": "Identify and resolve conflicts related to the meanings of words, concepts, practices, or behaviors.",
+    "handed_to_ai": 14
+   },
+   {
+    "task": "Proofread, edit, and revise translated materials.",
+    "handed_to_ai": 27
+   }
+  ],
+  "tasks_seen": 5,
+  "tasks_listed": 17,
+  "month": "2026-05"
+ },
+ "29-1031": {
+  "most_handed_to_ai": [
+   {
+    "task": "Assess nutritional needs, diet restrictions, and current health plans to develop and implement dietary-care plans and provide nutritional counseling.",
+    "handed_to_ai": 59
+   },
+   {
+    "task": "Advise patients and their families on nutritional principles, dietary plans, diet modifications, and food selection and preparation.",
+    "handed_to_ai": 49
+   }
+  ],
+  "least_handed_to_ai": [
+   {
+    "task": "Develop recipes and menus to address special nutrition needs, such as low glycemic, low histamine, or gluten- or allergen-free.",
+    "handed_to_ai": 38
+   },
+   {
+    "task": "Counsel individuals and groups on basic rules of good nutrition, healthy eating habits, and nutrition monitoring to improve their quality of life.",
+    "handed_to_ai": 48
+   }
+  ],
+  "tasks_seen": 4,
+  "tasks_listed": 28,
+  "month": "2026-05"
+ },
+ "29-1128": {
+  "most_handed_to_ai": [
+   {
+    "task": "Demonstrate correct use of exercise equipment or performance of exercise routines.",
+    "handed_to_ai": 50
+   },
+   {
+    "task": "Recommend methods to increase lifestyle physical activity.",
+    "handed_to_ai": 45
+   }
+  ],
+  "least_handed_to_ai": [
+   {
+    "task": "Develop exercise programs to improve participant strength, flexibility, endurance, or circulatory functioning, in accordance with exercise science standards, regulatory requirements, and credentialing requirements.",
+    "handed_to_ai": 42
+   },
+   {
+    "task": "Educate athletes or coaches on techniques to improve athletic performance, such as heart rate monitoring, recovery techniques, hydration strategies, or training limits.",
+    "handed_to_ai": 43
+   }
+  ],
+  "tasks_seen": 4,
+  "tasks_listed": 25,
+  "month": "2026-05"
+ },
+ "29-1141": {
+  "most_handed_to_ai": [
+   {
+    "task": "Prepare reports to document patients' care activities.",
+    "handed_to_ai": 57
+   },
+   {
+    "task": "Assist patients in organizing their health care system activities.",
+    "handed_to_ai": 55
+   },
+   {
+    "task": "Plan, evaluate, or modify treatment programs, based on information gathered by observing and interviewing patients or by analyzing patient records.",
+    "handed_to_ai": 47
+   }
+  ],
+  "least_handed_to_ai": [
+   {
+    "task": "Discuss illnesses and treatments with patients and family members.",
+    "handed_to_ai": 32
+   },
+   {
+    "task": "Provide consultation to other health care providers in areas such as patient discharge, patient care, or clinical procedures.",
+    "handed_to_ai": 34
+   },
+   {
+    "task": "Make clinical recommendations to physicians, other health care providers, insurance companies, patients, or health care organizations.",
+    "handed_to_ai": 39
+   }
+  ],
+  "tasks_seen": 7,
+  "tasks_listed": 136,
+  "month": "2026-05"
+ },
+ "29-1171": {
+  "most_handed_to_ai": [
+   {
+    "task": "Provide patients or caregivers with assistance in locating health care resources.",
+    "handed_to_ai": 65
+   },
+   {
+    "task": "Analyze and interpret patients' histories, symptoms, physical findings, or diagnostic information to develop appropriate diagnoses.",
+    "handed_to_ai": 58
+   }
+  ],
+  "least_handed_to_ai": [
+   {
+    "task": "Counsel patients about drug regimens and possible side effects or interactions with other substances, such as food supplements, over-the-counter (OTC) medications, or herbal remedies.",
+    "handed_to_ai": 30
+   },
+   {
+    "task": "Recommend interventions to modify behavior associated with health risks.",
+    "handed_to_ai": 49
+   }
+  ],
+  "tasks_seen": 4,
+  "tasks_listed": 27,
+  "month": "2026-05"
+ },
+ "29-1229": {
+  "most_handed_to_ai": [
+   {
+    "task": "Advise athletes, trainers, or coaches to alter or cease sports practices that are potentially harmful.",
+    "handed_to_ai": 62
+   },
+   {
+    "task": "Interpret diagnostic test results to make appropriate differential diagnoses.",
+    "handed_to_ai": 49
+   }
+  ],
+  "least_handed_to_ai": [
+   {
+    "task": "Educate patients about diagnoses, prognoses, or treatments.",
+    "handed_to_ai": 28
+   },
+   {
+    "task": "Provide education and counseling on illness and injury prevention.",
+    "handed_to_ai": 33
+   }
+  ],
+  "tasks_seen": 5,
+  "tasks_listed": 101,
+  "month": "2026-05"
+ },
+ "39-9032": {
+  "most_handed_to_ai": [
+   {
+    "task": "Assess the needs and interests of individuals and groups and plan activities accordingly, given the available equipment or facilities.",
+    "handed_to_ai": 62
+   },
+   {
+    "task": "Document individuals' progress toward meeting their treatment goals.",
+    "handed_to_ai": 51
+   }
+  ],
+  "least_handed_to_ai": [
+   {
+    "task": "Explain principles, techniques, and safety procedures to participants in recreational activities and demonstrate use of materials and equipment.",
+    "handed_to_ai": 38
+   },
+   {
+    "task": "Develop treatment goals for individuals based on their assessments.",
+    "handed_to_ai": 39
+   }
+  ],
+  "tasks_seen": 4,
+  "tasks_listed": 24,
+  "month": "2026-05"
+ },
+ "41-2031": {
+  "most_handed_to_ai": [
+   {
+    "task": "Greet customers and ascertain what each customer wants or needs.",
+    "handed_to_ai": 79
+   },
+   {
+    "task": "Answer questions regarding the store and its merchandise.",
+    "handed_to_ai": 70
+   }
+  ],
+  "least_handed_to_ai": [
+   {
+    "task": "Describe merchandise and explain use, operation, and care of merchandise to customers.",
+    "handed_to_ai": 35
+   },
+   {
+    "task": "Recommend, select, and help locate or obtain merchandise based on customer needs and desires.",
+    "handed_to_ai": 44
+   }
+  ],
+  "tasks_seen": 4,
+  "tasks_listed": 24,
+  "month": "2026-05"
+ },
+ "41-3011": {
+  "most_handed_to_ai": [
+   {
+    "task": "Write sales outlines for use by staff.",
+    "handed_to_ai": 46
+   },
+   {
+    "task": "Prepare promotional plans, sales literature, media kits, and sales contracts, using computer.",
+    "handed_to_ai": 44
+   }
+  ],
+  "least_handed_to_ai": [
+   {
+    "task": "Write copy as part of layout.",
+    "handed_to_ai": 27
+   },
+   {
+    "task": "Determine advertising medium to be used, and prepare sample advertisements within the selected medium for presentation to customers.",
+    "handed_to_ai": 35
+   }
+  ],
+  "tasks_seen": 4,
+  "tasks_listed": 20,
+  "month": "2026-05"
+ },
+ "41-3031": {
+  "most_handed_to_ai": [
+   {
+    "task": "Monitor markets or positions.",
+    "handed_to_ai": 96
+   },
+   {
+    "task": "Contact prospective customers to present information and explain available services.",
+    "handed_to_ai": 72
+   },
+   {
+    "task": "Track and analyze factors that affect price movement, such as trade policies, weather conditions, political developments, or supply and demand changes.",
+    "handed_to_ai": 56
+   }
+  ],
+  "least_handed_to_ai": [
+   {
+    "task": "Explain stock market terms or trading practices to clients.",
+    "handed_to_ai": 8
+   },
+   {
+    "task": "Discuss financial options with clients and keep them informed about transactions.",
+    "handed_to_ai": 23
+   },
+   {
+    "task": "Prepare financial reports to monitor client or corporate finances.",
+    "handed_to_ai": 53
+   }
+  ],
+  "tasks_seen": 6,
+  "tasks_listed": 30,
+  "month": "2026-05"
+ },
+ "41-3091": {
+  "most_handed_to_ai": [
+   {
+    "task": "Contact prospective or existing customers to discuss how services can meet their needs.",
+    "handed_to_ai": 72
+   },
+   {
+    "task": "Consult with clients after sales or contract signings to resolve problems and provide ongoing support.",
+    "handed_to_ai": 62
+   },
+   {
+    "task": "Answer customers' questions about services, prices, availability, or credit terms.",
+    "handed_to_ai": 55
+   }
+  ],
+  "least_handed_to_ai": [
+   {
+    "task": "Inform customers of contracts or other information pertaining to purchased services.",
+    "handed_to_ai": 31
+   },
+   {
+    "task": "Develop sales presentations or proposals to explain service specifications.",
+    "handed_to_ai": 35
+   },
+   {
+    "task": "Emphasize or recommend service features based on knowledge of customers' needs and vendor capabilities and limitations.",
+    "handed_to_ai": 43
+   }
+  ],
+  "tasks_seen": 7,
+  "tasks_listed": 15,
+  "month": "2026-05"
+ },
+ "41-4011": {
+  "most_handed_to_ai": [
+   {
+    "task": "Provide customers with ongoing technical support.",
+    "handed_to_ai": 70
+   },
+   {
+    "task": "Contact new or existing customers to discuss how specific products or services can meet their needs.",
+    "handed_to_ai": 69
+   },
+   {
+    "task": "Answer customers' questions about products, prices, availability, or credit terms.",
+    "handed_to_ai": 52
+   }
+  ],
+  "least_handed_to_ai": [
+   {
+    "task": "Emphasize product features, based on analyses of customers' needs and on technical knowledge of product capabilities and limitations.",
+    "handed_to_ai": 27
+   },
+   {
+    "task": "Provide customers with information, such as quotes, orders, sales, shipping, warranties, credit, funding options, incentives, or tax rebates.",
+    "handed_to_ai": 30
+   },
+   {
+    "task": "Prepare sales presentations or proposals to explain product specifications or applications.",
+    "handed_to_ai": 35
+   }
+  ],
+  "tasks_seen": 10,
+  "tasks_listed": 46,
+  "month": "2026-05"
+ },
+ "41-4012": {
+  "most_handed_to_ai": [
+   {
+    "task": "Consult with clients after sales or contract signings to resolve problems and to provide ongoing support.",
+    "handed_to_ai": 62
+   },
+   {
+    "task": "Estimate or quote prices, credit or contract terms, warranties, and delivery dates.",
+    "handed_to_ai": 51
+   }
+  ],
+  "least_handed_to_ai": [
+   {
+    "task": "Prepare drawings, estimates, and bids that meet specific customer needs.",
+    "handed_to_ai": 29
+   },
+   {
+    "task": "Answer customers' questions about products, prices, availability, product uses, and credit terms.",
+    "handed_to_ai": 45
+   }
+  ],
+  "tasks_seen": 5,
+  "tasks_listed": 18,
+  "month": "2026-05"
+ },
+ "41-9011": {
+  "most_handed_to_ai": [
+   {
+    "task": "Instruct customers in alteration of products.",
+    "handed_to_ai": 47
+   },
+   {
+    "task": "Suggest specific product purchases to meet customers' needs.",
+    "handed_to_ai": 43
+   }
+  ],
+  "least_handed_to_ai": [
+   {
+    "task": "Recommend product or service improvements to employers.",
+    "handed_to_ai": 30
+   },
+   {
+    "task": "Prepare or alter presentation contents to target specific audiences.",
+    "handed_to_ai": 31
+   }
+  ],
+  "tasks_seen": 4,
+  "tasks_listed": 21,
+  "month": "2026-05"
+ },
+ "41-9031": {
+  "most_handed_to_ai": [
+   {
+    "task": "Diagnose problems with installed equipment.",
+    "handed_to_ai": 86
+   },
+   {
+    "task": "Research and identify potential customers for products or services.",
+    "handed_to_ai": 75
+   },
+   {
+    "task": "Provide technical and non-technical support and services to clients or other staff members regarding the use, operation, and maintenance of equipment.",
+    "handed_to_ai": 60
+   }
+  ],
+  "least_handed_to_ai": [
+   {
+    "task": "Prepare and deliver technical presentations that explain products or services to customers and prospective customers.",
+    "handed_to_ai": 31
+   },
+   {
+    "task": "Develop, present, or respond to proposals for specific customer requirements, including request for proposal responses and industry-specific solutions.",
+    "handed_to_ai": 36
+   },
+   {
+    "task": "Develop sales plans to introduce products in new markets.",
+    "handed_to_ai": 43
+   }
+  ],
+  "tasks_seen": 7,
+  "tasks_listed": 25,
+  "month": "2026-05"
+ },
+ "43-1011": {
+  "most_handed_to_ai": [
+   {
+    "task": "Research, compile, and prepare reports, manuals, correspondence, or other information required by management or governmental agencies.",
+    "handed_to_ai": 65
+   },
+   {
+    "task": "Compute figures such as balances, totals, or commissions.",
+    "handed_to_ai": 58
+   }
+  ],
+  "least_handed_to_ai": [
+   {
+    "task": "Analyze financial activities of establishments or departments and provide input into budget planning and preparation processes.",
+    "handed_to_ai": 40
+   },
+   {
+    "task": "Develop or update procedures, policies, or standards.",
+    "handed_to_ai": 40
+   }
+  ],
+  "tasks_seen": 5,
+  "tasks_listed": 28,
+  "month": "2026-05"
+ },
+ "43-3031": {
+  "most_handed_to_ai": [
+   {
+    "task": "Transfer details from separate journals to general ledgers or data processing sheets.",
+    "handed_to_ai": 87
+   },
+   {
+    "task": "Compile statistical, financial, accounting, or auditing reports and tables pertaining to such matters as cash receipts, expenditures, accounts payable and receivable, and profits and losses.",
+    "handed_to_ai": 68
+   },
+   {
+    "task": "Classify, record, and summarize numerical and financial data to compile and keep financial records, using journals and ledgers or computers.",
+    "handed_to_ai": 67
+   }
+  ],
+  "least_handed_to_ai": [
+   {
+    "task": "Calculate costs of materials, overhead, and other expenses, based on estimates, quotations and price lists.",
+    "handed_to_ai": 41
+   },
+   {
+    "task": "Perform financial calculations, such as amounts due, interest charges, balances, discounts, equity, and principal.",
+    "handed_to_ai": 49
+   },
+   {
+    "task": "Check figures, postings, and documents for correct entry, mathematical accuracy, and proper codes.",
+    "handed_to_ai": 53
+   }
+  ],
+  "tasks_seen": 7,
+  "tasks_listed": 28,
+  "month": "2026-05"
+ },
+ "43-4021": {
+  "most_handed_to_ai": [
+   {
+    "task": "Compile data from records to prepare periodic reports.",
+    "handed_to_ai": 84
+   },
+   {
+    "task": "Read incoming correspondence to ascertain nature of writers' concerns and to determine disposition of correspondence.",
+    "handed_to_ai": 78
+   },
+   {
+    "task": "Type acknowledgment letters to persons sending correspondence.",
+    "handed_to_ai": 61
+   }
+  ],
+  "least_handed_to_ai": [
+   {
+    "task": "Present clear and concise explanations of governing rules and regulations.",
+    "handed_to_ai": 29
+   },
+   {
+    "task": "Prepare documents and correspondence, such as damage claims, credit and billing inquiries, invoices, and service complaints.",
+    "handed_to_ai": 50
+   },
+   {
+    "task": "Compose letters in reply to correspondence concerning such items as requests for merchandise, damage claims, credit information requests, delinquent accounts, incorrect billing, or unsatisfactory service.",
+    "handed_to_ai": 54
+   }
+  ],
+  "tasks_seen": 6,
+  "tasks_listed": 17,
+  "month": "2026-05"
+ },
+ "43-4071": {
+  "most_handed_to_ai": [
+   {
+    "task": "Add new material to file records or create new records as necessary.",
+    "handed_to_ai": 92
+   },
+   {
+    "task": "Input data, such as file numbers, new or updated information, or document information codes into computer systems to support document and information retrieval.",
+    "handed_to_ai": 82
+   }
+  ],
+  "least_handed_to_ai": [
+   {
+    "task": "Sort or classify information according to guidelines, such as content, purpose, user criteria, or chronological, alphabetical, or numerical order.",
+    "handed_to_ai": 70
+   },
+   {
+    "task": "Find, retrieve, and make copies of information from files in response to requests and deliver information to authorized users.",
+    "handed_to_ai": 77
+   }
+  ],
+  "tasks_seen": 4,
+  "tasks_listed": 19,
+  "month": "2026-05"
+ },
+ "43-4171": {
+  "most_handed_to_ai": [
+   {
+    "task": "Transmit information or documents to customers, using computer, mail, or facsimile machine.",
+    "handed_to_ai": 98
+   },
+   {
+    "task": "File and maintain records.",
+    "handed_to_ai": 97
+   }
+  ],
+  "least_handed_to_ai": [
+   {
+    "task": "Process and prepare memos, correspondence, travel vouchers, or other documents.",
+    "handed_to_ai": 54
+   },
+   {
+    "task": "Analyze data to determine answers to questions from customers or members of the public.",
+    "handed_to_ai": 55
+   }
+  ],
+  "tasks_seen": 5,
+  "tasks_listed": 18,
+  "month": "2026-05"
+ },
+ "43-6011": {
+  "most_handed_to_ai": [
+   {
+    "task": "Manage and maintain executives' schedules.",
+    "handed_to_ai": 84
+   },
+   {
+    "task": "Read and analyze incoming memos, submissions, and reports to determine their significance and plan their distribution.",
+    "handed_to_ai": 82
+   },
+   {
+    "task": "Compile, transcribe, and distribute minutes of meetings.",
+    "handed_to_ai": 79
+   }
+  ],
+  "least_handed_to_ai": [
+   {
+    "task": "Prepare invoices, reports, memos, letters, financial statements, and other documents, using word processing, spreadsheet, database, or presentation software.",
+    "handed_to_ai": 48
+   },
+   {
+    "task": "Conduct research, compile data, and prepare papers for consideration and presentation by executives, committees, and boards of directors.",
+    "handed_to_ai": 53
+   },
+   {
+    "task": "Prepare responses to correspondence containing routine inquiries.",
+    "handed_to_ai": 66
+   }
+  ],
+  "tasks_seen": 6,
+  "tasks_listed": 22,
+  "month": "2026-05"
+ },
+ "43-6014": {
+  "most_handed_to_ai": [
+   {
+    "task": "Use computers for various applications, such as database management or word processing.",
+    "handed_to_ai": 92
+   },
+   {
+    "task": "Maintain scheduling and event calendars.",
+    "handed_to_ai": 87
+   },
+   {
+    "task": "Create, maintain, and enter information into databases.",
+    "handed_to_ai": 83
+   }
+  ],
+  "least_handed_to_ai": [
+   {
+    "task": "Review work done by others to check for correct spelling and grammar, ensure that company format policies are followed, and recommend revisions.",
+    "handed_to_ai": 21
+   },
+   {
+    "task": "Prepare conference or event materials, such as flyers or invitations.",
+    "handed_to_ai": 44
+   },
+   {
+    "task": "Develop or maintain internal or external company Web sites.",
+    "handed_to_ai": 58
+   }
+  ],
+  "tasks_seen": 8,
+  "tasks_listed": 31,
+  "month": "2026-05"
+ },
+ "43-9021": {
+  "most_handed_to_ai": [
+   {
+    "task": "Maintain logs of activities and completed work.",
+    "handed_to_ai": 97
+   },
+   {
+    "task": "Read source documents such as canceled checks, sales reports, or bills, and enter data in specific data fields or onto tapes or disks for subsequent entry, using keyboards or scanners.",
+    "handed_to_ai": 80
+   }
+  ],
+  "least_handed_to_ai": [
+   {
+    "task": "Compare data with source documents, or re-enter data in verification format to detect errors.",
+    "handed_to_ai": 59
+   },
+   {
+    "task": "Compile, sort, and verify the accuracy of data before it is entered.",
+    "handed_to_ai": 69
+   }
+  ],
+  "tasks_seen": 4,
+  "tasks_listed": 9,
+  "month": "2026-05"
+ },
+ "43-9022": {
+  "most_handed_to_ai": [
+   {
+    "task": "Type correspondence, reports, text and other written material from rough drafts, corrected copies, voice recordings, dictation, or previous versions, using a computer, word processor, or typewriter.",
+    "handed_to_ai": 77
+   },
+   {
+    "task": "Manage schedules and set dates, times, and locations for meetings and appointments.",
+    "handed_to_ai": 74
+   },
+   {
+    "task": "Search for specific sets of stored, typed characters to make changes.",
+    "handed_to_ai": 68
+   }
+  ],
+  "least_handed_to_ai": [
+   {
+    "task": "Check completed work for spelling, grammar, punctuation, and format.",
+    "handed_to_ai": 27
+   },
+   {
+    "task": "Work with technical material, preparing statistical reports, planning and typing statistical tables, and combining and rearranging material from different sources.",
+    "handed_to_ai": 47
+   },
+   {
+    "task": "Adjust settings for format, page layout, line spacing, and other style requirements.",
+    "handed_to_ai": 53
+   }
+  ],
+  "tasks_seen": 9,
+  "tasks_listed": 19,
+  "month": "2026-05"
+ },
+ "43-9031": {
+  "most_handed_to_ai": [
+   {
+    "task": "Convert various types of files for printing or for the Internet, using computer software.",
+    "handed_to_ai": 66
+   },
+   {
+    "task": "Edit graphics and photos, using pixel or bitmap editing, airbrushing, masking, or image retouching.",
+    "handed_to_ai": 57
+   },
+   {
+    "task": "Enter text into computer keyboard and select the size and style of type, column width, and appropriate spacing for printed materials.",
+    "handed_to_ai": 51
+   }
+  ],
+  "least_handed_to_ai": [
+   {
+    "task": "Prepare sample layouts for approval, using computer software.",
+    "handed_to_ai": 34
+   },
+   {
+    "task": "Operate desktop publishing software and equipment to design, lay out, and produce camera-ready copy.",
+    "handed_to_ai": 42
+   },
+   {
+    "task": "Position text and art elements from a variety of databases in a visually appealing way to design print or web pages, using knowledge of type styles and size and layout patterns.",
+    "handed_to_ai": 44
+   }
+  ],
+  "tasks_seen": 7,
+  "tasks_listed": 18,
+  "month": "2026-05"
+ },
+ "43-9061": {
+  "most_handed_to_ai": [
+   {
+    "task": "Compile, copy, sort, and file records of office activities, business transactions, and other activities.",
+    "handed_to_ai": 94
+   },
+   {
+    "task": "Complete work schedules, manage calendars, and arrange appointments.",
+    "handed_to_ai": 82
+   }
+  ],
+  "least_handed_to_ai": [
+   {
+    "task": "Count, weigh, measure, or organize materials.",
+    "handed_to_ai": 68
+   },
+   {
+    "task": "Review files, records, and other documents to obtain information to respond to requests.",
+    "handed_to_ai": 69
+   }
+  ],
+  "tasks_seen": 5,
+  "tasks_listed": 20,
+  "month": "2026-05"
+ },
+ "43-9111": {
+  "most_handed_to_ai": [
+   {
+    "task": "File data and related information, and maintain and update databases.",
+    "handed_to_ai": 91
+   },
+   {
+    "task": "Enter data into computers for use in analyses or reports.",
+    "handed_to_ai": 67
+   }
+  ],
+  "least_handed_to_ai": [
+   {
+    "task": "Compute and analyze data, using statistical formulas and computers or calculators.",
+    "handed_to_ai": 50
+   },
+   {
+    "task": "Compile reports, charts, or graphs that describe and interpret findings of analyses.",
+    "handed_to_ai": 63
+   }
+  ],
+  "tasks_seen": 5,
+  "tasks_listed": 14,
+  "month": "2026-05"
+ }
+}

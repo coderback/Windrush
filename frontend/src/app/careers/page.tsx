@@ -1,20 +1,16 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import TopBar, { Page } from "@/components/ui/TopBar";
-import { PillTabs } from "@/components/ui/Tabs";
-import { buttonClass, Callout, cx, EmptyState, Skeleton, Spinner, TextLink } from "@/components/ui/kit";
-import Icon from "@/components/ui/Icon";
+import { Bar, buttonClass, Callout, cx, EmptyState, Skeleton, Spinner, TextLink } from "@/components/ui/kit";
 import { useResource } from "@/lib/store";
 import { postStream } from "@/lib/sse";
 import { shortDate } from "@/lib/format";
-import { riskLevel, RISK, type RiskLevel } from "@/lib/status";
-import type { Persona, SkillRisk } from "@/lib/types";
+import { noScoreReason, riskLevel, RISK } from "@/lib/status";
+import type { CareerExposure, OccupationEvidence, Persona, RoleExposure, TaskEvidence } from "@/lib/types";
 
 interface RoadmapItem { skill: string; reason?: string; action?: string; timeline?: string; resource?: string }
 interface SavedRoadmap { items: RoadmapItem[]; at: string; target: string }
-
-type Filter = "All" | RiskLevel;
 
 /* The last roadmap is kept in this browser, per account, so it survives a reload. */
 function roadmapKey(): string | null {
@@ -27,19 +23,80 @@ function roadmapKey(): string | null {
   }
 }
 
-function SummaryCard({ label, children }: { label: string; children: React.ReactNode }) {
+function monthName(month: string): string {
+  return new Date(`${month}-01T00:00:00Z`).toLocaleDateString("en-GB", { month: "long", year: "numeric", timeZone: "UTC" });
+}
+
+function RoleRow({ role }: { role: RoleExposure }) {
+  const level = role.exposure != null ? riskLevel(role.exposure) : null;
   return (
-    <section className="bg-surface border border-border rounded-card p-[18px] flex flex-col gap-[10px]">
-      <span className="micro">{label}</span>
-      {children}
+    <li className="flex flex-col gap-[6px] px-5 py-[13px] border-b border-divider last:border-0">
+      <span className="flex justify-between items-baseline gap-3">
+        <span className="min-w-0 text-[13.5px] font-medium">{role.title}</span>
+        {level ? (
+          <span className={cx("font-mono text-[12px] font-semibold shrink-0", RISK[level].text)}>{role.exposure}% · {level}</span>
+        ) : (
+          <span className="text-[12px] text-ink-3 shrink-0">Not enough data</span>
+        )}
+      </span>
+      {level && <Bar value={role.exposure as number} className={RISK[level].bar} />}
+      <span className="text-[12.5px] leading-[1.45] text-ink-2">
+        {level ? `Published figure for ${role.occupation}.` : noScoreReason(role.occupation)}
+      </span>
+    </li>
+  );
+}
+
+function RoleList({ id, title, roles }: { id: string; title: string; roles: RoleExposure[] }) {
+  return (
+    <section aria-labelledby={id} className="bg-surface border border-border rounded-card overflow-hidden">
+      <h2 id={id} className="m-0 px-5 pt-4 pb-2 text-[15.5px] font-semibold">{title}</h2>
+      <ul className="list-none m-0 p-0">
+        {roles.map((r) => <RoleRow key={r.title} role={r} />)}
+      </ul>
+    </section>
+  );
+}
+
+function TaskList({ title, tasks }: { title: string; tasks: TaskEvidence[] }) {
+  return (
+    <div className="flex flex-col gap-2 min-w-0">
+      <h3 className="m-0 text-[13.5px] font-semibold">{title}</h3>
+      <ul className="list-none m-0 p-0 flex flex-col gap-2">
+        {tasks.map((t) => (
+          <li key={t.task} className="flex justify-between gap-3 text-[12.5px] leading-[1.45] text-ink-2">
+            <span className="min-w-0">{t.task}</span>
+            <span className="font-mono text-[12px] shrink-0">{t.handed_to_ai}%</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function Evidence({ evidence }: { evidence: OccupationEvidence }) {
+  return (
+    <section aria-labelledby="evidence" className="bg-surface border border-border rounded-card p-5 flex flex-col gap-4">
+      <div className="flex flex-col gap-1">
+        <h2 id="evidence" className="m-0 text-[15.5px] font-semibold">What people hand to AI in {evidence.occupation}</h2>
+        <p className="m-0 text-[13px] leading-[1.5] text-ink-2 max-w-[72ch] text-pretty">
+          The share of conversations about each task where the work was handed to AI rather than done with it. From
+          Claude chat in {monthName(evidence.month)}, so coding tools and API use aren&apos;t included, and only {evidence.tasks_seen} of
+          this occupation&apos;s {evidence.tasks_listed} listed tasks had enough conversations. The tasks are generic US
+          descriptions. The roadmap below uses this as a hint.
+        </p>
+      </div>
+      <div className="grid gap-5" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(min(280px, 100%), 1fr))" }}>
+        <TaskList title="Handed to AI most" tasks={evidence.most_handed_to_ai} />
+        <TaskList title="Handed to AI least" tasks={evidence.least_handed_to_ai} />
+      </div>
     </section>
   );
 }
 
 export default function CareersPage() {
-  const risks = useResource<{ skill_risks?: SkillRisk[] }>("/api/score-skills", { init: { method: "POST" }, staleMs: Infinity });
+  const exposure = useResource<CareerExposure>("/api/careers/exposure");
   const persona = useResource<Persona>("/api/persona");
-  const [filter, setFilter] = useState<Filter>("All");
   const [roadmap, setRoadmap] = useState<SavedRoadmap | null>(null);
   const [generating, setGenerating] = useState(false);
   const [roadmapError, setRoadmapError] = useState<string | null>(null);
@@ -53,23 +110,10 @@ export default function CareersPage() {
     } catch {}
   }, []);
 
-  const all = useMemo(() => [...(risks.data?.skill_risks ?? [])].sort((a, b) => b.exposure_score - a.exposure_score),
-    [risks.data]);
-  const groupOf = useMemo(() => {
-    const m = new Map<string, string>();
-    persona.data?.skills.forEach((g) => g.skills.forEach((s) => m.set(s.toLowerCase(), g.category)));
-    persona.data?.history.forEach((h) => { if (h.title && !m.has(h.title.toLowerCase())) m.set(h.title.toLowerCase(), "Job title"); });
-    return m;
-  }, [persona.data]);
-
-  const counts = { All: all.length, High: 0, Medium: 0, Low: 0 } as Record<Filter, number>;
-  all.forEach((r) => { counts[riskLevel(r.exposure_score)] += 1; });
-  const rows = filter === "All" ? all : all.filter((r) => riskLevel(r.exposure_score) === filter);
-
-  const overall = all.length ? Math.round(all.reduce((n, r) => n + r.exposure_score, 0) / all.length) : null;
-  const resilient = all.length ? all[all.length - 1] : null;
+  const roles = exposure.data?.roles ?? [];
+  const targetRoles = roles.filter((r) => r.kind === "target");
+  const pastRoles = roles.filter((r) => r.kind === "past");
   const target = persona.data?.preferences.target_titles?.[0] ?? "";
-  const targetScore = target ? all.find((r) => r.skill.toLowerCase() === target.toLowerCase()) : undefined;
 
   const generate = async () => {
     setGenerating(true);
@@ -91,128 +135,34 @@ export default function CareersPage() {
     }
   };
 
-  const level = overall != null ? riskLevel(overall) : null;
-
   return (
     <>
-      <TopBar crumbs={[{ label: "Grow" }, { label: "AI exposure & roadmap" }]}>
-        <button type="button" onClick={() => risks.reload().catch(() => {})} disabled={risks.refreshing}
-          className={buttonClass("secondary", "top")}>
-          {risks.refreshing ? <Spinner /> : <Icon name="refresh" size={15} />}Rescore my skills
-        </button>
-      </TopBar>
+      <TopBar crumbs={[{ label: "Grow" }, { label: "AI exposure & roadmap" }]} />
       <Page className="gap-5 pt-[26px] sm:pt-[26px]">
         <div className="flex flex-col gap-[6px]">
-          <h1 className="m-0 text-[26px] font-semibold tracking-[-0.025em]">How exposed is your work to AI?</h1>
+          <h1 className="m-0 text-[26px] font-semibold tracking-[-0.025em]">How exposed are your roles to AI?</h1>
           <p className="m-0 text-[14px] text-ink-2 max-w-[72ch] text-pretty">
-            Scores are looked up in the Anthropic Economic Index and about 18,000 O*NET tasks. The model only writes the
-            explanations, it does not pick the numbers.
+            Each score is the figure the Anthropic Economic Index publishes for the occupation a role belongs to: how much
+            of that work AI is already seen doing, based on Claude usage in 2025 and US occupation data. It isn&apos;t a
+            forecast, and Anthropic found only a slight link to projected job growth. A low score means little use seen so
+            far, not that a job is safe.
           </p>
         </div>
 
-        {risks.error && <Callout title="Couldn't score your skills">{risks.error}</Callout>}
+        {exposure.error && <Callout title="Couldn't load AI exposure">{exposure.error}</Callout>}
 
-        {risks.loading ? (
-          <div className="grid gap-[14px]" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(min(280px, 100%), 1fr))" }}>
-            {Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-[150px] rounded-card" />)}
-          </div>
-        ) : !risks.error && all.length === 0 ? (
-          <EmptyState action={<TextLink href="/profile#skills">Add skills to your persona</TextLink>}>
-            Your persona has no skills to score yet.
+        {exposure.loading ? (
+          <Skeleton className="h-[180px] rounded-card" />
+        ) : !exposure.error && roles.length === 0 ? (
+          <EmptyState action={<TextLink href="/profile#prefs">Add the roles you&apos;re aiming for</TextLink>}>
+            Your persona has no roles to look up yet.
           </EmptyState>
-        ) : all.length > 0 && (
-          <div className="grid gap-[14px]" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(min(280px, 100%), 1fr))" }}>
-            <SummaryCard label="Your skill mix">
-              <span className="flex items-baseline gap-[10px] mt-1">
-                <span className="font-mono text-[38px] font-medium tracking-[-0.04em] leading-none">{overall}%</span>
-                {level && <span className={cx("text-[14px] font-semibold", RISK[level].text)}>{level}</span>}
-              </span>
-              <div className="flex flex-col gap-[6px] mt-1">
-                <span className="relative block">
-                  <span className="flex h-2 rounded-full overflow-hidden gap-[2px]" aria-hidden="true">
-                    <span className="bg-scale-low" style={{ flex: 35 }} />
-                    <span className="bg-scale-mid" style={{ flex: 30 }} />
-                    <span className="bg-scale-high" style={{ flex: 35 }} />
-                  </span>
-                  <span aria-hidden="true" className="absolute -top-[2px] w-[3px] h-3 rounded-[2px] bg-ink -translate-x-1/2"
-                    style={{ left: `${overall}%` }} />
-                </span>
-                <span className="flex justify-between font-mono text-[11px] text-ink-3">
-                  <span>Low &lt;35</span><span>Medium</span><span>High ≥65</span>
-                </span>
-              </div>
-            </SummaryCard>
-            <SummaryCard label="Target role">
-              <span className="text-[17px] font-semibold">{target || "No target role set"}</span>
-              {targetScore ? (
-                <span className="flex items-baseline gap-2">
-                  <span className="font-mono text-[26px] font-medium">{targetScore.exposure_score}%</span>
-                  <span className={cx("text-[13px] font-semibold", RISK[riskLevel(targetScore.exposure_score)].text)}>{riskLevel(targetScore.exposure_score)}</span>
-                </span>
-              ) : (
-                <span className="text-[13px] leading-[1.5] text-ink-2">
-                  {target
-                    ? "Target roles aren't scored yet; the scores cover your skills and past job titles."
-                    : <>Add the roles you&apos;re aiming for in <TextLink href="/profile#prefs" className="text-[13px]">Job preferences</TextLink>.</>}
-                </span>
-              )}
-              {targetScore?.reasoning && <span className="text-[13px] leading-[1.5] text-ink-2">{targetScore.reasoning}</span>}
-            </SummaryCard>
-            <SummaryCard label="Most resilient skill">
-              {resilient && (
-                <>
-                  <span className="text-[17px] font-semibold">{resilient.skill}</span>
-                  <span className="flex items-baseline gap-2">
-                    <span className="font-mono text-[26px] font-medium">{resilient.exposure_score}%</span>
-                    <span className={cx("text-[13px] font-semibold", RISK[riskLevel(resilient.exposure_score)].text)}>{riskLevel(resilient.exposure_score)}</span>
-                  </span>
-                  <span className="text-[13px] leading-[1.5] text-ink-2">Lead with it on your CV and in interviews.</span>
-                </>
-              )}
-            </SummaryCard>
-          </div>
-        )}
-
-        {all.length > 0 && (
-          <section aria-labelledby="skills" className="bg-surface border border-border rounded-card overflow-hidden">
-            <div className="flex flex-wrap items-center justify-between gap-3 px-5 pt-4">
-              <h2 id="skills" className="m-0 text-[15.5px] font-semibold">Skill by skill</h2>
-              <PillTabs label="Filter by level" value={filter} onChange={setFilter}
-                items={(["All", "High", "Medium", "Low"] as Filter[]).map((k) => ({ key: k, label: `${k} ${counts[k]}` }))} />
-            </div>
-            <div className="relative overflow-x-auto mt-3">
-              <table className="w-full min-w-[760px] border-collapse text-[13.5px]">
-                <thead>
-                  <tr className="bg-subtle border-y border-track text-left">
-                    <th scope="col" className="micro font-normal px-5 py-[10px] w-[24%]">Skill</th>
-                    <th scope="col" className="micro font-normal px-3 py-[10px] w-[16%]">Group</th>
-                    <th scope="col" className="micro font-normal px-3 py-[10px] w-[240px]">Exposure</th>
-                    <th scope="col" className="micro font-normal pl-3 pr-5 py-[10px]">Why</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows.map((r) => {
-                    const l = riskLevel(r.exposure_score);
-                    return (
-                      <tr key={r.skill} className="border-b border-divider last:border-0 align-middle">
-                        <td className="px-5 py-[13px] font-medium">{r.skill}</td>
-                        <td className="px-3 py-[13px] text-ink-2">{groupOf.get(r.skill.toLowerCase()) ?? "–"}</td>
-                        <td className="px-3 py-[13px]">
-                          <span className="flex items-center gap-[10px]">
-                            <span className="flex-1 block h-[6px] rounded-full bg-track overflow-hidden" aria-hidden="true">
-                              <span className={cx("block h-full rounded-full", RISK[l].bar)} style={{ width: `${r.exposure_score}%` }} />
-                            </span>
-                            <span className={cx("font-mono text-[12px] font-semibold min-w-20", RISK[l].text)}>{r.exposure_score} {l}</span>
-                          </span>
-                        </td>
-                        <td className="pl-3 pr-5 py-[13px] text-ink-2 leading-[1.45]">{r.reasoning || "–"}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </section>
+        ) : (
+          <>
+            {targetRoles.length > 0 && <RoleList id="target-roles" title="Roles you're aiming for" roles={targetRoles} />}
+            {exposure.data?.evidence && <Evidence evidence={exposure.data.evidence} />}
+            {pastRoles.length > 0 && <RoleList id="past-roles" title="Roles you've done" roles={pastRoles} />}
+          </>
         )}
 
         <section aria-labelledby="road" className="flex flex-col gap-[14px]">
@@ -222,8 +172,8 @@ export default function CareersPage() {
                 {(roadmap?.target || target) ? `Roadmap to ${roadmap?.target || target}` : "Your roadmap"}
               </h2>
               <span className="text-[13px] text-ink-3">
-                Six skills that hold their value as AI takes on routine work.
-                {roadmap ? ` Generated ${shortDate(roadmap.at)} from your persona.` : ""}
+                Six skills to build next, based on your persona and target role.
+                {roadmap ? ` Generated ${shortDate(roadmap.at)}.` : ""}
               </span>
             </div>
             <button type="button" onClick={generate} disabled={generating} className={buttonClass("primary", "top")}>

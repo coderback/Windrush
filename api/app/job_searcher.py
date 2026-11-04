@@ -25,7 +25,7 @@ from . import http_client
 from . import jobs_db
 from . import net_guard
 from .company_names import normalise_company_name
-from .risk_scorer import occupation_exposure
+from .risk_scorer import exposure_fields
 
 logger = logging.getLogger("windrush.job_searcher")
 
@@ -59,8 +59,7 @@ def _load_fixture() -> list[dict]:
     jobs = json.loads(_FIXTURE_PATH.read_text())
     for job in jobs:
         job["source"] = "fixture"  # mock data: shown as a fallback, never persisted (see discovery.py)
-        if "exposure_score" not in job:
-            job["exposure_score"] = round(occupation_exposure(job["title"]), 3)
+        job.update(exposure_fields(job["title"]))
     return jobs
 
 
@@ -68,8 +67,7 @@ _FIXTURE: list[dict] = _load_fixture()
 
 
 def _score_and_shape(raw: dict) -> dict:
-    if "exposure_score" not in raw:
-        raw["exposure_score"] = round(occupation_exposure(raw.get("title", "")), 3)
+    raw.update(exposure_fields(raw.get("title", "")))
     return raw
 
 
@@ -447,7 +445,7 @@ async def scrape_job_from_url(url: str) -> dict:
         "salary_max": salary_max,
         "source": "user-url",
     }
-    job["exposure_score"] = round(occupation_exposure(job["title"]), 3)
+    job.update(exposure_fields(job["title"]))
     return job
 
 
@@ -623,7 +621,7 @@ async def _scrape_one_page(page, url: str, company: str, keywords: list[str]) ->
                 "url": href,
                 "salary_min": None,
                 "salary_max": None,
-                "exposure_score": round(occupation_exposure(title), 3),
+                **exposure_fields(title),
             })
         return jobs
     except Exception as exc:
@@ -974,8 +972,8 @@ async def _fetch_greenhouse(slug: str, company: str, keywords: list[str]) -> lis
         async with http_client.async_client(timeout=8.0) as client:
             resp = await client.get(url)
             resp.raise_for_status()
-        # Big boards return every posting's full HTML (several MB); decoding + HTML-to-text +
-        # exposure scoring is ~1s of CPU, so do it off the event loop.
+        # Big boards return every posting's full HTML (several MB); decoding + HTML-to-text
+        # is ~1s of CPU, so do it off the event loop.
         return await asyncio.to_thread(_greenhouse_jobs, resp.content, company, keywords)
     except Exception:
         return []
@@ -997,7 +995,7 @@ def _greenhouse_jobs(raw: bytes, company: str, keywords: list[str]) -> list[dict
             "url": item.get("absolute_url", ""),
             "salary_min": None,
             "salary_max": None,
-            "exposure_score": round(occupation_exposure(title), 3),
+            **exposure_fields(title),
         })
     return jobs
 
@@ -1026,7 +1024,7 @@ async def _fetch_ashby(slug: str, company: str, keywords: list[str]) -> list[dic
                 "url": item.get("jobUrl", ""),
                 "salary_min": None,
                 "salary_max": None,
-                "exposure_score": round(occupation_exposure(title), 3),
+                **exposure_fields(title),
             })
         return jobs
     except Exception:
@@ -1058,7 +1056,7 @@ async def _fetch_lever(slug: str, company: str, keywords: list[str], eu: bool = 
                 "url": item.get("hostedUrl", ""),
                 "salary_min": None,
                 "salary_max": None,
-                "exposure_score": round(occupation_exposure(title), 3),
+                **exposure_fields(title),
             })
         return jobs
     except Exception:
@@ -1091,7 +1089,7 @@ async def _fetch_workable(slug: str, company: str, keywords: list[str]) -> list[
                 "url": item.get("url", ""),
                 "salary_min": None,
                 "salary_max": None,
-                "exposure_score": round(occupation_exposure(title), 3),
+                **exposure_fields(title),
             })
         return jobs
     except Exception:
@@ -1143,7 +1141,7 @@ async def _fetch_smartrecruiters(slug: str, company: str, keywords: list[str]) -
                         "salary_min": None,
                         "salary_max": None,
                         "source": "smartrecruiters",
-                        "exposure_score": round(occupation_exposure(title), 3),
+                        **exposure_fields(title),
                     })
                 if len(content) < limit:
                     break  # last page
@@ -1233,7 +1231,7 @@ async def _fetch_workday(slug: str, company: str, keywords: list[str], queries: 
                     "url": info.get("externalUrl") or f"{host}/{site}{posting['externalPath']}",
                     "salary_min": None,
                     "salary_max": None,
-                    "exposure_score": round(occupation_exposure(title), 3),
+                    **exposure_fields(title),
                 })
         return jobs
     except Exception as exc:
@@ -1307,7 +1305,7 @@ async def _fetch_oracle(slug: str, company: str, keywords: list[str], queries: l
                     "url": f"https://{host}/hcmUI/CandidateExperience/en/sites/{site}/job/{posting['Id']}",
                     "salary_min": None,
                     "salary_max": None,
-                    "exposure_score": round(occupation_exposure(title), 3),
+                    **exposure_fields(title),
                 })
         return jobs
     except Exception as exc:
@@ -1373,7 +1371,7 @@ async def _fetch_eightfold(slug: str, company: str, keywords: list[str], queries
                            or f"https://{tenant}.eightfold.ai/careers/job/{posting['id']}?domain={domain}",
                     "salary_min": None,
                     "salary_max": None,
-                    "exposure_score": round(occupation_exposure(title), 3),
+                    **exposure_fields(title),
                 })
         return jobs
     except Exception as exc:
@@ -1414,7 +1412,7 @@ def _teamtailor_jobs(raw: str, company: str, keywords: list[str]) -> list[dict]:
             "url": link,
             "salary_min": None,
             "salary_max": None,
-            "exposure_score": round(occupation_exposure(title), 3),
+            **exposure_fields(title),
         })
     return jobs
 
@@ -1422,7 +1420,7 @@ def _teamtailor_jobs(raw: str, company: str, keywords: list[str]) -> list[dict]:
 def _board_job(job_id: str, title: str, company: str, location: str, description_html: str, url: str) -> dict:
     return {"job_id": job_id, "title": title, "company": company, "location": location,
             "description": _html_to_text(description_html or "")[:_DESC_MAX], "url": url,
-            "salary_min": None, "salary_max": None, "exposure_score": round(occupation_exposure(title), 3)}
+            "salary_min": None, "salary_max": None, **exposure_fields(title)}
 
 
 async def _fetch_pinpoint(slug: str, company: str, keywords: list[str]) -> list[dict]:
@@ -1982,7 +1980,7 @@ async def _brave_search_one(client: httpx.AsyncClient, query: str) -> list[dict]
                 "url": url,
                 "salary_min": None,
                 "salary_max": None,
-                "exposure_score": round(occupation_exposure(title), 3),
+                **exposure_fields(title),
             })
         return jobs
     except Exception as exc:
@@ -2053,7 +2051,7 @@ async def _search_level4_workable(query: str, location: str) -> list[dict]:
             "url": item.get("url", ""),
             "salary_min": None,
             "salary_max": None,
-            "exposure_score": round(occupation_exposure(title), 3),
+            **exposure_fields(title),
         })
 
     logger.info("Level 4 (Workable): Found %d jobs for %r in %r", len(jobs), query, location)
@@ -2134,7 +2132,7 @@ async def _search_level4_adzuna(query: str, location: str) -> list[dict]:
                 "url": item.get("redirect_url", ""),
                 "salary_min": item.get("salary_min"),
                 "salary_max": item.get("salary_max"),
-                "exposure_score": round(occupation_exposure(title), 3),
+                **exposure_fields(title),
             })
         return jobs
 

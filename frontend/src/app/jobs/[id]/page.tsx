@@ -23,7 +23,7 @@ import { cacheFit, cachedFit, feedNeighbours, jobHref, recallJob } from "@/lib/j
 import { analyzeJob, postStream, readStream } from "@/lib/sse";
 import { discardJob, saveJob, trackedApplication } from "@/lib/actions";
 import { load, useResource } from "@/lib/store";
-import { fitVerdict, riskLevel, RISK } from "@/lib/status";
+import { fitVerdict, jobExposure, noScoreReason, riskLevel, RISK } from "@/lib/status";
 import { sponsorshipVerdict } from "@/lib/sponsorship";
 import type { Analysis, Application, FormAnswer, Job } from "@/lib/types";
 
@@ -61,9 +61,9 @@ function keptIssues(review: unknown): string[] {
 const LEVEL_MATCH: Record<string, string> = { strong: "strong", ok: "reasonable", reach: "a stretch" };
 
 const EXPOSURE_NOTE = {
-  Low: "Most of this role's work is hard to automate.",
-  Medium: "Routine parts of this role are automatable; judgement and ownership are not. Lean on the second in interviews.",
-  High: "Much of this role's routine work is automatable. Show judgement, ownership and people skills in interviews.",
+  Low: "AI is seen doing little of this work so far, which isn't the same as safe.",
+  Medium: "AI is already seen doing a fair part of this work.",
+  High: "AI is already seen doing much of this work.",
 };
 
 export default function JobDetailPage() {
@@ -331,7 +331,6 @@ export default function JobDetailPage() {
     form.append("job_email", "");
     form.append("job_password", "");
     form.append("cv_profile", JSON.stringify({}));
-    form.append("skill_risks", JSON.stringify([]));
     if (analysis?.fit_score != null) form.append("fit_score", String(analysis.fit_score));
     if (analysis?.level_match) form.append("level_match", analysis.level_match);
     if (analysis?.skill_gaps) form.append("skill_gaps", JSON.stringify(analysis.skill_gaps));
@@ -426,7 +425,7 @@ export default function JobDetailPage() {
   const exp = experienceLabel(job.years_min);
   const sponsor = sponsorship.view ? viewVerdict(sponsorship.view) : sponsorshipVerdict(job);
   const posted = longAgo(job.created_at ?? job.posted_at);
-  const exposure = job.exposure_score != null ? Math.round(job.exposure_score <= 1 ? job.exposure_score * 100 : job.exposure_score) : null;
+  const exposure = jobExposure(job);
   const otherHere = (apps.data ?? []).filter((a) =>
     a.company.toLowerCase() === job.company.toLowerCase() && a.job_title.toLowerCase() !== job.title.toLowerCase()).length;
 
@@ -800,16 +799,22 @@ export default function JobDetailPage() {
                 <p className="m-0 text-[13px] leading-[1.5] text-ink-2">{sponsor.why}</p>
               </section>
             )}
-            {exposure != null && (
-              <section aria-labelledby="exposure" className="bg-surface border border-border rounded-card p-[18px] flex flex-col gap-[10px]">
-                <div className="flex justify-between items-center gap-2">
-                  <h2 id="exposure" className="m-0 text-[15px] font-semibold">AI exposure of this role</h2>
+            <section aria-labelledby="exposure" className="bg-surface border border-border rounded-card p-[18px] flex flex-col gap-[10px]">
+              <div className="flex justify-between items-center gap-2">
+                <h2 id="exposure" className="m-0 text-[15px] font-semibold">AI exposure of this role</h2>
+                {exposure != null ? (
                   <span className={cx("font-mono text-[13px] font-semibold", RISK[riskLevel(exposure)].text)}>{exposure}% · {riskLevel(exposure)}</span>
-                </div>
-                <Bar value={exposure} className={RISK[riskLevel(exposure)].bar} />
-                <p className="m-0 text-[13px] leading-[1.5] text-ink-2">{EXPOSURE_NOTE[riskLevel(exposure)]}</p>
-              </section>
-            )}
+                ) : (
+                  <span className="text-[13px] text-ink-3">Not enough data</span>
+                )}
+              </div>
+              {exposure != null && <Bar value={exposure} className={RISK[riskLevel(exposure)].bar} />}
+              <p className="m-0 text-[13px] leading-[1.5] text-ink-2">
+                {exposure != null
+                  ? `${EXPOSURE_NOTE[riskLevel(exposure)]} Anthropic's published figure for ${job.exposure_occupation}, not a forecast.`
+                  : noScoreReason(job.exposure_occupation)}
+              </p>
+            </section>
           </aside>
         </div>
       </Page>

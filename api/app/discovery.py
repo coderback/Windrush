@@ -50,7 +50,7 @@ _running: dict[_Pair, asyncio.Task] = {}
 _finished_at: dict[_Pair, float] = {}
 
 # The live search runs in worker *processes*: it fans out to ~70 job boards and does a lot of
-# CPU work on the results (multi-MB JSON, HTML-to-text, exposure scoring). In threads that
+# CPU work on the results (multi-MB JSON, HTML-to-text). In threads that
 # work contends for the GIL with the event loop and stalls the API for ~1s at a time; in a
 # separate process it can't. 'spawn' avoids forking a process that has live threads.
 _pool: ProcessPoolExecutor | None = None

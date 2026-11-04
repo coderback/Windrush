@@ -10,11 +10,11 @@ import {
 import { useResource } from "@/lib/store";
 import { daysSince, greeting, longAgo, pct, shortAgo } from "@/lib/format";
 import { firstName } from "@/lib/persona";
-import { riskLevel, RISK, REPLIED, SENT, statusMeta, stageOf } from "@/lib/status";
+import { REPLIED, SENT, statusMeta, stageOf } from "@/lib/status";
 import { sponsorshipBadges } from "@/lib/sponsorship";
 import { levelLabel } from "@/lib/format";
 import { jobHref, rememberFeed } from "@/lib/jobs";
-import type { Application, Job, Persona, SkillRisk } from "@/lib/types";
+import type { Application, CareerExposure, Job, Persona } from "@/lib/types";
 
 interface JobsPage { jobs: Job[]; sponsorship?: string }
 
@@ -71,7 +71,7 @@ function Kpi({ label, value, bars, accent = "ink", delta, deltaTone = "teal", no
 export default function DashboardPage() {
   const persona = useResource<Persona>("/api/persona");
   const apps = useResource<Application[]>("/api/applications");
-  const risks = useResource<{ skill_risks?: SkillRisk[] }>("/api/score-skills", { init: { method: "POST" }, staleMs: Infinity });
+  const exposure = useResource<CareerExposure>("/api/careers/exposure");
   const feed = useResource<JobsPage>("/api/jobs?page=1&limit=4");
 
   const list = useMemo(() => apps.data ?? [], [apps.data]);
@@ -130,10 +130,9 @@ export default function DashboardPage() {
     stats.followUps.length ? `${stats.followUps.length} follow-up${stats.followUps.length === 1 ? " is" : "s are"} due.` : "",
   ].filter(Boolean).join(" ");
 
-  const skillRisks = risks.data?.skill_risks ?? [];
-  const overall = skillRisks.length
-    ? Math.round(skillRisks.reduce((n, s) => n + s.exposure_score, 0) / skillRisks.length) : null;
-  const topRisks = [...skillRisks].sort((a, b) => b.exposure_score - a.exposure_score).slice(0, 4);
+  const allRoles = exposure.data?.roles ?? [];
+  const targetRoles = allRoles.filter((r) => r.kind === "target");
+  const exposureRoles = (targetRoles.length ? targetRoles : allRoles).slice(0, 4);
 
   const matches = feed.data?.jobs ?? [];
 
@@ -267,31 +266,22 @@ export default function DashboardPage() {
               <SectionTitle id="risk">AI exposure</SectionTitle>
               <TextLink href="/careers">Roadmap</TextLink>
             </div>
-            {risks.loading ? (
+            {exposure.loading ? (
               <div className="flex flex-col gap-3">
-                <Skeleton className="h-10 w-40 rounded-[8px]" />
                 {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-7 rounded-[6px]" />)}
               </div>
-            ) : risks.error ? (
-              <Callout title="Couldn't score your skills">{risks.error}</Callout>
-            ) : overall == null ? (
+            ) : exposure.error ? (
+              <Callout title="Couldn't load AI exposure">{exposure.error}</Callout>
+            ) : exposureRoles.length === 0 ? (
               <p className="m-0 text-[13.5px] text-ink-2">
-                Add skills to your persona to see how exposed they are. <TextLink href="/profile#skills">Add skills</TextLink>
+                Add the roles you&apos;re aiming for to see how exposed they are. <TextLink href="/profile#prefs">Add roles</TextLink>
               </p>
             ) : (
               <>
-                <div className="flex items-center gap-3">
-                  <span className="font-mono text-[40px] font-medium tracking-[-0.04em] leading-none">{overall}%</span>
-                  <span className="flex flex-col gap-1">
-                    <span className={cx("self-start h-[22px] px-[9px] rounded-full text-[12px] font-semibold flex items-center", RISK[riskLevel(overall)].chip)}>
-                      {riskLevel(overall)}
-                    </span>
-                    <span className="text-[12.5px] text-ink-3">across {skillRisks.length} skills in your persona</span>
-                  </span>
-                </div>
                 <div className="flex flex-col gap-3">
-                  {topRisks.map((r) => <RiskBar key={r.skill} label={r.skill} score={r.exposure_score} />)}
+                  {exposureRoles.map((r) => <RiskBar key={r.title} label={r.title} score={r.exposure} />)}
                 </div>
+                <p className="m-0 text-[12.5px] text-ink-3">Anthropic&apos;s published figures for these occupations, not forecasts.</p>
               </>
             )}
           </section>

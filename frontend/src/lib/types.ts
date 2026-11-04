@@ -11,7 +11,8 @@ export interface Job {
   salary_max?: number | null;
   description?: string;
   url?: string;
-  exposure_score?: number;
+  exposure_score?: number | null;
+  exposure_occupation?: string | null;
   semantic_score?: number;
   tags?: string | string[];
   source?: string;
@@ -86,11 +87,31 @@ export interface SavedAnswer {
   updated_at: string;
 }
 
-export interface SkillRisk {
-  skill: string;
-  exposure_score: number;
-  risk_label: string;
-  reasoning?: string;
+export interface RoleExposure {
+  title: string;
+  kind: "target" | "past";
+  occupation: string | null;
+  exposure: number | null;
+}
+
+export interface TaskEvidence {
+  task: string;
+  handed_to_ai: number;
+}
+
+export interface OccupationEvidence {
+  role: string;
+  occupation: string;
+  most_handed_to_ai: TaskEvidence[];
+  least_handed_to_ai: TaskEvidence[];
+  tasks_seen: number;
+  tasks_listed: number;
+  month: string;
+}
+
+export interface CareerExposure {
+  roles: RoleExposure[];
+  evidence: OccupationEvidence | null;
 }
 
 export interface Analysis {

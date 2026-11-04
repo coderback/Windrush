@@ -395,7 +395,7 @@ def test_the_apply_stream_never_carries_the_password(monkeypatch, user):
 
     async def run():
         return "".join([chunk async for chunk in agent.run_apply(
-            user, "j", "https://jobs.example.com/1", "", [], "sid", _review_queue("submit"), None,
+            user, "j", "https://jobs.example.com/1", "", "sid", _review_queue("submit"), None,
             job_email="ada@example.com", job_password=PASSWORD)])
     stream = asyncio.run(run())
     assert "Needs your input" in stream and '"submitted": true' in stream

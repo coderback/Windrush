@@ -10,7 +10,7 @@ Built with FastAPI, Next.js, [browser-use](https://github.com/browser-use/browse
 
 1. **Accounts & Persona** — sign up, then build a rich persona (contact details, preferences, skills, work history, education, projects, certifications, screening answers, behavioural stories, custom directives).
 2. **Upload a CV (PDF)** — parsed into structured data and merged into your persona; the PDF is kept so the browser agent can attach it.
-3. **AI Exposure Risk** — scores each skill and job title against the Anthropic Economic Index / O\*NET task-penetration data (~18 000 occupational tasks), with LLM-generated reasoning.
+3. **AI Exposure** — shows the Anthropic Economic Index's published score for the occupation each job or target role belongs to, or "not enough data".
 4. **Job Feed** — searches a local job store with real filters (search terms, role/domain tags, level, location, remote, visa sponsorship, experience asked for, degree requirement) and ranks results by semantic similarity to your persona. When results are thin, live discovery across job boards runs in the background and the feed fills in as it finishes.
 5. **Paste any job link** — scrape an arbitrary listing into the same analysis flow.
 6. **Per-job analysis** — fit score (LLM semantic match) and AI risk for a single role.
@@ -79,11 +79,12 @@ The API refuses to start without `JWT_SECRET` and `CREDENTIALS_KEY`.
 
 ### 2. Data files
 
-The economic index and task-penetration data must be present in `./data/` (bind-mounted read-only at `/data`):
+The economic index and occupation data must be present in `./data/` (bind-mounted read-only at `/data`):
 
 ```
-data/economic_index.json   — Anthropic Economic Index (O*NET occupation exposure scores)
-data/task_penetration.csv  — O*NET task-level AI penetration scores (~18 000 rows)
+data/economic_index.json       — Anthropic Economic Index (published exposure score per occupation)
+data/occupation_titles.csv     — O*NET job titles and the occupation each belongs to
+data/occupation_evidence.json  — tasks people hand to AI most and least, per occupation
 ```
 
 ### 3. Run
@@ -168,13 +169,13 @@ Long-running endpoints stream **Server-Sent Events (SSE)**. Protected endpoints 
 
 ## AI Exposure Risk Scoring
 
-Scores are deterministic lookups against O\*NET data; the LLM only adds human-readable reasoning afterwards. `score_ai_risk` resolves each skill/title in this order (`agent.py`, `risk_scorer.py`):
+Every score is the figure the Anthropic Economic Index publishes for an occupation; nothing is estimated and no model is involved (`risk_scorer.py`). There are no per-skill scores, because the index has none.
 
-1. **Curated exposure table** — a hand-tuned map of common tech skills and job titles.
-2. **Keyword task search** — average penetration of all O\*NET tasks containing the term.
-3. **TF-IDF semantic match** — cosine similarity against ~1 350 non-zero-penetration task descriptions; requires all content words to appear.
-4. **O\*NET word-overlap** — stems and noise-strips the title, then matches the occupation with the most shared content words.
-5. **Default 0.5** — neutral when no data differentiates.
+1. **Title to occupation** — words that say nothing about the job (graduate, 2027, programme) are dropped, then the title is looked up in O\*NET's list of job titles, plus a short list for titles O\*NET leaves out or spreads across occupations (backend, DevOps, ML engineer). A longer title can contain a known one; if it contains two from different occupations it isn't scored.
+2. **Not enough data** — shown when a title doesn't clearly belong to one occupation, or when the index publishes a zero, which means too little usage was seen rather than that the job is safe.
+3. **Read at request time** — job scores aren't taken from the stored column, so a data update applies to every job at once.
+
+The score isn't a forecast: it comes from 2025 Claude usage and US occupation data, and Anthropic found only a slight link to projected job growth. Jobs aren't ranked by it. The roadmap gets a short summary of the tasks people hand to AI most and least in the target occupation (one month of chat use) as a hint, and is told not to quote its figures.
 
 Labels: **High ≥ 65 %**, **Medium 35–65 %**, **Low < 35 %**. **Job fit** (`score_job_fit`) is an LLM semantic analysis returning `fit_score` (0–100), `level_match` (`strong`/`ok`/`reach`), `matched_skills`, `skill_gaps` and a one-line rationale.
 
@@ -235,7 +236,8 @@ Labels: **High ≥ 65 %**, **Medium 35–65 %**, **Low < 35 %**. **Job fit** (`s
 | File | Description |
 |---|---|
 | `data/economic_index.json` | 756 O\*NET occupations → `overall_exposure` (0–1). Source: Anthropic Economic Index. |
-| `data/task_penetration.csv` | ~18 000 O\*NET task descriptions → `penetration` score. |
+| `data/occupation_titles.csv` | ~62 000 job titles → occupation. From O\*NET 30.2 (U.S. Department of Labor, Employment and Training Administration), used under CC BY 4.0. Built by `scripts/build_occupation_titles.py`. |
+| `data/occupation_evidence.json` | 103 occupations → the tasks handed to AI most and least, from the index's chat usage. Built by `scripts/build_occupation_evidence.py`. |
 | `api/app/jobs_fixture.json` | Mock job listings shown only when every live source is empty. |
 | `applications.db` (SQLite, `/appdata`) | `users` (bcrypt password hashes, persona JSON, encrypted job-site password, onboarding flag) + `applications`. |
 | `jobs.db` (SQLite, `/appdata`) | Cached jobs with semantic vectors, filled by the scheduled collection and the feed's discovery; jobs no source has listed for 3 days are expired. Also the collection runs and the sponsor register. |

@@ -5,7 +5,7 @@ import { useState } from "react";
 import Icon from "@/components/ui/Icon";
 import { buttonClass, Callout, Chip, CompanyMark, cx, FactTile, FitRing, RiskBar, Spinner } from "@/components/ui/kit";
 import { degreeLabel, experienceLabel, jobKey, jobSalary, levelLabel, longAgo, workSetting } from "@/lib/format";
-import { fitVerdict } from "@/lib/status";
+import { fitVerdict, jobExposure } from "@/lib/status";
 import { sponsorshipVerdict } from "@/lib/sponsorship";
 import { cacheFit, cachedFit, jobHref, rememberJob } from "@/lib/jobs";
 import { analyzeJob } from "@/lib/sse";
@@ -146,9 +146,7 @@ export default function JobPreview({ job, onDiscard, onOpen }: {
           <span className="text-[13px] font-semibold">Visa sponsorship: {sponsor.verdict.toLowerCase()}</span>
           <span className="text-[13px] leading-[1.5] text-ink-2">{sponsor.why}</span>
         </div>
-        {job.exposure_score != null && (
-          <RiskBar label="AI exposure of this role" score={Math.round(job.exposure_score <= 1 ? job.exposure_score * 100 : job.exposure_score)} />
-        )}
+        <RiskBar label="AI exposure of this role" score={jobExposure(job)} />
       </div>
 
       <div className="flex flex-wrap gap-2 px-5 py-[14px] border-t border-divider bg-subtle">

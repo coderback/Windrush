@@ -27,6 +27,7 @@ from . import doc_render
 from . import doc_check
 from . import jobs_db
 from . import net_guard
+from . import risk_scorer
 from . import seniority
 from . import sponsor_register
 from . import job_attributes
@@ -272,7 +273,6 @@ async def apply(
     job_url: str = Form(default=""),
     cover_letter: str = Form(default=""),
     cv_profile: str = Form(default="{}"),
-    skill_risks: str = Form(default="[]"),
     job_email: str = Form(default=""),
     job_password: str = Form(default=""),
     tailored_cv: str = Form(default=""),
@@ -285,7 +285,7 @@ async def apply(
     location: str = Form(default=""),
     job_description: str = Form(default=""),
     composite_score: float = Form(default=0.0),
-    exposure_score: float = Form(default=0.5),
+    exposure_score: float | None = Form(default=None),
     fit_score: float = Form(default=0.0),
     level_match: str = Form(default="ok"),
     skill_gaps: str = Form(default="[]"),
@@ -295,10 +295,6 @@ async def apply(
         profile = json.loads(cv_profile)
     except json.JSONDecodeError:
         profile = {}
-    try:
-        risks = json.loads(skill_risks)
-    except json.JSONDecodeError:
-        risks = []
     try:
         gaps = json.loads(skill_gaps)
     except json.JSONDecodeError:
@@ -359,7 +355,7 @@ async def apply(
         try:
             # aclosing: if the client disconnects, close run_apply (and the browser beneath it) now
             async with aclosing(run_apply(
-                current_user.id, job_id, job_url, cover_letter, risks, session_id, q, fq,
+                current_user.id, job_id, job_url, cover_letter, session_id, q, fq,
                 job_email=effective_email, job_password=effective_password, cv_path=cv_path,
                 cover_letter_path=letter_path, answerer=answerer,
             )) as chunks:
@@ -491,7 +487,7 @@ async def save_job(
         cover_letter="",
         score_data={
             "composite_score": 0.0,
-            "exposure_score": 0.5,
+            "exposure_score": None,
             "fit_score": 0.0,
             "skill_gaps": [],
             "level_match": "ok"
@@ -750,18 +746,6 @@ async def analyze_job(
     async def gen():
         yield _sse_json("start", {"message": "Analysing job…"})
 
-        # Score AI risk for persona skills
-        all_skills: list[str] = []
-        for cat in persona.get("skills", []):
-            all_skills.extend(cat.get("skills", []))
-        for exp in persona.get("history", []):
-            title = exp.get("title", "")
-            if title:
-                all_skills.append(title)
-        if all_skills:
-            risk_result = await execute_tool("score_ai_risk", {"skills": list(set(all_skills))})
-            yield _sse_json("skill_risks", risk_result)
-
         # Score job fit
         fit_result = await execute_tool("score_job_fit", {"jobs": [job], "persona": persona})
         yield _sse_json("job_fit", fit_result)
@@ -812,23 +796,12 @@ async def generate_tailored_cv_endpoint(
 
 # ── Careers ───────────────────────────────────────────────────────────────────
 
-@app.post("/score-skills")
-async def score_skills(
+@app.get("/careers/exposure")
+async def careers_exposure(
     current_user: Annotated[auth.User, Depends(auth.get_current_user)],
 ):
-    """Non-streaming: score AI risk for all skills in the user's persona."""
-    persona = tracker.get_user_persona(current_user.id)
-    all_skills: list[str] = []
-    for cat in persona.get("skills", []):
-        all_skills.extend(cat.get("skills", []))
-    for exp in persona.get("history", []):
-        title = exp.get("title", "")
-        if title:
-            all_skills.append(title)
-    if not all_skills:
-        return {"skill_risks": []}
-    result = await execute_tool("score_ai_risk", {"skills": list(set(all_skills))})
-    return result
+    """The published AI exposure of the roles in the user's persona. A lookup: no model is involved."""
+    return risk_scorer.career_exposure(tracker.get_user_persona(current_user.id))
 
 
 @app.post("/careers/roadmap")
@@ -837,15 +810,10 @@ async def careers_roadmap(  # noqa: E302
 ):
     """SSE: generate a skill development roadmap from the user's persona."""
     persona = tracker.get_user_persona(current_user.id)
-    all_skills: list[str] = []
-    for cat in persona.get("skills", []):
-        all_skills.extend(cat.get("skills", []))
 
     async def gen():
         yield _sse_json("start", {"message": "Building your skill roadmap…"})
-        risk_result = await execute_tool("score_ai_risk", {"skills": list(set(all_skills)) or ["software engineering"]})
-        skill_risks = risk_result.get("skill_risks", [])
-        result = await execute_tool("generate_skill_roadmap", {"skill_risks": skill_risks, "persona": persona})
+        result = await execute_tool("generate_skill_roadmap", {"persona": persona})
         yield _sse_json("roadmap", result)
         yield _sse_json("done", {"message": "Roadmap ready"})
 
