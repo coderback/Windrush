@@ -1,18 +1,19 @@
 """
 Does Windrush read job emails right, and leave alone what isn't about an application?
 
-24 emails as graduate applicants get them (applicant tracking systems, company recruiters, agencies, job
+27 emails as graduate applicants get them (applicant tracking systems, company recruiters, agencies, job
 boards, newsletters), each labelled with what it means and which application it is about. Every run writes
 evals/last_email_run.json.
 
 The bar: no email is matched to the wrong application; nothing unrelated (job alerts, newsletters, an agency's
 pitch) changes an application; every confident reading that would change a status on its own is correct.
-How many labelled emails were read correctly is reported, and must be at least 21 of 24.
+How many labelled emails were read correctly is reported, and must be at least 24 of 27, and tests must carry their state, deadline and length.
 """
 import asyncio
 import json
 import pathlib
 import time
+from datetime import date, timedelta
 
 from app import gmail
 
@@ -94,7 +95,19 @@ EMAILS = [
     ("Monzo <noreply@candidates.workablemail.com>", "Complete our anonymous survey - Monzo",
      "Monzo Hi Timothy, Thanks for applying to Monzo. To improve our hiring practices, we are asking that you complete "
      "our anonymous survey. It's optional, but your help would be greatly appreciated.", "other", "monzo"),
+    ("Optiver <recruitment@optiver.com>", "Invitation for assessments",
+     "Dear Timothy, thanks again for your interest in the Graduate Software Developer role at Ocado Technology. Please complete "
+     "the assessments within 7 days. The full assessment takes approximately 1 hour 42 minutes.", "assessment", "ocado"),
+    ("Your Hiring Team <no-reply@hirevue.com>", "Reminder to complete your assessment with Catapult",
+     "Dear Timothy, we noticed you have not yet completed the assessment for Graduate Software Engineer at Catapult. Please "
+     "complete it to progress your application.", "assessment", "catapult"),
+    ("TestGorilla <no-reply@testgorilla.com>", "Your assessment was submitted, what's next?",
+     "Hi Timothy, your assessment for Globex Corporation was submitted. They'll be in touch about next steps.", "other", None),
 ]
+
+# Test emails above: what the reader should say about each one, with days from today for the deadline
+TESTS = {"Invitation for assessments": ("requested", 7, 102), "Reminder to complete your assessment with Catapult": ("requested", None, None),
+         "Your assessment was submitted, what's next?": ("completed", None, None)}
 
 
 def _email(n, sender, subject, body):
@@ -118,6 +131,7 @@ def test_emails_are_read_and_matched_right():
             target, safe = (gmail.proposed_change((reading["application"] or {}).get("status", ""), reading["kind"])
                             if reading["application"] else (None, False))
             out.append({"subject": subject, "expected": [kind, app_id], "got": [reading["kind"], got],
+                        "test": [reading.get("assessment"), reading.get("deadline"), reading.get("minutes")],
                         "confidence": reading["confidence"], "summary": reading.get("summary", ""),
                         "auto": bool(target and safe and reading["confidence"] == "high"), "relevant": relevant})
         return out
@@ -136,4 +150,13 @@ def test_emails_are_read_and_matched_right():
     assert not wrong_app, wrong_app
     assert not unrelated_changed, unrelated_changed
     assert not wrong_auto, wrong_auto
-    assert right >= 21
+    assert right >= 24
+    today = date.today()
+    for r in results:
+        if r["subject"] in TESTS:
+            state, days, minutes = TESTS[r["subject"]]
+            assert r["test"][0] == state, r
+            if days is not None:
+                assert r["test"][1] in ((today + timedelta(days=days)).isoformat(), (today + timedelta(days=days - 1)).isoformat()), r
+            if minutes is not None:
+                assert r["test"][2] == minutes, r

@@ -54,6 +54,7 @@ test("logging in keeps the token and opens the dashboard", async ({ page }) => {
     "GET /api/onboarding/status": { complete: true },
     "GET /api/careers/exposure": { roles: [], evidence: null },
     "GET /api/jobs": { jobs: [], has_more: false, discovering: false, sponsorship: "any" },
+    "GET /api/assessments": { open: [], record: { done: 0, moved_on: 0, not_passed: 0, waiting: 0, missed: 0 } },
   });
   await page.goto("/login");
   await page.getByLabel("Email").fill("sam@example.com");
@@ -823,4 +824,61 @@ test("a job page never shows the old placeholder score", async ({ page }) => {
   await expect(section.getByText("Not enough data")).toBeVisible();
   await expect(section.getByText(/50%/)).toHaveCount(0);
   api.expectAllMocked();
+});
+
+test("Home lists assessments by deadline, and marking one done can be undone", async ({ page }) => {
+  await signIn(page);
+  const open = [
+    { key: "app:1", company: "Optiver", role: "Graduate Software Engineer", tracked: true, deadline: "2030-01-08", days_left: 1, minutes: 102,
+      summary: "Asks you to complete assessments.", gmail_id: "abc", emails: 2 },
+    { key: "co:bank", company: "Bank of England", role: "", tracked: false, deadline: null, days_left: null, minutes: null,
+      summary: "Asks you to take a test.", gmail_id: "def", emails: 1 },
+  ];
+  const record = { done: 0, moved_on: 0, not_passed: 0, waiting: 0, missed: 0 };
+  const marks: unknown[] = [];
+  let current = { open, record };
+  const api = await mockApi(page, {
+    ...SHELL,
+    "GET /api/careers/exposure": { roles: [], evidence: null },
+    "GET /api/jobs": { jobs: [], has_more: false, discovering: false, sponsorship: "any" },
+    "GET /api/assessments": () => current,
+    "POST /api/assessments/mark": (request) => {
+      const body = request.postDataJSON();
+      marks.push(body);
+      current = body.state === "open" ? { open, record } : { open: [open[1]], record: { ...record, done: 1, waiting: 1 } };
+      return current;
+    },
+  });
+  await page.goto("/dashboard");
+
+  const card = page.getByRole("region", { name: "Assessments to do" });
+  await expect(card.getByRole("listitem")).toHaveCount(2);
+  await expect(card.getByRole("listitem").first()).toContainText("Optiver");
+  await expect(card.getByText("Due tomorrow")).toBeVisible();
+  await expect(card.getByText("about 1 h 42 min")).toBeVisible();
+  await expect(card.getByText("No deadline given")).toBeVisible();
+  await expect(card.getByRole("link", { name: "Open email" }).first()).toHaveAttribute("href", /#all\/abc$/);
+
+  await card.getByRole("button", { name: "Mark the Optiver test as done" }).click();
+  await expect(card.getByRole("listitem")).toHaveCount(1);
+  await expect(card.getByText("1 done (1 waiting)")).toBeVisible();
+  expect(marks.at(-1)).toEqual({ key: "app:1", state: "done" });
+
+  await card.getByRole("button", { name: "Undo" }).click();
+  await expect(card.getByRole("listitem")).toHaveCount(2);
+  expect(marks.at(-1)).toEqual({ key: "app:1", state: "open" });
+  api.expectAllMocked();
+});
+
+test("Home shows no assessments card when there is nothing to do or report", async ({ page }) => {
+  await signIn(page);
+  await mockApi(page, {
+    ...SHELL,
+    "GET /api/careers/exposure": { roles: [], evidence: null },
+    "GET /api/jobs": { jobs: [], has_more: false, discovering: false, sponsorship: "any" },
+    "GET /api/assessments": { open: [], record: { done: 0, moved_on: 0, not_passed: 0, waiting: 0, missed: 0 } },
+  });
+  await page.goto("/dashboard");
+  await expect(page.getByRole("heading", { name: "AI exposure" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Assessments to do" })).toHaveCount(0);
 });

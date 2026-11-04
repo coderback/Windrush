@@ -930,7 +930,23 @@ def _gmail_tables(con: sqlite3.Connection) -> None:
         proposed       TEXT,
         decision       TEXT NOT NULL,
         status_before  TEXT,
-        created_at     TEXT NOT NULL
+        created_at     TEXT NOT NULL,
+        assessment     TEXT NOT NULL DEFAULT '',
+        deadline       TEXT,
+        minutes        INTEGER
+    )""")
+    # Added to existing databases here, since every use of these tables comes through this function
+    columns = {row[1] for row in con.execute("PRAGMA table_info(email_events)")}
+    for column, definition in (("assessment", "TEXT NOT NULL DEFAULT ''"), ("deadline", "TEXT"), ("minutes", "INTEGER")):
+        if column not in columns:
+            con.execute(f"ALTER TABLE email_events ADD COLUMN {column} {definition}")
+    # What the user said about a test, by application (see assessments.py)
+    con.execute("""CREATE TABLE IF NOT EXISTS assessment_marks (
+        user_id   TEXT NOT NULL,
+        key       TEXT NOT NULL,
+        state     TEXT NOT NULL,
+        marked_at TEXT NOT NULL,
+        PRIMARY KEY (user_id, key)
     )""")
     con.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_email_events_msg ON email_events(user_id, gmail_id)")
 
@@ -1014,12 +1030,13 @@ def add_email_event(user_id: str, event: dict) -> str:
     with con:
         con.execute(
             "INSERT OR IGNORE INTO email_events (id, user_id, gmail_id, thread_id, received_at, sender, subject, snippet, "
-            "kind, company, role, summary, application_id, proposed, decision, status_before, created_at) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "kind, company, role, summary, application_id, proposed, decision, status_before, created_at, assessment, deadline, minutes) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (event_id, user_id, event["gmail_id"], event.get("thread_id"), event["received_at"], event["sender"][:300],
              event["subject"][:300], event.get("snippet", "")[:300], event["kind"], event.get("company", "")[:200],
              event.get("role", "")[:200], event.get("summary", "")[:300], event.get("application_id"),
-             event.get("proposed"), event["decision"], event.get("status_before"), _now()))
+             event.get("proposed"), event["decision"], event.get("status_before"), _now(),
+             event.get("assessment") or "", event.get("deadline"), event.get("minutes")))
     con.close()
     return event_id
 
@@ -1034,6 +1051,40 @@ def list_email_events(user_id: str, limit: int = 200) -> list[dict]:
                        (user_id, limit)).fetchall()
     con.close()
     return [dict(r) for r in rows]
+
+
+def assessment_events(user_id: str) -> list[dict]:
+    """Emails about a test and the verdicts that can end one, oldest first, with their application's details."""
+    con = _gmail_con()
+    con.row_factory = sqlite3.Row
+    rows = con.execute("SELECT e.gmail_id, e.received_at, e.kind, e.company, e.role, e.summary, e.application_id, e.assessment, "
+                       "e.deadline, e.minutes, a.company AS app_company, a.job_title AS app_title, a.status AS app_status "
+                       "FROM email_events e LEFT JOIN applications a ON a.id = e.application_id AND a.user_id = e.user_id "
+                       "WHERE e.user_id=? AND e.decision NOT IN ('ignored', 'dismissed', 'undone') "
+                       "AND (e.kind IN ('assessment', 'rejected', 'interview', 'offer') OR e.assessment != '') "
+                       "ORDER BY e.received_at", (user_id,)).fetchall()
+    con.close()
+    return [dict(r) for r in rows]
+
+
+def assessment_marks(user_id: str) -> dict[str, dict]:
+    con = _gmail_con()
+    rows = con.execute("SELECT key, state, marked_at FROM assessment_marks WHERE user_id=?", (user_id,)).fetchall()
+    con.close()
+    return {key: {"state": state, "marked_at": marked_at} for key, state, marked_at in rows}
+
+
+def set_assessment_mark(user_id: str, key: str, state: str | None) -> None:
+    """Record that a test is done or not being taken; None takes that back."""
+    con = _gmail_con()
+    with con:
+        if state is None:
+            con.execute("DELETE FROM assessment_marks WHERE user_id=? AND key=?", (user_id, key))
+        else:
+            con.execute("INSERT INTO assessment_marks (user_id, key, state, marked_at) VALUES (?,?,?,?) "
+                        "ON CONFLICT(user_id, key) DO UPDATE SET state=excluded.state, marked_at=excluded.marked_at",
+                        (user_id, key, state, _now()))
+    con.close()
 
 
 def get_email_event(user_id: str, event_id: str) -> dict | None:
