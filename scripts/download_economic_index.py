@@ -4,10 +4,6 @@ Uses labor_market_impacts/job_exposure.csv which contains:
   occ_code          — SOC occupation code (6-digit, no dot)
   title             — occupation name
   observed_exposure — fraction of tasks where AI is already being used (0–1)
-
-Also downloads labor_market_impacts/task_penetration.csv which contains:
-  task        — natural-language O*NET task description
-  penetration — fraction of task done by AI (0–1)
 """
 import json
 import sys
@@ -50,20 +46,3 @@ with open(OUTPUT, "w") as f:
 print(f"Saved {len(lookup)} records to {OUTPUT}")
 print(f"Exposure range: {df['observed_exposure'].min():.3f} – {df['observed_exposure'].max():.3f}")
 
-# --- 2. Task penetration (task-level NLP signal) ---
-print("\nDownloading Anthropic/EconomicIndex — labor_market_impacts/task_penetration.csv ...")
-task_csv_path = hf_hub_download(
-    repo_id="Anthropic/EconomicIndex",
-    filename="labor_market_impacts/task_penetration.csv",
-    repo_type="dataset",
-)
-
-tp = pd.read_csv(task_csv_path)
-print(f"Loaded {len(tp)} rows. Columns: {tp.columns.tolist()}")
-print(tp.head(3).to_string())
-
-TASK_OUTPUT = DATA_DIR / "task_penetration.csv"
-tp.to_csv(TASK_OUTPUT, index=False)
-
-non_zero = (tp["penetration"] > 0).sum()
-print(f"Saved {len(tp)} tasks to {TASK_OUTPUT} ({non_zero} non-zero penetration)")

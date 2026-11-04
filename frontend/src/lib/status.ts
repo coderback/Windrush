@@ -47,6 +47,19 @@ export function riskLevel(score: number): RiskLevel {
   return score >= 65 ? "High" : score >= 35 ? "Medium" : "Low";
 }
 
+/* A job's published score as a percentage, or null for not enough data. A job saved in the browser before scores
+   named their occupation may still carry the old placeholder 50%, so a score without an occupation doesn't count. */
+export function jobExposure(job: { exposure_score?: number | null; exposure_occupation?: string | null }): number | null {
+  return job.exposure_score != null && job.exposure_occupation ? Math.round(job.exposure_score * 100) : null;
+}
+
+/* Why a role or job has no score. */
+export function noScoreReason(occupation?: string | null): string {
+  return occupation
+    ? `Matched to ${occupation}, but the index saw too little use to score it. That doesn't mean it's safe.`
+    : "This title doesn't clearly belong to one occupation.";
+}
+
 export const RISK: Record<RiskLevel, { bar: string; text: string; chip: string }> = {
   Low: { bar: "bg-teal", text: "text-teal", chip: "bg-teal-chip text-teal-deep" },
   Medium: { bar: "bg-amber", text: "text-amber-text", chip: "bg-amber-soft text-amber-text" },

@@ -52,7 +52,7 @@ test("logging in keeps the token and opens the dashboard", async ({ page }) => {
       return { access_token: "fresh-token", token_type: "bearer" };
     },
     "GET /api/onboarding/status": { complete: true },
-    "POST /api/score-skills": { skill_risks: [] },
+    "GET /api/careers/exposure": { roles: [], evidence: null },
     "GET /api/jobs": { jobs: [], has_more: false, discovering: false, sponsorship: "any" },
   });
   await page.goto("/login");
@@ -773,5 +773,54 @@ test("persona suggestions: read GitHub, then add or dismiss what it found", asyn
   await page.getByRole("button", { name: "Dismiss Rust" }).click();
   await expect.poll(() => posts.at(-1)).toEqual({ path: "dismiss", body: { ids: ["s1"] } });
   await expect(page.getByText("Add to “Olimpia”")).toBeVisible();
+  api.expectAllMocked();
+});
+
+test("AI exposure shows each role's published score, or says there isn't enough data", async ({ page }) => {
+  await signIn(page);
+  const api = await mockApi(page, {
+    ...SHELL,
+    "GET /api/careers/exposure": {
+      roles: [
+        { title: "Graduate Software Engineer", kind: "target", occupation: "Software Developers", exposure: 29 },
+        { title: "Graduate Program", kind: "target", occupation: null, exposure: null },
+        { title: "Chef", kind: "past", occupation: "Chefs and Head Cooks", exposure: null },
+      ],
+      evidence: {
+        role: "Graduate Software Engineer", occupation: "Software Developers", tasks_seen: 6, tasks_listed: 19, month: "2026-05",
+        most_handed_to_ai: [{ task: "Modify existing software to correct errors.", handed_to_ai: 69 }],
+        least_handed_to_ai: [{ task: "Design and develop software systems.", handed_to_ai: 42 }],
+      },
+    },
+  });
+  await page.goto("/careers");
+
+  await expect(page.getByText("29% · Low")).toBeVisible();
+  await expect(page.getByText("Published figure for Software Developers.")).toBeVisible();
+  await expect(page.getByText("This title doesn't clearly belong to one occupation.")).toBeVisible();
+  await expect(page.getByText(/Matched to Chefs and Head Cooks, but the index saw too little use/)).toBeVisible();
+  await expect(page.getByText("Not enough data")).toHaveCount(2);
+  await expect(page.getByRole("heading", { name: "What people hand to AI in Software Developers" })).toBeVisible();
+  await expect(page.getByText("May 2026", { exact: false })).toBeVisible();
+  await expect(page.getByText("Skill by skill")).toHaveCount(0);
+  api.expectAllMocked();
+});
+
+test("a job page never shows the old placeholder score", async ({ page }) => {
+  await signIn(page);
+  // Saved in this browser before scores named their occupation
+  const job = { ...JOBS[0], description: "Python services.", exposure_score: 0.5 };
+  await page.addInitScript((j) => sessionStorage.setItem("job_1", JSON.stringify(j)), job);
+  const api = await mockApi(page, {
+    ...SHELL,
+    "GET /api/jobs/1/sponsorship": { sponsorship: "offered", evidence: "", clearance: "", licensed_sponsor: false, sponsor_name: "", mark: "" },
+    "POST /api/jobs/analyze": { sse: [{ type: "job_fit", ranked_jobs: [{ fit_score: 84, level_match: "strong",
+      matched_skills: ["Python"], skill_gaps: [], reasoning: "Strong backend overlap." }] }] },
+  });
+  await page.goto("/jobs/1");
+
+  const section = page.getByRole("region", { name: "AI exposure of this role" });
+  await expect(section.getByText("Not enough data")).toBeVisible();
+  await expect(section.getByText(/50%/)).toHaveCount(0);
   api.expectAllMocked();
 });

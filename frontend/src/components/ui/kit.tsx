@@ -171,7 +171,15 @@ export function FitRing({ value, size = 42, label = "Fit" }: { value: number; si
   );
 }
 
-export function RiskBar({ label, score, className }: { label: React.ReactNode; score: number; className?: string }) {
+export function RiskBar({ label, score, className }: { label: React.ReactNode; score: number | null; className?: string }) {
+  if (score == null) {
+    return (
+      <span className={cx("flex justify-between gap-3 text-[13px]", className)}>
+        <span className="min-w-0 truncate">{label}</span>
+        <span className="text-[12px] text-ink-3 shrink-0">Not enough data</span>
+      </span>
+    );
+  }
   const level = riskLevel(score);
   return (
     <div className={cx("flex flex-col gap-[6px]", className)}>
