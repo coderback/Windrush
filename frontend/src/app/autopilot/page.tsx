@@ -11,13 +11,13 @@ import {
   type ChipTone,
 } from "@/components/ui/kit";
 import { load, useResource } from "@/lib/store";
-import { jobKey, longAgo } from "@/lib/format";
+import { documentFileName, jobKey, longAgo } from "@/lib/format";
 import { jobHref, rememberJob } from "@/lib/jobs";
 import {
   dismissRun, downloadDocument, downloadPack, retryRun, RUNS_URL, runNow, saveSettings, screenshotUrl, sendCode,
   STATUS_URL,
 } from "@/lib/autopilot";
-import type { AutopilotOutcome, AutopilotRun, AutopilotSettings, AutopilotStatus, Job } from "@/lib/types";
+import type { AutopilotOutcome, AutopilotRun, AutopilotSettings, AutopilotStatus, Job, Persona } from "@/lib/types";
 
 type Tab = "queue" | "sent" | "practice" | "other";
 
@@ -257,10 +257,10 @@ function RunRow({ run, running }: { run: AutopilotRun; running: boolean }) {
     }
   };
 
-  const fileName = (kind: string) =>
-    `${run.company}_${kind}.pdf`.replace(/[^A-Za-z0-9_.-]+/g, "_");
-  const download = (docId: string, kind: string) =>
-    downloadDocument(docId, fileName(kind)).catch((e) => setError(e instanceof Error ? e.message : "Couldn't download it."));
+  const persona = useResource<Persona>("/api/persona");
+  const download = (docId: string, kind: "CV" | "Cover Letter") =>
+    downloadDocument(docId, documentFileName(persona.data?.core_info, kind, run.company))
+      .catch((e) => setError(e instanceof Error ? e.message : "Couldn't download it."));
   const downloadHandover = () =>
     downloadPack(run.id).catch((e) => setError(e instanceof Error ? e.message : "Couldn't download it."));
 
@@ -326,7 +326,7 @@ function RunRow({ run, running }: { run: AutopilotRun; running: boolean }) {
           </button>
         )}
         {run.letter_doc_id && (
-          <button type="button" onClick={() => download(run.letter_doc_id!, "Cover_Letter")} className={buttonClass("quiet", "xs")}>
+          <button type="button" onClick={() => download(run.letter_doc_id!, "Cover Letter")} className={buttonClass("quiet", "xs")}>
             <Icon name="download" size={13} />Cover letter
           </button>
         )}

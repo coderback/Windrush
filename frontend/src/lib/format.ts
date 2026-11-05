@@ -2,6 +2,15 @@ import type { Job } from "./types";
 
 const k = (n: number) => Math.round(n / 1000);
 
+/** "Timothy_Ojebiyi_CV_Tripadvisor.pdf": a saved CV or cover letter, named like the files autopilot uploads with the
+    employer added. Plain letters and digits only (accents dropped), since some application systems mangle anything else. */
+export function documentFileName(person: { first_name?: string | null; last_name?: string | null } | null | undefined,
+                                 kind: "CV" | "Cover Letter", company?: string | null): string {
+  const words = [person?.first_name, person?.last_name, kind, company].flatMap((part) =>
+    (part ?? "").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").match(/[A-Za-z0-9]+/g) ?? []);
+  return `${words.join("_")}.pdf`;
+}
+
 /** "£34–38k", "£32k", "From £30k", "Up to £45k", or null when the ad states no salary. */
 export function formatSalary(min?: number | null, max?: number | null): string | null {
   if (!min && !max) return null;

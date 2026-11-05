@@ -393,6 +393,14 @@ test("the job workspace tailors a CV and checks it against the persona", async (
   await expect(page.getByText("“35%” isn't in your persona")).toBeVisible();
   await expect(page.getByText("Docker", { exact: true })).toBeVisible();
   expect(checked[0]).toMatchObject({ type: "cv", doc: { name: "Sam Okafor" }, job: { title: job.title } });
+
+  // A saved CV is named after the person and the employer
+  await page.route("**/api/documents/pdf", (route) => route.fulfill({ status: 200, json: { doc_id: "e".repeat(32) } }));
+  await page.route("**/api/documents/*/download", (route) => route.fulfill({
+    status: 200, body: "%PDF-1.4", headers: { "content-type": "application/pdf" } }));
+  const saved = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Download PDF" }).first().click();
+  expect((await saved).suggestedFilename()).toBe("Sam_Okafor_CV_Acme_Robotics.pdf");
   api.expectAllMocked();
 });
 
@@ -612,6 +620,15 @@ test("autopilot: practice runs, the queue, answering a held question and turning
   const download = page.waitForEvent("download");
   await queue.getByRole("button", { name: "Handover pack" }).click();
   expect((await download).suggestedFilename()).toBe("Windrush - Company 1 - Graduate Engineer 1.zip");
+
+  // The CV and letter on their own are named after the person and the employer
+  await page.route("**/api/documents/*/download", (route) => route.fulfill({
+    status: 200, body: "%PDF-1.4", headers: { "content-type": "application/pdf" } }));
+  for (const [button, name] of [["CV", "Sam_Okafor_CV_Company_1.pdf"], ["Cover letter", "Sam_Okafor_Cover_Letter_Company_1.pdf"]]) {
+    const saved = page.waitForEvent("download");
+    await queue.getByRole("button", { name: button, exact: true }).click();
+    expect((await saved).suggestedFilename()).toBe(name);
+  }
 
   await queue.getByLabel(blank.question).selectOption("No");
   await queue.getByRole("button", { name: "Save answer" }).click();

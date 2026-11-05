@@ -18,14 +18,14 @@ import { UnderlineTabs, TabPanel } from "@/components/ui/Tabs";
 import {
   Bar, buttonClass, Callout, Card, Chip, CompanyMark, cx, EmptyState, FactTile, FitRing, Skeleton, Spinner,
 } from "@/components/ui/kit";
-import { degreeLabel, experienceLabel, jobSalary, levelLabel, longAgo, workSetting } from "@/lib/format";
+import { degreeLabel, documentFileName, experienceLabel, jobSalary, levelLabel, longAgo, workSetting } from "@/lib/format";
 import { cacheFit, cachedFit, feedNeighbours, jobHref, recallJob } from "@/lib/jobs";
 import { analyzeJob, postStream, readStream } from "@/lib/sse";
 import { discardJob, saveJob, trackedApplication } from "@/lib/actions";
 import { load, useResource } from "@/lib/store";
 import { fitVerdict, jobExposure, noScoreReason, riskLevel, RISK } from "@/lib/status";
 import { sponsorshipVerdict } from "@/lib/sponsorship";
-import type { Analysis, Application, FormAnswer, Job } from "@/lib/types";
+import type { Analysis, Application, FormAnswer, Job, Persona } from "@/lib/types";
 
 type CvChoice = "tailored" | "original";
 
@@ -234,6 +234,8 @@ export default function JobDetailPage() {
     goTo(2);
   };
 
+  const persona = useResource<Persona>("/api/persona");   // shared with the sidebar's, so no extra request
+
   const savePdf = async (type: "cv" | "cover_letter"): Promise<string | null> => {
     const doc = type === "cv" ? cvDoc : letterDoc;
     if (!doc) return null;
@@ -263,7 +265,7 @@ export default function JobDetailPage() {
   const download = async (type: "cv" | "cover_letter") => {
     const existing = type === "cv" ? cvDocId : letterDocId;
     const docId = existing ?? await savePdf(type);
-    if (docId) await downloadPdf(docId, `${type === "cv" ? "CV" : "CoverLetter"}_${job?.company ?? "Windrush"}.pdf`);
+    if (docId) await downloadPdf(docId, documentFileName(persona.data?.core_info, type === "cv" ? "CV" : "Cover Letter", job?.company));
   };
 
   const handleBrowserEvent = (ev: Record<string, unknown>) => {
