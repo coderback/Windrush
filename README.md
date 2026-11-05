@@ -181,6 +181,10 @@ Labels: **High ≥ 65 %**, **Medium 35–65 %**, **Low < 35 %**. **Job fit** (`s
 
 ---
 
+## Assessment deadlines
+
+Employers' online tests have short deadlines and arrive in bursts, so Home lists the ones still to do, soonest first (`assessments.py`). The email reader records each test's state (requested, completed, missed), its deadline (worked out from "within 7 days" if that's how it's put) and how long it takes. There's one row per application however many reminders it sends, and an invitation from an employer not tracked yet still shows. A row goes away when you mark it done or not being taken, an email says it's finished, or the application ends; one past its deadline stays for 14 days, since some tests can still be taken. A request more than 2 days after a mark counts as a new test. Home also shows how finished tests went. Emails read before this existed carry no details, so they aren't counted.
+
 ## Job Feed & Discovery
 
 - **Search** (`jobs_db.get_jobs`) filters in SQL: every word of a free-text term (the search box sends them as tags) must appear in title/company/description as a word, in any of its forms (`ml` / machine learning, quant / quantitative, front end / frontend, …); role tags (`ml`, `backend`, …) match any; domain tags (`fintech`, `sponsorship`, …) must all match; location uses whole-word aliases (`uk`, `us`, …). Results are ranked by cosine similarity between your persona-plus-search embedding and each job's stored embedding (the 2 000 most recent matches are ranked), nudged up for your search words in the title, jobs at your level, sponsoring employers when you need sponsorship, and new jobs; jobs you've applied to or discarded are removed before pagination.

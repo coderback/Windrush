@@ -22,7 +22,7 @@ import os
 import re
 import secrets
 import time
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from email.utils import parseaddr
 from urllib.parse import urlencode
 
@@ -58,11 +58,16 @@ ATS_SENDERS = ("greenhouse.io", "greenhouse-mail.io", "lever.co", "ashbyhq.com",
                # What they really send from. Workable's replies are titled "Junior Python Engineer - PetLabCo.", with
                # nothing about an application for the subject search to find, rejections included.
                "workablemail.com", "teamtailor-mail.com", "pinpoint.email", "tal.net", "brassring.com", "njoyn.com",
-               "ambertrack.global", "beapplied.com", "earlycareerscompany.com")
-_SUBJECT_TERMS = ("application", "applying", "interview", "assessment", '"next steps"', "offer", "unfortunately",
-                  "candidacy", '"your interest"')
-_SUBJECT_RE = re.compile(r"applica|applying|applied|interview|assessment|next step|candidacy|offer|unfortunately|"
-                         r"regret|your interest|update on your|recruit", re.I)
+               "ambertrack.global", "beapplied.com", "earlycareerscompany.com",
+               # Test platforms: their invitations name the employer in the body, if at all
+               "hirevue-app.eu", "arcticshores.com", "canditech.io", "testgorilla.com", "codesignal.com", "hackerrank.com",
+               "codility.com", "willotalent.com", "shl.com", "thomas.co", "evolveassess.com", "sovaonline.com", "neurosight.io")
+# Gmail matches whole words, so "assessment" doesn't find "Invitation for assessments". "coding challenge" stays out:
+# it finds a newsletter of that name, not tests.
+_SUBJECT_TERMS = ("application", "applying", "interview", "assessment", "assessments", '"online test"', '"technical challenge"',
+                  '"next steps"', "offer", "unfortunately", "candidacy", '"your interest"')
+_SUBJECT_RE = re.compile(r"applica|applying|applied|interview|assessment|online test|technical challenge|next step|candidacy|"
+                         r"offer|unfortunately|regret|your interest|update on your|recruit", re.I)
 
 KIND_STATUS = {"received": "Applied", "assessment": "Responded", "interview": "Interview", "offer": "Offer",
                "rejected": "Rejected"}
@@ -309,11 +314,19 @@ _BODY_SAYS_THEY_APPLIED = re.compile(r"thank(?:s| you)(?: so much| very much)? f
                                      r"your application (?:for|to|has|was|is)\b", re.I)
 
 
+_ASKS_THEM_TO_TAKE_A_TEST = re.compile(r"\bcomplete (?:your|the|an|our|this) (?:\w+ ){0,2}(?:assessments?|tests?)\b|"
+                                       r"(?:\bnot|n.t) yet completed\b|"
+                                       r"\b(?:invited?|invitation) (?:you )?to (?:complete|take) (?:an?|the|our) (?:\w+ ){0,2}(?:assessments?|tests?)\b", re.I)
+
+
 def is_job_alert(email: dict) -> bool:
     """A job alert or recommendation, by its sender or subject: not about an application they made, so not read at all.
     LinkedIn sends both alerts and "your application was sent" from one address, and Leonardo sends its rejections
     from jobalerts.leonardojobs.co.uk, so what the email says about an application comes first."""
     if _SAYS_THEY_APPLIED.search(email["subject"]) or _BODY_SAYS_THEY_APPLIED.search(email.get("text") or ""):
+        return False
+    # PwC sends its test reminders from a job alerts address
+    if _ASKS_THEM_TO_TAKE_A_TEST.search(f"{email['subject']}\n{email.get('text') or ''}"):
         return False
     return bool(_ALERT_SENDER.search(email["sender_address"]) or _ALERT_SUBJECT.search(email["subject"]))
 
@@ -335,15 +348,22 @@ _CLASSIFY_SYSTEM = (
     "should apply to is unrelated, even when its title has the word Application in it or it names a company they "
     "applied to. So are invitations to apply, deadline reminders, careers advice, an employer's talent-network "
     "sign-up, and a recruitment agency's first approach about a role they haven't applied for, even one offering an "
-    "interview. An employer's own invitation to its interview or test does count: it means they applied.\n"
+    "interview. An employer's own invitation to its interview or test does count, also when a test platform such as "
+    "HireVue or TestGorilla sends it: it means they applied. A note that they finished a test counts too: kind other.\n"
     "company is the employer, never the job board that sent the email; leave company or role empty if it doesn't say.\n"
     "application is the number of the application it is about, from the list given, only when the email names "
     "that company (and, when they applied to several roles there, the role); otherwise null.\n"
     "confidence is high only when the email states its meaning outright and names the company; medium or low "
     "otherwise.\n"
     "summary is one short line in plain words, e.g. \"Invites you to a first interview on 21 October\".\n"
+    "assessment says where a test stands: requested when the email asks them to take one or reminds them to, completed "
+    "when it says they have finished one, missed when it says they didn't finish one in time; otherwise empty.\n"
+    "deadline is when a requested test is due, as YYYY-MM-DD, worked out from the Received date if it says something like "
+    "within 7 days; empty if it gives no date.\n"
+    "minutes is how long it says the test takes in total, the higher figure of a range; null if it doesn't say.\n"
     'Return ONLY JSON: {"kind": str, "application": int | null, "confidence": "high" | "medium" | "low", '
-    '"company": str, "role": str, "summary": str}'
+    '"company": str, "role": str, "summary": str, "assessment": "requested" | "completed" | "missed" | "", '
+    '"deadline": str, "minutes": int | null}'
 )
 
 _FALLBACK = (
@@ -367,6 +387,44 @@ _ASKS_FOR_A_TEST = re.compile(r"assessment|\btests?\b|coding challenge|hackerran
 def _is_hiring_survey(email: dict) -> bool:
     text = f"{email['subject']}\n{email.get('text') or email.get('snippet') or ''}"
     return bool(_HIRING_SURVEY.search(text)) and not _ASKS_FOR_A_TEST.search(text)
+
+
+_LATEST_DEADLINE_DAYS = 90
+_LONGEST_TEST_MINUTES = 600
+_NUMBER_WORDS = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10}
+_WITHIN = re.compile(r"\b(?:within|have|in the next)\s+(?:the\s+next\s+)?(\d{1,3}|" + "|".join(_NUMBER_WORDS) + r")\s+"
+                     r"(?:calendar\s+|working\s+|business\s+)?(days?|hours?)\b", re.I)
+
+
+def _test_deadline(stated, email: dict) -> str | None:
+    """The date the model worked out if it's a sensible one, else what "within 7 days" comes to."""
+    received = date.fromisoformat(email["received_at"][:10])
+    try:
+        due = date.fromisoformat(str(stated or "")[:10])
+    except ValueError:
+        due = None
+    if due and received - timedelta(days=1) <= due <= received + timedelta(days=_LATEST_DEADLINE_DAYS):
+        return due.isoformat()
+    match = _WITHIN.search(email.get("text") or email.get("snippet") or "")
+    if not match:
+        return None
+    number = _NUMBER_WORDS.get(match.group(1).lower()) or int(match.group(1))
+    days = number if match.group(2).lower().startswith("day") else -(-number // 24)
+    return (received + timedelta(days=days)).isoformat() if 0 < days <= _LATEST_DEADLINE_DAYS else None
+
+
+def _test_details(data: dict, email: dict, kind: str) -> dict:
+    """{assessment, deadline, minutes}: where a test stands. A request is only ever an email read as an assessment."""
+    state = data.get("assessment") if data.get("assessment") in ("requested", "completed", "missed") else ""
+    if kind == "assessment" and not state:
+        state = "requested"
+    if state == "requested" and kind != "assessment":
+        state = ""
+    if state != "requested":
+        return {"assessment": state, "deadline": None, "minutes": None}
+    minutes = data.get("minutes")
+    minutes = minutes if isinstance(minutes, int) and not isinstance(minutes, bool) and 0 < minutes <= _LONGEST_TEST_MINUTES else None
+    return {"assessment": state, "deadline": _test_deadline(data.get("deadline"), email), "minutes": minutes}
 
 
 def _numbered(applications: list[dict]) -> str:
@@ -401,7 +459,8 @@ async def read(email: dict, applications: list[dict]) -> dict:
     confidence = data.get("confidence") if data.get("confidence") in ("high", "medium", "low") else "low"
     return {"kind": kind, "application": app, "confidence": confidence,
             "company": str(data.get("company") or (app or {}).get("company") or "")[:200],
-            "role": str(data.get("role") or "")[:200], "summary": str(data.get("summary") or "")[:300]}
+            "role": str(data.get("role") or "")[:200], "summary": str(data.get("summary") or "")[:300],
+            **_test_details(data, email, kind)}
 
 
 def _read_without_model(email: dict, applications: list[dict]) -> dict:
@@ -411,7 +470,7 @@ def _read_without_model(email: dict, applications: list[dict]) -> dict:
     named = [a for a in applications if names_company(email, a["company"])]
     app = named[0] if len({a["company"].lower() for a in named}) == 1 and len(named) == 1 else None
     return {"kind": kind, "application": app, "confidence": "low", "company": (app or {}).get("company", ""),
-            "role": "", "summary": email["subject"][:300], "by_model": False}
+            "role": "", "summary": email["subject"][:300], "by_model": False, **_test_details({}, email, kind)}
 
 
 def proposed_change(current: str, kind: str) -> tuple[str | None, bool]:
@@ -463,7 +522,8 @@ def _apply(user_id: str, email: dict, reading: dict) -> str:
     """Record what an email means, and change the application's status when that is safe. Returns the decision."""
     event = {**{k: email[k] for k in ("gmail_id", "thread_id", "received_at", "sender", "subject")},
              "snippet": email["snippet"][:300], "kind": reading["kind"], "company": reading["company"],
-             "role": reading["role"], "summary": reading["summary"]}
+             "role": reading["role"], "summary": reading["summary"], "assessment": reading.get("assessment") or "",
+             "deadline": reading.get("deadline"), "minutes": reading.get("minutes")}
     if reading["kind"] == "unrelated":
         # Nothing of an unrelated email is kept but the fact it was read.
         tracker.add_email_event(user_id, {"gmail_id": email["gmail_id"], "received_at": email["received_at"],
@@ -627,7 +687,8 @@ def _note_past_email(user_id: str, email: dict, reading: dict, companies: set[st
         reading = _with_real_names(email, reading)
     event = {**{k: email[k] for k in ("gmail_id", "thread_id", "received_at", "sender", "subject")},
              "snippet": email["snippet"][:300], "kind": reading["kind"], "company": reading["company"],
-             "role": reading["role"], "summary": reading["summary"]}
+             "role": reading["role"], "summary": reading["summary"], "assessment": reading.get("assessment") or "",
+             "deadline": reading.get("deadline"), "minutes": reading.get("minutes")}
     target_status = KIND_STATUS.get(reading["kind"])
     app = reading["application"]
     if app is None:

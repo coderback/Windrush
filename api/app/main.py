@@ -18,6 +18,7 @@ from .agent import run_apply, execute_tool, career_stage
 from .guardrails import check_cv_for_injection, GuardrailViolation
 from . import tracker
 from . import answers
+from . import assessments
 from . import autopilot
 from . import gmail
 from . import enrich
@@ -1164,6 +1165,22 @@ async def gmail_disconnect(current_user: Annotated[auth.User, Depends(auth.get_c
 async def gmail_events(current_user: Annotated[auth.User, Depends(auth.get_current_user)]):
     """Emails read as being about an application, latest first, with what Windrush did about each."""
     return tracker.list_email_events(current_user.id)
+
+
+@app.get("/assessments")
+async def list_assessments(current_user: Annotated[auth.User, Depends(auth.get_current_user)]):
+    """Tests employers have asked for that are still to do, soonest first, and how the finished ones went."""
+    return assessments.overview(current_user.id)
+
+
+@app.post("/assessments/mark")
+async def mark_assessment(body: dict, current_user: Annotated[auth.User, Depends(auth.get_current_user)]):
+    try:
+        return assessments.mark(current_user.id, str(body.get("key") or ""), str(body.get("state") or ""))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except LookupError:
+        raise HTTPException(status_code=404, detail="No such assessment")
 
 
 def _email_action(fn, *args):

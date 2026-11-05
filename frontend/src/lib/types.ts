@@ -352,6 +352,32 @@ export interface Backfill {
 export type EmailKind = "received" | "assessment" | "interview" | "offer" | "rejected" | "other";
 export type EmailDecision = "applied" | "suggested" | "unmatched" | "noted" | "confirmed" | "dismissed" | "undone";
 
+export interface OpenAssessment {
+  key: string;
+  company: string;
+  role: string;
+  tracked: boolean;
+  deadline: string | null;
+  days_left: number | null;
+  minutes: number | null;
+  summary: string;
+  gmail_id: string;
+  emails: number;
+}
+
+export interface AssessmentRecord {
+  done: number;
+  moved_on: number;
+  not_passed: number;
+  waiting: number;
+  missed: number;
+}
+
+export interface Assessments {
+  open: OpenAssessment[];
+  record: AssessmentRecord;
+}
+
 export interface EmailEvent {
   id: string;
   gmail_id: string;

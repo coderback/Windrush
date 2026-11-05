@@ -15,6 +15,7 @@ import { sponsorshipBadges } from "@/lib/sponsorship";
 import { levelLabel } from "@/lib/format";
 import { jobHref, rememberFeed } from "@/lib/jobs";
 import type { Application, CareerExposure, Job, Persona } from "@/lib/types";
+import AssessmentsCard from "@/components/home/AssessmentsCard";
 
 interface JobsPage { jobs: Job[]; sponsorship?: string }
 
@@ -188,6 +189,8 @@ export default function DashboardPage() {
             ))}
           </section>
         )}
+
+        <AssessmentsCard />
 
         {stats.followUps.length > 0 && (
           <section aria-labelledby="week" className="bg-surface border border-border rounded-card px-5 pt-[18px] pb-2 flex flex-col">
