@@ -9,7 +9,7 @@ const PROOF_LABEL: Record<string, string> = {
 };
 const VENUE_LABEL: Record<string, string> = {
   event: "Event", hackathon: "Hackathon", conference: "Conference", meetup: "Meetup", community: "Community",
-  competition: "Competition", course: "Course", programme: "Programme",
+  competition: "Competition", course: "Course", programme: "Programme", listing: "Listing",
 };
 
 /** Every checkable id in a plan, for the "x of y done" count. */
