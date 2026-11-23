@@ -36,6 +36,14 @@ def test_only_ads_with_enough_text_are_queued_and_a_new_ad_is_read_again(db):
     assert len(jobs_db.jobs_needing_skills(10, job_skills.SKILLS_VERSION)) == 1
 
 
+def test_the_waiting_count_is_only_ads_the_reader_will_read(db):
+    jobs_db.add_jobs([make_job(1, description=AD, location="London, UK"),
+                      make_job(2, description=AD, location="Austin, TX")])
+    assert jobs_db.ads_waiting_for_skills() == 2
+    assert jobs_db.ads_waiting_for_skills(["London"]) == 1
+    assert len(jobs_db.jobs_needing_skills(10, job_skills.SKILLS_VERSION, ["London"])) == 1
+
+
 def test_reading_pending_ads_stores_each_reading(db, monkeypatch):
     jobs_db.add_jobs([make_job(1, description=AD)])
     monkeypatch.setattr(tracker, "feed_locations", lambda: None)

@@ -948,7 +948,7 @@ async def careers_exposure(
 
 def _market_for(user_id: str) -> dict:
     return market.demand(tracker.get_user_persona(user_id), tracker.list_applications(user_id),
-                         waiting=jobs_db.ads_waiting_for_skills())
+                         waiting=jobs_db.ads_waiting_for_skills(tracker.feed_locations()))
 
 
 @app.get("/careers/market")
