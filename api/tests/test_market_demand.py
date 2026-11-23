@@ -80,6 +80,20 @@ def test_counts_say_which_asked_for_skills_the_profile_shows():
     assert by["python"]["ads"] == 3 and by["python"]["where"] == ["your skills"]   # once per ad
 
 
+def test_a_skill_that_is_also_an_everyday_word_needs_a_listed_skill_and_git_shows_version_control():
+    persona = {"skills": [{"skills": ["Git"]}],
+               "projects": [{"name": "Thespis", "technologies": ["Python"], "outcomes": "Ready to go live on Linux."}]}
+    ads = [_ad(i, "Software Engineer", ["Go", "Linux", "version control"]) for i in range(3)]
+    by = {s["key"]: s for s in market.demand({**persona, **PERSONA_TARGET}, [], ads)["skills"]}
+    assert not by["go"]["shown"] and by["linux"]["where"] == ["Thespis"]
+    assert by["version control"]["where"] == ["your skills"]
+    with_go = {**persona, "projects": [{**persona["projects"][0], "technologies": ["Python", "Go"]}]}
+    assert {s["key"]: s for s in market.demand({**with_go, **PERSONA_TARGET}, [], ads)["skills"]}["go"]["shown"]
+
+
+PERSONA_TARGET = {"preferences": {"target_titles": ["Software Engineer"]}}
+
+
 def test_the_users_level_is_counted_when_there_are_enough_ads():
     ads = [_ad(i, "Software Engineer", ["Rust"], level="junior") for i in range(30)]
     ads += [_ad(100 + i, "Senior Software Engineer", ["Leadership"], level="senior") for i in range(40)]

@@ -29,7 +29,11 @@ _SAME_SKILL = [
     ("llms", "llm", "large language models", "large language model"), ("nlp", "natural language processing"),
     ("rest apis", "rest api", "restful apis", "restful api"), ("microservices", "microservice"),
     ("docker", "containers", "containerisation", "containerization"), ("c++", "cpp"),
+    ("version control", "git"),
 ]
+# Skill names that are also everyday words ("go live", "R&D"): shown only by a skills or technologies list, never by
+# a project's or job's write-up.
+_PROSE_UNSAFE = {"go", "r", "c", "d", "ruby", "swift", "spark", "rust", "dart", "elixir", "julia"}
 _KEY = {form: group[0] for group in _SAME_SKILL for form in group}
 _FORMS = {group[0]: group for group in _SAME_SKILL}
 
@@ -56,29 +60,30 @@ def _short(name: str) -> str:
     return re.split(r"\s*[:·|]\s*", name or "", maxsplit=1)[0].strip()
 
 
-def evidence_texts(persona: dict) -> list[tuple[str, str]]:
-    """(where, text) for everything the profile says the user has done or knows."""
+def evidence_texts(persona: dict) -> list[tuple[str, str, str]]:
+    """(where, listed, prose) for everything the profile says the user has done or knows: `listed` is its skills or
+    technologies, `prose` its write-up."""
     out = []
     skills = [s for g in persona.get("skills") or [] for s in g.get("skills") or []]
     if skills:
-        out.append(("your skills", " ; ".join(skills)))
+        out.append(("your skills", " ; ".join(skills), ""))
     for p in persona.get("projects") or []:
-        text = " ; ".join([*(p.get("technologies") or []), p.get("problem_solved") or "", p.get("outcomes") or "",
-                           p.get("summary") or ""])
-        out.append((_short(p.get("name") or "a project"), text))
+        prose = " ; ".join([p.get("problem_solved") or "", p.get("outcomes") or "", p.get("summary") or ""])
+        out.append((_short(p.get("name") or "a project"), " ; ".join(p.get("technologies") or []), prose))
     for h in persona.get("history") or []:
-        text = " ; ".join([*(h.get("tech_stack") or []), *(h.get("achievements") or []), h.get("summary") or ""])
-        out.append((h.get("employer") or "a job", text))
+        prose = " ; ".join([*(h.get("achievements") or []), h.get("summary") or ""])
+        out.append((h.get("employer") or "a job", " ; ".join(h.get("tech_stack") or []), prose))
     for c in persona.get("certifications") or []:
-        out.append(("certifications", " ".join(str(v) for v in c.values() if isinstance(v, str))))
+        out.append(("certifications", " ".join(str(v) for v in c.values() if isinstance(v, str)), ""))
     return out
 
 
-def _shown_in(key: str, texts: list[tuple[str, str]]) -> list[str]:
+def _shown_in(key: str, texts: list[tuple[str, str, str]]) -> list[str]:
     forms = _FORMS.get(key, (key,))
+    prose_ok = key not in _PROSE_UNSAFE and not any(f in _PROSE_UNSAFE for f in forms)
     where = []
-    for place, text in texts:
-        blob = f" {words(text)} "
+    for place, listed, prose in texts:
+        blob = f" {words(listed)} {words(prose) if prose_ok else ''} "
         if any(f" {f} " in blob for f in forms) and place not in where:
             where.append(place)
     return where
