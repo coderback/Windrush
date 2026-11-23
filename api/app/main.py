@@ -821,6 +821,35 @@ async def job_from_url(
 
 
 _MIN_AD_TEXT = 200   # characters of ad text below which a job isn't scored (a title and a line say too little)
+_MAX_PASTED_AD = 30_000
+
+
+@app.post("/jobs/from-text")
+async def job_from_text(body: dict, current_user: Annotated[auth.User, Depends(auth.get_current_user)]):
+    """
+    A job from an ad the user copied from their own browser, for a link Windrush can't read (e.g. a Workday site
+    that refuses it). Treated like a pasted link: returned, not stored, and the link (if given) is kept so "View
+    posting" still opens it. Only the user's own text is used: nothing is fetched.
+    """
+    from .job_searcher import _html_to_text, _location_from_url
+    from .risk_scorer import exposure_fields
+    clean =lambda value, n: " ".join(str(value or "").split())[:n]  # noqa: E731
+    title, company = clean(body.get("title"), 200), clean(body.get("company"), 200)
+    url = str(body.get("url") or "").strip()
+    url = url if url.lower().startswith(("http://", "https://")) else ""
+    text = str(body.get("description") or "")
+    text = (_html_to_text(text) if "<" in text and ">" in text else text).strip()[:_MAX_PASTED_AD]
+    if not title or not company:
+        raise HTTPException(status_code=400, detail="Give the job title and the employer.")
+    if len(text) < _MIN_AD_TEXT:
+        raise HTTPException(status_code=400, detail="Paste the whole ad: that's too little text to read the job from.")
+    job = {"id": uuid.uuid4().hex, "job_id": uuid.uuid4().hex[:12], "title": title, "company": company,
+           "location": clean(body.get("location"), 200) or _location_from_url(url), "description": text, "url": url,
+           "salary_min": None, "salary_max": None, "source": "user-text"}
+    job.update(exposure_fields(title))
+    job["level"] = seniority.infer_level(title, text)
+    job["tags"] = jobs_db._extract_tags(job)
+    return {"job": job}
 
 
 @app.post("/jobs/report")

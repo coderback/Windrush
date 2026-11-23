@@ -23,15 +23,35 @@ const WIDE = "(min-width: 1000px)";
 
 const NO_FILTERS: FeedFilterState = { sponsorship: "", remote: false, hybrid: false, level: "", noDegree: false, noClearance: false };
 
-/** Paste any job link: POST /jobs/from-url, then open that job. Lives in the top bar. */
+/** Paste any job link: POST /jobs/from-url, then open that job. Lives in the top bar. When the link can't be read
+    (some sites refuse Windrush), the ad's text can be pasted instead: POST /jobs/from-text, with the link kept. */
 function PasteLink({ focus }: { focus: boolean }) {
   const router = useRouter();
   const [url, setUrl] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+  const [manual, setManual] = useState(false);
+  const [ad, setAd] = useState({ title: "", company: "", location: "", description: "" });
   const input = useRef<HTMLInputElement>(null);
 
   useEffect(() => { if (focus) input.current?.focus(); }, [focus]);
+
+  const open = (job: Job) => {
+    if (!(job.id ?? job.job_id)) throw new Error("The listing came back without an id");
+    router.push(jobHref(rememberJob(job)));
+  };
+
+  const post = async (path: string, body: object, fallback: string) => {
+    const res = await authFetch(path, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data?.detail || fallback);
+    return data.job as Job;
+  };
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -43,39 +63,80 @@ function PasteLink({ focus }: { focus: boolean }) {
     }
     setBusy(true);
     setError(null);
+    setFailed(false);
     try {
-      const res = await authFetch("/api/jobs/from-url", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: link }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data?.detail || "Couldn't read that listing");
-      const job: Job = data.job;
-      if (!(job.id ?? job.job_id)) throw new Error("The listing came back without an id");
-      router.push(jobHref(rememberJob(job)));
+      open(await post("/api/jobs/from-url", { url: link }, "Couldn't read that listing"));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn't read that listing. Try a direct job-posting link.");
+      setFailed(true);
       setBusy(false);
     }
   };
 
+  const submitAd = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      open(await post("/api/jobs/from-text", { ...ad, url: url.trim() }, "Couldn't use that ad"));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't use that ad.");
+      setBusy(false);
+    }
+  };
+
+  const field = "w-full h-[36px] px-3 border border-border rounded-control bg-surface text-[13.5px] text-ink outline-none focus:border-teal";
+
   return (
-    <form onSubmit={submit} className="flex flex-col gap-1 flex-[0_1_420px] min-w-0 w-full sm:w-auto">
-      <div className="flex items-center gap-2 min-w-0">
+    <div className="flex flex-col gap-1 flex-[0_1_420px] min-w-0 w-full sm:w-auto">
+      <form onSubmit={submit} className="flex items-center gap-2 min-w-0">
         <label htmlFor="joblink" className="sr-only">Paste a job link</label>
         <span className="flex-1 min-w-0 flex items-center gap-2 h-[38px] px-3 border border-border rounded-control bg-subtle text-ink-3 focus-within:border-teal">
           <Icon name="link" size={16} />
           <input id="joblink" ref={input} type="url" inputMode="url" value={url} onChange={(e) => setUrl(e.target.value)}
-            placeholder="Paste any job link to analyse it"
+            placeholder="Paste a job link"
             className="flex-1 min-w-0 border-0 bg-transparent text-[13.5px] text-ink outline-none placeholder:text-ink-3" />
         </span>
         <button type="submit" disabled={busy} className={buttonClass("secondary", "top")}>
-          {busy ? <><Spinner /> Reading…</> : "Analyse"}
+          {busy && !manual ? <><Spinner /> Reading…</> : "Analyse"}
         </button>
-      </div>
+      </form>
       {error && <p role="alert" className="m-0 text-[12.5px] text-red">{error}</p>}
-    </form>
+      {failed && !manual && (
+        <p className="m-0 text-[12.5px] text-ink-2">
+          Some sites refuse Windrush but open in your browser.{" "}
+          <button type="button" onClick={() => { setManual(true); setError(null); }}
+            className="bg-transparent border-0 p-0 text-[12.5px] font-medium text-teal-deep underline underline-offset-2 cursor-pointer">
+            Paste the ad instead
+          </button>
+        </p>
+      )}
+      {manual && (
+        <form onSubmit={submitAd} aria-label="Paste the ad" className="flex flex-col gap-2 mt-1 p-3 border border-border rounded-card bg-surface">
+          <span className="text-[12.5px] text-ink-2">Copy these from the posting in your browser. The link above is kept so you can open it later.</span>
+          <label className="flex flex-col gap-1 text-[12.5px] font-medium">Job title
+            <input required value={ad.title} onChange={(e) => setAd({ ...ad, title: e.target.value })} className={field} />
+          </label>
+          <span className="grid gap-2" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(min(160px, 100%), 1fr))" }}>
+            <label className="flex flex-col gap-1 text-[12.5px] font-medium">Employer
+              <input required value={ad.company} onChange={(e) => setAd({ ...ad, company: e.target.value })} className={field} />
+            </label>
+            <label className="flex flex-col gap-1 text-[12.5px] font-medium">Location (optional)
+              <input value={ad.location} onChange={(e) => setAd({ ...ad, location: e.target.value })} className={field} />
+            </label>
+          </span>
+          <label className="flex flex-col gap-1 text-[12.5px] font-medium">The ad
+            <textarea required rows={6} value={ad.description} onChange={(e) => setAd({ ...ad, description: e.target.value })}
+              placeholder="Paste the whole job description"
+              className="w-full px-3 py-2 border border-border rounded-control bg-surface text-[13px] leading-[1.5] text-ink outline-none focus:border-teal" />
+          </label>
+          <span className="flex flex-wrap gap-2">
+            <button type="submit" disabled={busy} className={buttonClass("primary", "sm")}>{busy ? <Spinner /> : null}Analyse this ad</button>
+            <button type="button" onClick={() => setManual(false)} className={buttonClass("quiet", "sm")}>Cancel</button>
+          </span>
+        </form>
+      )}
+    </div>
   );
 }
 
