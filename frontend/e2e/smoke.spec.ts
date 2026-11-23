@@ -1095,6 +1095,38 @@ test("an application tracked from email can be linked to the ad it was made thro
   api.expectAllMocked();
 });
 
+test("a link the site refuses can be analysed from the ad pasted instead, keeping the link", async ({ page }) => {
+  await signIn(page);
+  const link = "https://fca.wd3.myworkdayjobs.com/en-US/FCA_earlycareers/job/London/Graduate_JR0022847";
+  const sent: unknown[] = [];
+  await mockApi(page, {
+    ...SHELL,
+    "GET /api/jobs": { jobs: [], has_more: false, discovering: false, sponsorship: "any" },
+    "POST /api/jobs/from-url": { status: 400, json: { detail: "Couldn't read that listing — try a direct job-posting link." } },
+    "POST /api/jobs/from-text": (request) => {
+      sent.push(request.postDataJSON());
+      return { job: { id: "t1", job_id: "t1", title: "Data Graduate Programme", company: "Financial Conduct Authority",
+                      location: "London", url: link, description: "The ad.", source: "user-text" } };
+    },
+  });
+  await page.goto("/jobs");
+  await page.getByLabel("Paste a job link").fill(link);
+  await page.getByRole("button", { name: "Analyse", exact: true }).click();
+  await expect(page.getByRole("alert").filter({ hasText: "Couldn't read that listing" })).toBeVisible();
+
+  await page.getByRole("button", { name: "Paste the ad instead" }).click();
+  const form = page.getByRole("form", { name: "Paste the ad" });
+  await form.getByLabel("Job title").fill("Data Graduate Programme");
+  await form.getByLabel("Employer").fill("Financial Conduct Authority");
+  await form.getByLabel("The ad").fill("You'll rotate through data, software and cyber teams.");
+  await form.getByRole("button", { name: "Analyse this ad" }).click();
+
+  await expect.poll(() => sent).toEqual([{ title: "Data Graduate Programme", company: "Financial Conduct Authority",
+                                           location: "", description: "You'll rotate through data, software and cyber teams.",
+                                           url: link }]);
+  await expect(page).toHaveURL(/\/jobs\/t1$/);
+});
+
 test("Home lists assessments by deadline, and marking one done can be undone", async ({ page }) => {
   await signIn(page);
   const open = [
