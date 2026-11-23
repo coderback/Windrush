@@ -35,6 +35,7 @@ from . import job_attributes
 from . import job_skills
 from . import market
 from .models import Persona
+from pydantic import BaseModel
 from .profile_merge import merge_cv as _merge_cv, _split_cv_dates  # noqa: F401  (tests use _split_cv_dates)
 
 logger = logging.getLogger("windrush.main")
@@ -853,22 +854,50 @@ async def careers_market(current_user: Annotated[auth.User, Depends(auth.get_cur
     return await asyncio.to_thread(_market_for, current_user.id)
 
 
-@app.post("/careers/roadmap")
-async def careers_roadmap(  # noqa: E302
-    current_user: Annotated[auth.User, Depends(auth.get_current_user)],
-):
-    """SSE: generate a skill development roadmap from the user's persona and what employers ask for."""
+@app.get("/careers/plan")
+async def careers_plan(current_user: Annotated[auth.User, Depends(auth.get_current_user)]):
+    """The user's newest career plan and what they've ticked off, or {"plan": null}."""
+    return await asyncio.to_thread(tracker.latest_career_plan, current_user.id) or {"plan": None}
+
+
+@app.post("/careers/plan")
+async def careers_plan_generate(current_user: Annotated[auth.User, Depends(auth.get_current_user)]):
+    """SSE: write a new career plan from the whole profile, the target roles and what their ads ask for, and keep it."""
     persona = tracker.get_user_persona(current_user.id)
+    target = ", ".join((persona.get("preferences") or {}).get("target_titles") or [])
 
     async def gen():
-        yield _sse_json("start", {"message": "Building your skill roadmap…"})
+        yield _sse_json("start", {"message": "Counting what employers ask for…"})
         demand = await asyncio.to_thread(_market_for, current_user.id)
-        result = await execute_tool("generate_skill_roadmap", {"persona": persona, "market": demand})
-        yield _sse_json("roadmap", result)
-        yield _sse_json("done", {"message": "Roadmap ready"})
+        yield _sse_json("status", {"message": "Writing your plan…"})
+        result = await execute_tool("generate_career_plan", {"persona": persona, "market": demand})
+        if not result.get("plan"):
+            yield _sse_json("error", {"message": "The plan came back empty. Try again."})
+            return
+        saved = await asyncio.to_thread(tracker.save_career_plan, current_user.id, target, result["plan"])
+        yield _sse_json("plan", saved)
+        yield _sse_json("done", {"message": "Plan ready"})
 
     return StreamingResponse(gen(), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+class PlanItemMark(BaseModel):
+    plan_id: int
+    item_id: str
+    done: bool
+
+
+@app.put("/careers/plan/items")
+async def careers_plan_mark(body: PlanItemMark, current_user: Annotated[auth.User, Depends(auth.get_current_user)]):
+    """Tick an item of the user's plan off, or back on."""
+    from . import career_plan
+    plan = await asyncio.to_thread(tracker.career_plan, current_user.id, body.plan_id)
+    if plan is None or not await asyncio.to_thread(tracker.mark_plan_item, current_user.id, body.plan_id,
+                                                    body.item_id, body.done, career_plan.item_ids(plan)):
+        raise HTTPException(status_code=404, detail="No such item in your plan")
+    latest = await asyncio.to_thread(tracker.latest_career_plan, current_user.id)
+    return {"done": latest["done"] if latest and latest["id"] == body.plan_id else []}
 
 
 # ── Document / PDF export ─────────────────────────────────────────────────────

@@ -1,31 +1,15 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import TopBar, { Page } from "@/components/ui/TopBar";
 import { Bar, buttonClass, Callout, cx, EmptyState, Skeleton, Spinner, TextLink } from "@/components/ui/kit";
+import CareerPlan, { planItemIds } from "@/components/CareerPlan";
 import MarketDemandPanel from "@/components/MarketDemand";
-import { useResource } from "@/lib/store";
+import { requestJson, useResource } from "@/lib/store";
 import { postStream } from "@/lib/sse";
 import { shortDate } from "@/lib/format";
 import { noScoreReason, riskLevel, RISK } from "@/lib/status";
-import type { CareerExposure, MarketDemand, OccupationEvidence, Persona, RoleExposure, TaskEvidence } from "@/lib/types";
-
-interface RoadmapItem {
-  skill: string; reason?: string; action?: string; timeline?: string; resource?: string;
-  market?: { ads: number; of: number; shown: boolean } | null;
-}
-interface SavedRoadmap { items: RoadmapItem[]; at: string; target: string }
-
-/* The last roadmap is kept in this browser, per account, so it survives a reload. */
-function roadmapKey(): string | null {
-  try {
-    const token = localStorage.getItem("windrush_token") || "";
-    const payload = JSON.parse(atob(token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/")));
-    return payload.user_id ? `windrush_roadmap_${payload.user_id}` : null;
-  } catch {
-    return null;
-  }
-}
+import type { CareerExposure, MarketDemand, OccupationEvidence, Persona, RoleExposure, SavedPlan, TaskEvidence } from "@/lib/types";
 
 function monthName(month: string): string {
   return new Date(`${month}-01T00:00:00Z`).toLocaleDateString("en-GB", { month: "long", year: "numeric", timeZone: "UTC" });
@@ -102,18 +86,11 @@ export default function CareersPage() {
   const exposure = useResource<CareerExposure>("/api/careers/exposure");
   const persona = useResource<Persona>("/api/persona");
   const market = useResource<MarketDemand>("/api/careers/market");
-  const [roadmap, setRoadmap] = useState<SavedRoadmap | null>(null);
-  const [generating, setGenerating] = useState(false);
-  const [roadmapError, setRoadmapError] = useState<string | null>(null);
-
-  useEffect(() => {
-    const key = roadmapKey();
-    if (!key) return;
-    try {
-      const raw = localStorage.getItem(key);
-      if (raw) setRoadmap(JSON.parse(raw));
-    } catch {}
-  }, []);
+  const stored = useResource<SavedPlan | { plan: null }>("/api/careers/plan");
+  const [mine, setMine] = useState<SavedPlan | null>(null);
+  const [generating, setGenerating] = useState<string | null>(null);
+  const [planError, setPlanError] = useState<string | null>(null);
+  const saved: SavedPlan | null = mine ?? (stored.data && stored.data.plan ? (stored.data as SavedPlan) : null);
 
   const roles = exposure.data?.roles ?? [];
   const targetRoles = roles.filter((r) => r.kind === "target");
@@ -121,28 +98,49 @@ export default function CareersPage() {
   const target = persona.data?.preferences.target_titles?.[0] ?? "";
 
   const generate = async () => {
-    setGenerating(true);
-    setRoadmapError(null);
-    let items: RoadmapItem[] = [];
+    setGenerating("Starting…");
+    setPlanError(null);
+    let made: SavedPlan | null = null;
+    let failed = "";
     try {
-      await postStream("/api/careers/roadmap", undefined, (ev) => {
-        if (ev.type === "roadmap" && Array.isArray(ev.items)) items = ev.items as RoadmapItem[];
+      await postStream("/api/careers/plan", undefined, (ev) => {
+        if (typeof ev.message === "string" && (ev.type === "start" || ev.type === "status")) setGenerating(ev.message);
+        if (ev.type === "plan") made = ev as unknown as SavedPlan;
+        if (ev.type === "error") failed = typeof ev.message === "string" ? ev.message : "The plan couldn't be written.";
       });
-      if (!items.length) throw new Error("The roadmap came back empty. Try again.");
-      const saved = { items, at: new Date().toISOString(), target };
-      setRoadmap(saved);
-      const key = roadmapKey();
-      if (key) try { localStorage.setItem(key, JSON.stringify(saved)); } catch {}
+      if (!made) throw new Error(failed || "The plan came back empty. Try again.");
+      setMine(made);
     } catch (e) {
-      setRoadmapError(e instanceof Error ? e.message : "Roadmap generation failed.");
+      setPlanError(e instanceof Error ? e.message : "The plan couldn't be written.");
     } finally {
-      setGenerating(false);
+      setGenerating(null);
     }
   };
 
+  const toggle = async (itemId: string, done: boolean) => {
+    if (!saved) return;
+    const before = saved;
+    const next = done ? [...saved.done.filter((d) => d !== itemId), itemId] : saved.done.filter((d) => d !== itemId);
+    setMine({ ...saved, done: next });
+    setPlanError(null);
+    try {
+      const res = await requestJson<{ done: string[] }>("/api/careers/plan/items", {
+        method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ plan_id: saved.id, item_id: itemId, done }),
+      });
+      setMine({ ...before, done: res.done });
+    } catch (e) {
+      setMine(before);
+      setPlanError(e instanceof Error ? e.message : "That didn't save. Try again.");
+    }
+  };
+
+  const total = saved ? planItemIds(saved).length : 0;
+  const doneCount = saved ? saved.done.length : 0;
+
   return (
     <>
-      <TopBar crumbs={[{ label: "Grow" }, { label: "AI exposure & roadmap" }]} />
+      <TopBar crumbs={[{ label: "Grow" }, { label: "Career plan & AI exposure" }]} />
       <Page className="gap-5 pt-[26px] sm:pt-[26px]">
         <div className="flex flex-col gap-[6px]">
           <h1 className="m-0 text-[26px] font-semibold tracking-[-0.025em]">How exposed are your roles to AI?</h1>
@@ -173,53 +171,36 @@ export default function CareersPage() {
         {market.error && <Callout title="Couldn't load what employers ask for">{market.error}</Callout>}
         {market.loading ? <Skeleton className="h-[220px] rounded-card" /> : market.data && <MarketDemandPanel market={market.data} />}
 
-        <section aria-labelledby="road" className="flex flex-col gap-[14px]">
+        <section aria-labelledby="plan" className="flex flex-col gap-[14px]">
           <div className="flex flex-wrap items-end justify-between gap-3">
             <div className="flex flex-col gap-1">
-              <h2 id="road" className="m-0 text-[18px] font-semibold tracking-[-0.015em]">
-                {(roadmap?.target || target) ? `Roadmap to ${roadmap?.target || target}` : "Your roadmap"}
+              <h2 id="plan" className="m-0 text-[18px] font-semibold tracking-[-0.015em]">
+                {(saved?.target || target) ? `Your plan for ${saved?.target || target}` : "Your plan"}
               </h2>
               <span className="text-[13px] text-ink-3">
-                Six skills to build next, from your whole profile, your target roles and what their ads ask for.
-                {roadmap ? ` Generated ${shortDate(roadmap.at)}.` : ""}
+                From your whole profile, your target roles, what their ads ask for and how your applications are going.
+                {saved ? ` Made ${shortDate(saved.created_at)} · ${doneCount} of ${total} done.` : ""}
               </span>
             </div>
-            <button type="button" onClick={generate} disabled={generating} className={buttonClass("primary", "top")}>
-              {generating ? <><Spinner /> Generating…</> : roadmap ? "Regenerate roadmap" : "Generate roadmap"}
+            <button type="button" onClick={generate} disabled={!!generating} className={buttonClass("primary", "top")}>
+              {generating ? <><Spinner /> {generating}</> : saved ? "Make a new plan" : "Make my plan"}
             </button>
           </div>
-          {roadmapError && <Callout>{roadmapError}</Callout>}
+          {planError && <Callout>{planError}</Callout>}
+          {stored.error && !saved && <Callout title="Couldn't load your plan">{stored.error}</Callout>}
           {generating ? (
-            <ol className="list-none m-0 p-0 grid gap-[14px]" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(min(300px, 100%), 1fr))" }}
-              aria-label="Generating your roadmap" role="status">
-              {Array.from({ length: 6 }).map((_, i) => <li key={i}><Skeleton className="h-[210px] rounded-card" /></li>)}
-            </ol>
-          ) : roadmap ? (
-            <ol className="list-none m-0 p-0 grid gap-[14px]" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(min(300px, 100%), 1fr))" }}>
-              {roadmap.items.map((r, i) => (
-                <li key={i} className="bg-surface border border-border rounded-card p-[18px] flex flex-col gap-3">
-                  <span className="font-mono text-[12px] text-ink-3">{String(i + 1).padStart(2, "0")}</span>
-                  <span className="text-[16px] font-semibold leading-[1.3]">{r.skill}</span>
-                  {r.market && (
-                    <span className="text-[12px] font-mono text-ink-3">
-                      Asked for in {r.market.ads} of {r.market.of} ads{r.market.shown ? " · you already show it" : ""}
-                    </span>
-                  )}
-                  {r.reason && <span className="text-[13px] leading-[1.5] text-ink-2">{r.reason}</span>}
-                  {(r.action || r.resource) && (
-                    <span className="flex flex-col gap-1 px-3 py-[10px] rounded-[10px] bg-subtle border border-track">
-                      <span className="text-[12px] font-semibold">Start with</span>
-                      {r.action && <span className="text-[12.5px] leading-[1.45] text-ink-2">{r.action}</span>}
-                      {r.resource && <span className="text-[12.5px] leading-[1.45] text-teal-deep">{r.resource}</span>}
-                    </span>
-                  )}
-                  {r.timeline && <span className="mt-auto text-[12px] text-ink-3">{r.timeline}</span>}
-                </li>
-              ))}
-            </ol>
+            <div className="grid gap-[14px]" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(min(340px, 100%), 1fr))" }}
+              aria-label="Writing your plan" role="status">
+              {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-[260px] rounded-card" />)}
+            </div>
+          ) : stored.loading && !saved ? (
+            <Skeleton className="h-[260px] rounded-card" />
+          ) : saved ? (
+            <CareerPlan saved={saved} onToggle={toggle} />
           ) : (
             <EmptyState>
-              Generate a six-step plan built on your strongest skills and aimed at {target || "the roles you want"}.
+              Make a plan to {target || "the roles you want"}: where you stand, goals with dates, and for each gap a study
+              guide, a project that builds on your own work and a proof point to aim for.
             </EmptyState>
           )}
         </section>

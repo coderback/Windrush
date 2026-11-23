@@ -127,6 +127,34 @@ export interface MarketSkill {
 
 export interface FunnelCounts { applied: number; replies: number; interviews: number; rejected: number }
 
+export interface PlanGoal { id: string; goal: string; measure: string; by: string }
+export interface PlanStep { id: string; text: string }
+/** A resource the plan names; `checked` once a live search found a page for it (then `url` and `title` are that page). */
+export interface PlanResource { name: string; url: string; checked: boolean; title?: string }
+export interface PlanTrack {
+  id: string;
+  skill: string;
+  why: string;
+  market: { ads: number; of: number; shown: boolean } | null;
+  study: PlanStep[];
+  resources: PlanResource[];
+  project: { id: string; title: string; brief: string; builds_on: string; done_when: string } | null;
+  proof: { id: string; kind: string; target: string; why: string } | null;
+  timeline: string;
+}
+/** An event, community, competition or course found by live search; `when` only if the result itself said so. */
+export interface PlanVenue { id: string; name: string; url: string; kind: string; when: string; why: string }
+export interface CareerPlanBody {
+  diagnosis: string;
+  strengths: string[];
+  goals: PlanGoal[];
+  tracks: PlanTrack[];
+  applications: string[];
+  venues: PlanVenue[];
+  venues_searched?: boolean;
+}
+export interface SavedPlan { id: number; target: string; created_at: string; plan: CareerPlanBody; done: string[] }
+
 /** GET /careers/market: counts over read ads and the user's applications; no model involved. */
 export interface MarketDemand {
   roles: string[];

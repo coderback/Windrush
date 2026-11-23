@@ -861,6 +861,7 @@ test("AI exposure shows each role's published score, or says there isn't enough 
         least_handed_to_ai: [{ task: "Design and develop software systems.", handed_to_ai: 42 }],
       },
     },
+    "GET /api/careers/plan": { plan: null },
     "GET /api/careers/market": { roles: [], ads: 0, level: "", matched_ads: 0, read_ads: 0, waiting: 0, skills: [],
                                  funnel: { total: { applied: 0, replies: 0, interviews: 0, rejected: 0 }, by_role: [] },
                                  noted_gaps: [] },
@@ -885,6 +886,7 @@ test("the careers page shows what employers ask for, what the profile shows, and
   const api = await mockApi(page, {
     ...SHELL,
     "GET /api/careers/exposure": { roles: [], evidence: null },
+    "GET /api/careers/plan": { plan: null },
     "GET /api/careers/market": {
       roles: ["Software Engineer"], ads: 40, level: "junior", matched_ads: 55, read_ads: 900, waiting: 12,
       skills: [skill("Python", 30, true, ["your skills", "RootLayer"]), skill("Kubernetes", 18, false)],
@@ -905,6 +907,78 @@ test("the careers page shows what employers ask for, what the profile shows, and
   const all = panel.getByRole("row", { name: /^All/ });
   await expect(all.getByRole("cell").last()).toHaveText("10%");
   api.expectAllMocked();
+});
+
+const NO_MARKET = { roles: [], ads: 0, level: "", matched_ads: 0, read_ads: 0, waiting: 0, skills: [],
+                    funnel: { total: { applied: 0, replies: 0, interviews: 0, rejected: 0 }, by_role: [] }, noted_gaps: [] };
+const PLAN = {
+  id: 7, target: "ML Engineer", created_at: "2026-11-23T10:00:00Z", done: [],
+  plan: {
+    diagnosis: "Strong research ML; little production infrastructure.",
+    strengths: ["Reproducible GPU training (Cambium)"],
+    goals: [{ id: "g1", goal: "Ship a model service", measure: "Deployed with CI and a rollback", by: "60 days" }],
+    tracks: [{
+      id: "t1", skill: "Kubernetes", why: "Platform teams ask for it.", market: { ads: 18, of: 40, shown: false },
+      study: [{ id: "t1.s1", text: "Pods, deployments and services" }, { id: "t1.s2", text: "Helm charts" }],
+      resources: [{ name: "Kubernetes Up & Running", url: "", checked: false }],
+      project: { id: "t1.p", title: "Serve Cambium on k8s", brief: "Package the scorer.", builds_on: "Cambium",
+                 done_when: "A rolling deploy passes its health check" },
+      proof: { id: "t1.r", kind: "certification", target: "CKAD", why: "Employers can check it." },
+      timeline: "2 months",
+    }],
+    applications: ["Most replies came from ML roles: focus there."],
+    venues: [],
+  },
+};
+
+test("the career plan is made, kept on the server, and its items ticked off", async ({ page }) => {
+  await signIn(page);
+  const marks: unknown[] = [];
+  const api = await mockApi(page, {
+    ...SHELL,
+    "GET /api/careers/exposure": { roles: [], evidence: null },
+    "GET /api/careers/market": NO_MARKET,
+    "GET /api/careers/plan": { plan: null },
+    "POST /api/careers/plan": { sse: [{ type: "start", message: "Counting what employers ask for…" }, { type: "plan", ...PLAN },
+                                      { type: "done" }] },
+    "PUT /api/careers/plan/items": (request) => {
+      const body = request.postDataJSON();
+      marks.push(body);
+      return { done: body.done ? [body.item_id] : [] };
+    },
+  });
+  await page.goto("/careers");
+  await page.getByRole("button", { name: "Make my plan" }).click();
+
+  await expect(page.getByRole("heading", { name: "Your plan for ML Engineer" })).toBeVisible();
+  await expect(page.getByText("Strong research ML; little production infrastructure.")).toBeVisible();
+  await expect(page.getByText("Reproducible GPU training (Cambium)")).toBeVisible();
+  await expect(page.getByText("within 60 days")).toBeVisible();
+  await expect(page.getByText("Asked for in 18 of 40 ads")).toBeVisible();
+  await expect(page.getByText("Builds on Cambium")).toBeVisible();
+  await expect(page.getByText("Aim for (Certification): CKAD")).toBeVisible();
+  await expect(page.getByText("(not checked: search for it before relying on it)")).toBeVisible();
+  await expect(page.getByText("Most replies came from ML roles: focus there.")).toBeVisible();
+  await expect(page.getByText("0 of 5 done", { exact: false })).toBeVisible();
+
+  await page.getByRole("checkbox", { name: "Kubernetes step 2" }).check();
+  await expect.poll(() => marks.at(-1)).toEqual({ plan_id: 7, item_id: "t1.s2", done: true });
+  await expect(page.getByText("1 of 5 done", { exact: false })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Make a new plan" })).toBeVisible();
+  api.expectAllMocked();
+});
+
+test("a saved plan is shown on arrival", async ({ page }) => {
+  await signIn(page);
+  await mockApi(page, {
+    ...SHELL,
+    "GET /api/careers/exposure": { roles: [], evidence: null },
+    "GET /api/careers/market": NO_MARKET,
+    "GET /api/careers/plan": { ...PLAN, done: ["g1"] },
+  });
+  await page.goto("/careers");
+  await expect(page.getByRole("checkbox", { name: "Ship a model service" })).toBeChecked();
+  await expect(page.getByText("1 of 5 done", { exact: false })).toBeVisible();
 });
 
 test("a job page never shows the old placeholder score", async ({ page }) => {

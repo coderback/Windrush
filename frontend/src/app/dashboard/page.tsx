@@ -267,7 +267,7 @@ export default function DashboardPage() {
           <section aria-labelledby="risk" className="flex-[1_1_300px] min-w-0 bg-surface border border-border rounded-card p-5 flex flex-col gap-4">
             <div className="flex justify-between items-center">
               <SectionTitle id="risk">AI exposure</SectionTitle>
-              <TextLink href="/careers">Roadmap</TextLink>
+              <TextLink href="/careers">Career plan</TextLink>
             </div>
             {exposure.loading ? (
               <div className="flex flex-col gap-3">

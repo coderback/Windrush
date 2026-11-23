@@ -1,6 +1,6 @@
 """What employers ask for: each ad's skills are read once and kept only where the ad says them; the counts over
-the ads for the user's target roles say which skills their profile shows; and the roadmap gets the counts, with
-the figures shown beside each item looked up rather than taken from the model."""
+the ads for the user's target roles say which skills their profile shows; and the career plan gets the counts, with
+the figures shown beside each track looked up rather than taken from the model."""
 import asyncio
 import json
 
@@ -132,36 +132,36 @@ def test_the_market_endpoint_counts_the_users_own_profile_and_applications(clien
     assert m["funnel"]["total"]["applied"] == 1 and m["noted_gaps"] == ["Rust"]
 
 
-# ── The roadmap ───────────────────────────────────────────────────────────────
+# ── The plan's prompt ─────────────────────────────────────────────────────────
 
-def test_the_roadmap_sees_the_projects_and_the_counts_and_its_figures_are_looked_up(monkeypatch):
+def test_the_plan_sees_the_projects_and_the_counts_and_its_figures_are_looked_up(monkeypatch):
     seen = {}
 
     async def fake_llm(system, user, max_tokens=2048):
         seen.update(system=system, user=user)
-        return json.dumps({"items": [{"skill": "Rust", "reason": "Asked for in 999 ads."}, {"skill": "Haskell"}]})
+        return json.dumps({"tracks": [{"skill": "Rust", "why": "Asked for in 999 ads."}, {"skill": "Haskell"}]})
     monkeypatch.setattr(agent, "_llm", fake_llm)
     ads = [_ad(i, "Software Engineer", ["Rust", "Python"]) for i in range(5)]
     m = market.demand(PERSONA, [{"job_title": "Software Engineer", "status": "Rejected"}], ads)
-    out = asyncio.run(agent.execute_tool("generate_skill_roadmap", {"persona": PERSONA, "market": m}))
+    out = asyncio.run(agent.execute_tool("generate_career_plan", {"persona": PERSONA, "market": m}))
     assert "- RootLayer: Postgres, Docker" in seen["user"] and "Acme (Kubernetes)" in seen["user"]
     assert "- Rust: asked for in 5 of 5 ads (5 as required); NOT shown anywhere in the profile" in seen["user"]
     assert "- Python: asked for in 5 of 5 ads (5 as required); shown in: your skills" in seen["user"]
     assert "1 sent, 0 replies, 0 interviews, 1 rejections" in seen["user"]
     assert "never invent one" in seen["system"]
-    assert [i["market"] for i in out["items"]] == [{"ads": 5, "of": 5, "shown": False}, None]
+    assert [t["market"] for t in out["plan"]["tracks"]] == [{"ads": 5, "of": 5, "shown": False}, None]
 
 
 def test_the_prompt_block_is_empty_without_counts():
     assert market.prompt_block({}) == "" and market.prompt_block(market.demand(PERSONA, [], [])) == ""
 
 
-def test_main_passes_the_market_to_the_roadmap(client, user, monkeypatch):
+def test_main_passes_the_market_to_the_plan(client, user, monkeypatch):
     got = {}
 
     async def tool(name, tool_input):
         got.update(name=name, keys=set(tool_input))
-        return {"status": "generated", "items": []}
+        return {"status": "empty", "plan": None}
     monkeypatch.setattr(main, "execute_tool", tool)
-    client.post("/careers/roadmap").text
-    assert got == {"name": "generate_skill_roadmap", "keys": {"persona", "market"}}
+    assert '"type": "error"' in client.post("/careers/plan").text
+    assert got == {"name": "generate_career_plan", "keys": {"persona", "market"}}

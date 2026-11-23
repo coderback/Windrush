@@ -182,7 +182,7 @@ def _roadmap_prompt(monkeypatch, persona):
         seen.update(system=system, user=user)
         return json.dumps({"items": []})
     monkeypatch.setattr(agent, "_llm", fake_llm)
-    asyncio.run(agent.execute_tool("generate_skill_roadmap", {"persona": persona}))
+    asyncio.run(agent.execute_tool("generate_career_plan", {"persona": persona}))
     return seen
 
 
@@ -197,7 +197,7 @@ def test_the_roadmap_gets_the_target_occupations_evidence_as_a_hint(monkeypatch)
 
 def test_the_roadmap_still_knows_the_skills_it_must_not_repeat(monkeypatch):
     seen = _roadmap_prompt(monkeypatch, {"skills": [{"category": "x", "skills": ["Python", "SQL"]}]})
-    assert "Skills they already list: Python, SQL" in seen["user"]
+    assert "Skills they list: Python, SQL" in seen["user"]
 
 
 def test_the_roadmap_works_without_evidence(monkeypatch):
