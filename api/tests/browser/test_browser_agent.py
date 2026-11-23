@@ -125,7 +125,8 @@ def test_run_apply_closes_the_browser_as_soon_as_it_is_done(ba, site, monkeypatc
     async def run():
         queue: asyncio.Queue = asyncio.Queue()
         events = []
-        async for chunk in agent.run_apply("u", "j", f"{site}/form.html", "", [], "s", queue, None):
+        async for chunk in agent.run_apply("u", "j", job_url=f"{site}/form.html", session_id="s",
+                                           instruction_queue=queue):
             event = json.loads(chunk[6:])
             events.append(event)
             if event.get("interactive"):
