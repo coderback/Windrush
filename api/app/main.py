@@ -32,6 +32,8 @@ from . import risk_scorer
 from . import seniority
 from . import sponsor_register
 from . import job_attributes
+from . import job_skills
+from . import market
 from .models import Persona
 from .profile_merge import merge_cv as _merge_cv, _split_cv_dates  # noqa: F401  (tests use _split_cv_dates)
 
@@ -69,6 +71,7 @@ async def lifespan(app: FastAPI):
     from . import discovery
     background = [asyncio.create_task(sponsor_register.keep_fresh()),
                   asyncio.create_task(job_attributes.keep_extracting()),
+                  asyncio.create_task(job_skills.keep_reading()),
                   asyncio.create_task(discovery.keep_collecting()),
                   asyncio.create_task(autopilot.keep_running()),
                   asyncio.create_task(gmail.keep_syncing())]
@@ -838,16 +841,29 @@ async def careers_exposure(
     return risk_scorer.career_exposure(tracker.get_user_persona(current_user.id))
 
 
+def _market_for(user_id: str) -> dict:
+    return market.demand(tracker.get_user_persona(user_id), tracker.list_applications(user_id),
+                         waiting=jobs_db.ads_waiting_for_skills())
+
+
+@app.get("/careers/market")
+async def careers_market(current_user: Annotated[auth.User, Depends(auth.get_current_user)]):
+    """What employers ask for in the user's target roles, whether their profile shows it, and how their applications
+    for those roles have gone. Counts only: no model is involved."""
+    return await asyncio.to_thread(_market_for, current_user.id)
+
+
 @app.post("/careers/roadmap")
 async def careers_roadmap(  # noqa: E302
     current_user: Annotated[auth.User, Depends(auth.get_current_user)],
 ):
-    """SSE: generate a skill development roadmap from the user's persona."""
+    """SSE: generate a skill development roadmap from the user's persona and what employers ask for."""
     persona = tracker.get_user_persona(current_user.id)
 
     async def gen():
         yield _sse_json("start", {"message": "Building your skill roadmap…"})
-        result = await execute_tool("generate_skill_roadmap", {"persona": persona})
+        demand = await asyncio.to_thread(_market_for, current_user.id)
+        result = await execute_tool("generate_skill_roadmap", {"persona": persona, "market": demand})
         yield _sse_json("roadmap", result)
         yield _sse_json("done", {"message": "Roadmap ready"})
 

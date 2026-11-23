@@ -114,6 +114,32 @@ export interface CareerExposure {
   evidence: OccupationEvidence | null;
 }
 
+/** One skill the ads for the user's target roles ask for, and whether their profile shows it. */
+export interface MarketSkill {
+  name: string;
+  key: string;
+  ads: number;
+  share: number;
+  required: number;
+  shown: boolean;
+  where: string[];
+}
+
+export interface FunnelCounts { applied: number; replies: number; interviews: number; rejected: number }
+
+/** GET /careers/market: counts over read ads and the user's applications; no model involved. */
+export interface MarketDemand {
+  roles: string[];
+  ads: number;
+  level: string;
+  matched_ads: number;
+  read_ads: number;
+  waiting: number;
+  skills: MarketSkill[];
+  funnel: { total: FunnelCounts; by_role: (FunnelCounts & { role: string })[] };
+  noted_gaps: string[];
+}
+
 export interface Analysis {
   /** The ad's text couldn't be read, so the job wasn't scored; reasoning says so. */
   no_text?: boolean;

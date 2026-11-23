@@ -42,7 +42,10 @@ CREATE TABLE IF NOT EXISTS jobs (
     years_min       INTEGER,
     degree          TEXT,
     attributes_version INTEGER,
-    attributes_tries   INTEGER
+    attributes_tries   INTEGER,
+    skills          TEXT,
+    skills_version  INTEGER,
+    skills_tries    INTEGER
 );
 """
 
@@ -139,7 +142,8 @@ def init_db(db_path: str = "") -> None:
         try: con.execute("ALTER TABLE jobs ADD COLUMN semantic_vector BLOB")
         except sqlite3.OperationalError: pass
         for column in ("sponsorship TEXT", "sponsorship_evidence TEXT", "clearance TEXT", "sponsor_key TEXT",
-                       "years_min INTEGER", "degree TEXT", "attributes_version INTEGER", "attributes_tries INTEGER"):
+                       "years_min INTEGER", "degree TEXT", "attributes_version INTEGER", "attributes_tries INTEGER",
+                       "skills TEXT", "skills_version INTEGER", "skills_tries INTEGER"):
             try: con.execute(f"ALTER TABLE jobs ADD COLUMN {column}")
             except sqlite3.OperationalError: pass
         con.execute(_CREATE_SPONSORS_TABLE)
@@ -1039,7 +1043,8 @@ def update_description(job_db_id: str, description: str) -> None:
         status, evidence, clearance, sponsor_key = _sponsorship_columns(company or "", title or "", description)
         con.execute(
             "UPDATE jobs SET description = ?, level = ?, updated_at = ?, sponsorship = ?, sponsorship_evidence = ?, "
-            "clearance = ?, sponsor_key = ?, attributes_version = NULL, attributes_tries = 0 WHERE id = ?",
+            "clearance = ?, sponsor_key = ?, attributes_version = NULL, attributes_tries = 0, "
+            "skills_version = NULL, skills_tries = 0 WHERE id = ?",
             (description, seniority.infer_level(title, description), _now(), status, evidence, clearance,
              sponsor_key, job_db_id),
         )
@@ -1106,6 +1111,90 @@ def store_attributes(job_db_id: str, attributes: dict | None) -> None:
                  attributes["clearance"], attributes["years_min"], attributes["degree"], ATTRIBUTES_VERSION,
                  job_db_id))
     con.close()
+
+
+# ── LLM-read skills (see job_skills.py) ───────────────────────────────────────
+
+_MAX_SKILL_TRIES = 3
+# A stored snippet (sync keeps ~500 characters) rarely lists what the role asks for, so only fuller ads are read.
+SKILLS_MIN_AD_CHARS = 600
+
+
+def jobs_needing_skills(limit: int, version: int, locations: list[str] | None = None) -> list[dict]:
+    """Newest ads with enough text that the current skill reader hasn't read, skipping ones it has given up on.
+    `locations` narrows them to what some feed shows, as for jobs_needing_attributes."""
+    if not _DB_PATH:
+        init_db()
+    where = ("coalesce(skills_version, 0) < ? AND coalesce(skills_tries, 0) < ? "
+             "AND length(coalesce(description, '')) >= ?")
+    params: list = [version, _MAX_SKILL_TRIES, SKILLS_MIN_AD_CHARS]
+    if locations is not None:
+        loc_sql, loc_params, _, _ = _locations_clause(locations)
+        if loc_sql:
+            where += f" AND {loc_sql}"
+            params += loc_params
+    con = sqlite3.connect(_DB_PATH)
+    con.row_factory = sqlite3.Row
+    rows = con.execute(
+        f"SELECT id, title, company, description FROM jobs WHERE {where} "
+        "ORDER BY created_at DESC LIMIT ?", (*params, limit)).fetchall()
+    con.close()
+    return [dict(r) for r in rows]
+
+
+def store_skills(job_db_id: str, skills: dict | None, version: int) -> None:
+    """Save an ad's skills ({"required": [...], "preferred": [...]}), or, for None, count a failed read."""
+    if not _DB_PATH:
+        init_db()
+    con = sqlite3.connect(_DB_PATH)
+    with con:
+        if skills is None:
+            con.execute("UPDATE jobs SET skills_tries = coalesce(skills_tries, 0) + 1 WHERE id = ?", (job_db_id,))
+        else:
+            con.execute("UPDATE jobs SET skills = ?, skills_version = ? WHERE id = ?",
+                        (json.dumps(skills), version, job_db_id))
+    con.close()
+
+
+def ads_with_skills(since: str = "") -> list[dict]:
+    """Every ad whose skills have been read (expired ones too: they still say what employers asked for), first seen
+    on or after `since` (ISO date) when given: [{id, title, company, level, skills}]."""
+    if not _DB_PATH:
+        init_db()
+    con = sqlite3.connect(_DB_PATH)
+    con.row_factory = sqlite3.Row
+    rows = con.execute("SELECT id, title, company, level, skills FROM jobs WHERE skills IS NOT NULL AND created_at >= ?",
+                       (since,)).fetchall()
+    con.close()
+    out = []
+    for r in rows:
+        try:
+            skills = json.loads(r["skills"])
+        except (TypeError, ValueError):
+            continue
+        out.append({"id": r["id"], "title": r["title"] or "", "company": r["company"] or "", "level": r["level"] or "",
+                    "skills": skills})
+    return out
+
+
+def ads_waiting_for_skills() -> int:
+    """How many ads with enough text the skill reader still has to read."""
+    if not _DB_PATH:
+        init_db()
+    con = sqlite3.connect(_DB_PATH)
+    from .job_skills import SKILLS_VERSION
+    row = con.execute("SELECT count(*) FROM jobs WHERE coalesce(skills_version, 0) < ? AND coalesce(skills_tries, 0) < ? "
+                      "AND length(coalesce(description, '')) >= ?",
+                      (SKILLS_VERSION, _MAX_SKILL_TRIES, SKILLS_MIN_AD_CHARS)).fetchone()
+    con.close()
+    return row[0] if row else 0
+
+
+def title_matcher(title: str):
+    """A test for job titles that are the same role as `title`: each of its words (or a known synonym, e.g. ML for
+    machine learning) appears in the job title."""
+    patterns = [_compiled(_group_pattern(g)) for g in search_groups(title)]
+    return lambda job_title: bool(patterns) and all(p.search((job_title or "").lower()) for p in patterns)
 
 
 async def ensure_full_description(job: dict) -> dict:
