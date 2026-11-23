@@ -3,13 +3,17 @@
 import { useEffect, useState } from "react";
 import TopBar, { Page } from "@/components/ui/TopBar";
 import { Bar, buttonClass, Callout, cx, EmptyState, Skeleton, Spinner, TextLink } from "@/components/ui/kit";
+import MarketDemandPanel from "@/components/MarketDemand";
 import { useResource } from "@/lib/store";
 import { postStream } from "@/lib/sse";
 import { shortDate } from "@/lib/format";
 import { noScoreReason, riskLevel, RISK } from "@/lib/status";
-import type { CareerExposure, OccupationEvidence, Persona, RoleExposure, TaskEvidence } from "@/lib/types";
+import type { CareerExposure, MarketDemand, OccupationEvidence, Persona, RoleExposure, TaskEvidence } from "@/lib/types";
 
-interface RoadmapItem { skill: string; reason?: string; action?: string; timeline?: string; resource?: string }
+interface RoadmapItem {
+  skill: string; reason?: string; action?: string; timeline?: string; resource?: string;
+  market?: { ads: number; of: number; shown: boolean } | null;
+}
 interface SavedRoadmap { items: RoadmapItem[]; at: string; target: string }
 
 /* The last roadmap is kept in this browser, per account, so it survives a reload. */
@@ -97,6 +101,7 @@ function Evidence({ evidence }: { evidence: OccupationEvidence }) {
 export default function CareersPage() {
   const exposure = useResource<CareerExposure>("/api/careers/exposure");
   const persona = useResource<Persona>("/api/persona");
+  const market = useResource<MarketDemand>("/api/careers/market");
   const [roadmap, setRoadmap] = useState<SavedRoadmap | null>(null);
   const [generating, setGenerating] = useState(false);
   const [roadmapError, setRoadmapError] = useState<string | null>(null);
@@ -165,6 +170,9 @@ export default function CareersPage() {
           </>
         )}
 
+        {market.error && <Callout title="Couldn't load what employers ask for">{market.error}</Callout>}
+        {market.loading ? <Skeleton className="h-[220px] rounded-card" /> : market.data && <MarketDemandPanel market={market.data} />}
+
         <section aria-labelledby="road" className="flex flex-col gap-[14px]">
           <div className="flex flex-wrap items-end justify-between gap-3">
             <div className="flex flex-col gap-1">
@@ -172,7 +180,7 @@ export default function CareersPage() {
                 {(roadmap?.target || target) ? `Roadmap to ${roadmap?.target || target}` : "Your roadmap"}
               </h2>
               <span className="text-[13px] text-ink-3">
-                Six skills to build next, based on your persona and target role.
+                Six skills to build next, from your whole profile, your target roles and what their ads ask for.
                 {roadmap ? ` Generated ${shortDate(roadmap.at)}.` : ""}
               </span>
             </div>
@@ -192,6 +200,11 @@ export default function CareersPage() {
                 <li key={i} className="bg-surface border border-border rounded-card p-[18px] flex flex-col gap-3">
                   <span className="font-mono text-[12px] text-ink-3">{String(i + 1).padStart(2, "0")}</span>
                   <span className="text-[16px] font-semibold leading-[1.3]">{r.skill}</span>
+                  {r.market && (
+                    <span className="text-[12px] font-mono text-ink-3">
+                      Asked for in {r.market.ads} of {r.market.of} ads{r.market.shown ? " · you already show it" : ""}
+                    </span>
+                  )}
                   {r.reason && <span className="text-[13px] leading-[1.5] text-ink-2">{r.reason}</span>}
                   {(r.action || r.resource) && (
                     <span className="flex flex-col gap-1 px-3 py-[10px] rounded-[10px] bg-subtle border border-track">

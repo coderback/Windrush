@@ -861,6 +861,9 @@ test("AI exposure shows each role's published score, or says there isn't enough 
         least_handed_to_ai: [{ task: "Design and develop software systems.", handed_to_ai: 42 }],
       },
     },
+    "GET /api/careers/market": { roles: [], ads: 0, level: "", matched_ads: 0, read_ads: 0, waiting: 0, skills: [],
+                                 funnel: { total: { applied: 0, replies: 0, interviews: 0, rejected: 0 }, by_role: [] },
+                                 noted_gaps: [] },
   });
   await page.goto("/careers");
 
@@ -872,6 +875,35 @@ test("AI exposure shows each role's published score, or says there isn't enough 
   await expect(page.getByRole("heading", { name: "What people hand to AI in Software Developers" })).toBeVisible();
   await expect(page.getByText("May 2026", { exact: false })).toBeVisible();
   await expect(page.getByText("Skill by skill")).toHaveCount(0);
+  api.expectAllMocked();
+});
+
+test("the careers page shows what employers ask for, what the profile shows, and the application funnel", async ({ page }) => {
+  await signIn(page);
+  const skill = (name: string, ads: number, shown: boolean, where: string[] = []) =>
+    ({ name, key: name.toLowerCase(), ads, share: ads / 40, required: ads, shown, where });
+  const api = await mockApi(page, {
+    ...SHELL,
+    "GET /api/careers/exposure": { roles: [], evidence: null },
+    "GET /api/careers/market": {
+      roles: ["Software Engineer"], ads: 40, level: "junior", matched_ads: 55, read_ads: 900, waiting: 12,
+      skills: [skill("Python", 30, true, ["your skills", "RootLayer"]), skill("Kubernetes", 18, false)],
+      funnel: { total: { applied: 20, replies: 2, interviews: 1, rejected: 6 },
+                by_role: [{ role: "Software Engineer", applied: 20, replies: 2, interviews: 1, rejected: 6 }] },
+      noted_gaps: [],
+    },
+  });
+  await page.goto("/careers");
+
+  const panel = page.getByRole("region", { name: "What employers ask for" });
+  await expect(panel.getByText("Counted over 40 junior-level ads for Software Engineer")).toBeVisible();
+  await expect(panel.getByText("1 of the 2 most asked-for skills aren't in your profile yet.", { exact: false })).toBeVisible();
+  await expect(panel.getByText("12 more ads are still being read.", { exact: false })).toBeVisible();
+  await expect(panel.getByText("You show it: your skills, RootLayer")).toBeVisible();
+  await expect(panel.getByRole("listitem").filter({ hasText: "Kubernetes" }).getByText("Not in your profile yet")).toBeVisible();
+  await expect(panel.getByText("18 of 40 ads")).toBeVisible();
+  const all = panel.getByRole("row", { name: /^All/ });
+  await expect(all.getByRole("cell").last()).toHaveText("10%");
   api.expectAllMocked();
 });
 

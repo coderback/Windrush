@@ -14,6 +14,7 @@ from openai import AsyncOpenAI, BadRequestError
 from . import azure_config, doc_check, doc_render
 from .company_names import normalise_company_name as _normalise_company_name
 from . import http_client
+from . import market
 from . import tracker
 from .risk_scorer import target_evidence
 from .browser_agent import apply_with_browser
@@ -1364,16 +1365,24 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
         name_str = f"{core.get('first_name', '')} {core.get('last_name', '')}".strip() or "the candidate"
         summary = persona.get("summary", "")
         exp_list = persona.get("history", [])
-        exp_str = "; ".join(
-            f"{e.get('title','')} at {e.get('employer','')}" for e in exp_list[:3]
+        exp_str = "".join(
+            f"\n- {e.get('title','')} at {e.get('employer','')}"
+            + (f" ({', '.join(e.get('tech_stack') or [])})" if e.get("tech_stack") else "")
+            for e in exp_list[:6]
         )
-        
+        projects_str = "".join(
+            f"\n- {(p.get('name') or '').split(':')[0].strip()}: {', '.join(p.get('technologies') or [])}"
+            for p in persona.get("projects") or [] if p.get("name")
+        )
+
         edu_list = persona.get("education", [])
         edu_str = "; ".join(
             f"{e.get('degree','')} at {e.get('institution','')}" for e in edu_list[:2]
         )
-        
+
         job_titles = list(set(e.get("title", "") for e in exp_list if e.get("title")))
+        market_m = tool_input.get("market") or {}
+        market_str = market.prompt_block(market_m)
 
         text = await _llm(
             system=(
@@ -1395,8 +1404,12 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
                 "descriptions, so treat it as a hint: never quote its figures or call a skill safe or at risk. "
                 "4. Do NOT recommend generic soft skills (leadership, communication, PM) unless the candidate is "
                 "already working in a non-technical or hybrid role. "
-                "5. Do NOT recommend skills the candidate already lists. "
-                "6. Keep resources real and specific."
+                "5. Do NOT recommend skills the candidate already lists or shows in their projects or jobs. "
+                "6. Keep resources real and specific. "
+                "7. When counts of what employers ask for are given, they are the strongest evidence: favour skills "
+                "many ads ask for that the profile does NOT show yet, and say in the reason how many ads ask for it "
+                "(use the given numbers exactly, never invent one). A skill the profile already shows is not a gap. "
+                "8. Each 'skill' is a short name; when it is one of the counted skills, use that exact name."
             ),
             user=(
                 f"Candidate: {name_str}\n"
@@ -1406,6 +1419,8 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
                 f"Current job titles: {', '.join(job_titles)}\n"
                 f"Target role: {target_job_title or 'not specified'}\n\n"
                 f"Skills they already list: {all_skills_str}\n"
+                + (f"Projects and the technologies they used: {projects_str}\n" if projects_str else "")
+                + (f"\n{market_str}" if market_str else "")
                 + (_evidence_prompt(evidence) if evidence else "")
                 + "\nGenerate 6 skill development recommendations that deepen this candidate's technical profile and make them more competitive for their target role."
             ),
@@ -1416,7 +1431,13 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
             data = json.loads(text or "{}")
         except json.JSONDecodeError:
             data = {}
-        return {"status": "generated", "items": data.get("items", [])}
+        items = [i for i in data.get("items", []) if isinstance(i, dict) and i.get("skill")]
+        # The market figures shown with an item are looked up here, never taken from the model's text.
+        counted = {s["key"]: s for s in market_m.get("skills") or []}
+        for item in items:
+            s = counted.get(market.skill_key(str(item["skill"])))
+            item["market"] = ({"ads": s["ads"], "of": market_m.get("ads", 0), "shown": s["shown"]} if s else None)
+        return {"status": "generated", "items": items}
 
     elif name == "generate_tailored_cv":
         job = tool_input.get("job", {})
