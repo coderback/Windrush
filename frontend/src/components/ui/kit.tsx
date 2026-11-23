@@ -127,10 +127,12 @@ export function Chip({ tone = "neutral", size = "md", title, className, children
   className?: string;
   children: React.ReactNode;
 }) {
+  // A chip never grows wider than its container: long text ends in an ellipsis, with the full text on hover.
+  const text = typeof children === "string" ? children : null;
   return (
-    <span title={title}
-      className={cx("inline-flex items-center gap-[6px] rounded-full font-medium whitespace-nowrap", CHIP_TONE[tone], CHIP_SIZE[size], className)}>
-      {children}
+    <span title={title ?? text ?? undefined}
+      className={cx("inline-flex items-center gap-[6px] max-w-full rounded-full font-medium whitespace-nowrap", CHIP_TONE[tone], CHIP_SIZE[size], className)}>
+      {text != null ? <span className="min-w-0 truncate">{text}</span> : children}
     </span>
   );
 }

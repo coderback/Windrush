@@ -1,6 +1,8 @@
 /* Backend application status → label and colours (HANDOFF section 2). The statuses themselves
    stay as the API has them; only what the user sees changes. */
 
+import { daysSince } from "./format";
+
 export interface StatusMeta {
   label: string;
   dot: string;   // background class for the colour dot / bar
@@ -39,6 +41,25 @@ export const STATUS_CHOICES = ["Saved", "Pending Review", "Applied", "Responded"
 /** Sent applications (for reply rates): everything that left the building. */
 export const SENT = new Set(["Applied", "Responded", "Interview", "Offer", "Rejected"]);
 export const REPLIED = new Set(["Responded", "Interview", "Offer"]);
+
+/* Follow-ups, the same everywhere: a week in Applied with no reply means a nudge is due; after two
+   weeks the application has gone quiet, and nudging it is no longer a to-do. */
+export const FOLLOW_UP_DAYS = 7;
+export const QUIET_DAYS = 14;
+
+/** Days the application has sat in Applied, or null when it isn't in Applied. */
+export const appliedDays = (a: { status: string; date_applied?: string | null }) =>
+  (a.status === "Applied" ? daysSince(a.date_applied) : null);
+
+export const followUpDue = (a: { status: string; date_applied?: string | null }) => {
+  const d = appliedDays(a);
+  return d != null && d >= FOLLOW_UP_DAYS && d < QUIET_DAYS;
+};
+
+export const goneQuiet = (a: { status: string; date_applied?: string | null }) => {
+  const d = appliedDays(a);
+  return d != null && d >= QUIET_DAYS;
+};
 
 /* AI exposure thresholds, matching the backend: Low < 35, Medium 35–65, High ≥ 65. */
 export type RiskLevel = "Low" | "Medium" | "High";

@@ -13,7 +13,8 @@ export default function TopBar({ crumbs, children, className }: {
 }) {
   return (
     <header className={cx(
-      "flex flex-wrap items-center justify-between gap-3 px-4 sm:px-8 py-[14px] border-b border-border bg-surface",
+      // min-h: the same height with or without an action button, so the page never jumps between screens.
+      "flex flex-wrap items-center justify-between gap-3 px-4 sm:px-8 py-[14px] min-h-[67px] border-b border-border bg-surface",
       className,
     )}>
       <nav aria-label="Breadcrumb" className="flex items-center gap-2 min-w-0 text-[13.5px] text-ink-3">

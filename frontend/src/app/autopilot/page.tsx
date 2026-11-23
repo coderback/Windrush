@@ -154,7 +154,7 @@ function Settings({ settings }: { settings: AutopilotSettings }) {
 
       <div className="flex flex-col gap-2 pt-4 border-t border-track">
         <span className="text-[13px] font-semibold text-ink">A form is sent only when</span>
-        <ul className="m-0 pl-5 flex flex-col gap-1 text-[12.5px] leading-[1.5] text-ink-2">
+        <ul className="m-0 pl-5 list-disc marker:text-ink-3 flex flex-col gap-1 text-[12.5px] leading-[1.5] text-ink-2">
           <li>it&apos;s on Greenhouse, Lever, Ashby or Workable (never LinkedIn or Indeed);</li>
           <li>the fit is at least {settings.min_fit} and the level isn&apos;t a stretch;</li>
           <li>every answer came from your persona or your saved answers: nothing drafted, nothing left blank;</li>
@@ -416,7 +416,7 @@ export default function AutopilotPage() {
 
   return (
     <>
-      <TopBar crumbs={[{ label: "Autopilot" }]}>
+      <TopBar crumbs={[{ label: "Workspace" }, { label: "Autopilot" }]}>
         <button type="button" onClick={start} disabled={!s || running || starting} className={buttonClass("primary", "top")}>
           {running || starting ? <Spinner /> : <Icon name="play" size={15} />}
           {running ? "Running…" : "Run now"}

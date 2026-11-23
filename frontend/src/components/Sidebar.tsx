@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import Icon, { type IconName } from "@/components/ui/Icon";
-import { cx } from "@/components/ui/kit";
+import { cx, Skeleton } from "@/components/ui/kit";
 import { clearStore, useResource } from "@/lib/store";
 import { displayName, personaStrength } from "@/lib/persona";
 import { applyTheme, readTheme, saveTheme, type ThemeChoice } from "@/lib/theme";
@@ -128,7 +128,8 @@ export default function Sidebar() {
     { href: "/inbox", label: "Inbox", icon: "mail", badge: emailsWaiting, badgeTone: "amber" },
   ];
   const grow: NavItem[] = [
-    { href: "/careers", label: "Career plan & AI exposure", icon: "trend" },
+    // Short enough not to truncate in the 240px sidebar; the page itself covers AI exposure too.
+    { href: "/careers", label: "Career plan", icon: "trend" },
     { href: "/profile", label: "Persona", icon: "user", badge: suggested },
   ];
   const isActive = (i: NavItem) => pathname === i.href || pathname.startsWith(i.href + "/");
@@ -156,7 +157,10 @@ export default function Sidebar() {
             className="md:hidden inline-flex items-center gap-2 h-11 px-3 rounded-control border border-border text-[13.5px] font-medium text-ink">
             <Icon name={open ? "close" : "menu"} size={17} />
             Menu
-            {waiting > 0 && <span className="w-[7px] h-[7px] rounded-full bg-amber" aria-label={`${waiting} waiting for review`} />}
+            {/* Any amber badge inside the menu, not just the review queue. */}
+            {waiting + held + emailsWaiting > 0 && (
+              <span className="w-[7px] h-[7px] rounded-full bg-amber" aria-label={`${waiting + held + emailsWaiting} waiting for you`} />
+            )}
           </button>
         </div>
 
@@ -183,13 +187,26 @@ export default function Sidebar() {
 
           <div className="flex flex-col gap-3 border-t border-track pt-[14px]">
             <div className="flex items-center gap-[10px] px-[6px]">
-              <span aria-hidden="true" className="w-[34px] h-[34px] rounded-full bg-ink text-surface flex items-center justify-center text-[12.5px] font-semibold shrink-0">
-                {userInitials}
-              </span>
-              <span className="flex flex-col gap-px flex-1 min-w-0">
-                <span className="text-[13.5px] font-semibold truncate">{name}</span>
-                {line && <span className="text-[12px] text-ink-3 truncate">{line}</span>}
-              </span>
+              {persona.loading && !p ? (
+                // Until the persona arrives, a placeholder rather than "Your account" flashing to the real name.
+                <>
+                  <Skeleton className="w-[34px] h-[34px] rounded-full shrink-0" />
+                  <span className="flex flex-col gap-[6px] flex-1 min-w-0">
+                    <Skeleton className="h-[13px] w-24 rounded-[4px]" />
+                    <Skeleton className="h-[11px] w-16 rounded-[4px]" />
+                  </span>
+                </>
+              ) : (
+                <>
+                  <span aria-hidden="true" className="w-[34px] h-[34px] rounded-full bg-ink text-surface flex items-center justify-center text-[12.5px] font-semibold shrink-0">
+                    {userInitials}
+                  </span>
+                  <span className="flex flex-col gap-px flex-1 min-w-0">
+                    <span className="text-[13.5px] font-semibold truncate">{name}</span>
+                    {line && <span className="text-[12px] text-ink-3 truncate">{line}</span>}
+                  </span>
+                </>
+              )}
               <button type="button" aria-label="Log out" title="Log out" onClick={logout}
                 className="w-[34px] h-[34px] rounded-[8px] text-ink-3 hover:text-ink hover:bg-muted flex items-center justify-center shrink-0">
                 <Icon name="logout" size={17} strokeWidth={1.7} />

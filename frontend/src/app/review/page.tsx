@@ -13,7 +13,7 @@ import { useResource } from "@/lib/store";
 import { setStatus } from "@/lib/actions";
 import { longAgo } from "@/lib/format";
 import { applicationLink } from "@/lib/jobs";
-import type { Application } from "@/lib/types";
+import type { Application, AutopilotRun } from "@/lib/types";
 
 /* Applications the agent filled and stopped on before the final submit (tracker status
    Pending Review). The API keeps no live browser sessions between page loads (HANDOFF gap 1),
@@ -24,6 +24,9 @@ function ReviewQueue() {
   const router = useRouter();
   const params = useSearchParams();
   const apps = useResource<Application[]>("/api/applications");
+  const runs = useResource<AutopilotRun[]>("/api/autopilot/runs");
+  const heldByAutopilot = (runs.data ?? []).filter((r) =>
+    r.outcome === "needs_you" || r.outcome === "unconfirmed" || r.outcome === "awaiting_code").length;
   const [busy, setBusy] = useState<"skip" | "done" | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -91,9 +94,17 @@ function ReviewQueue() {
         ) : !current ? (
           <>
             <h1 className="m-0 text-[26px] font-semibold tracking-[-0.025em]">Agent review</h1>
-            <EmptyState action={<Link href="/jobs" className={buttonClass("primary", "sm")}>Browse matches</Link>}>
-              Nothing is waiting for your review. When the agent fills a form it stops before the final submit, and the application waits here for you.
-            </EmptyState>
+            {/* Autopilot holds its own queue; point there so an empty page here doesn't read as "nothing needs me". */}
+            {heldByAutopilot > 0 ? (
+              <EmptyState action={<Link href="/autopilot" className={buttonClass("primary", "sm")}>Open Autopilot</Link>}>
+                Nothing from a manual application is waiting here, but Autopilot has {heldByAutopilot}{" "}
+                {heldByAutopilot === 1 ? "application" : "applications"} that need you under Needs you.
+              </EmptyState>
+            ) : (
+              <EmptyState action={<Link href="/jobs" className={buttonClass("primary", "sm")}>Browse matches</Link>}>
+                Nothing is waiting for your review. When the agent fills a form it stops before the final submit, and the application waits here for you.
+              </EmptyState>
+            )}
           </>
         ) : (
           <>

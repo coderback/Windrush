@@ -101,6 +101,8 @@ test("the feed shows each job's badges and sends the filters to the API", async 
   }
   await expect(card(JOBS[1]).getByText("Degree required")).toHaveCount(0);   // only preferred
 
+  // Below 1440px the filters sit behind the Filters button, so the list and preview get the room.
+  await page.getByRole("button", { name: /^Filters/ }).click();
   await expect(page.getByRole("checkbox", { name: "Possible" })).toBeChecked();
 
   await page.getByLabel("Experience asked").selectOption({ label: "No experience required" });

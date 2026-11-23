@@ -388,7 +388,7 @@ function FeedPage() {
               {discovering ? "Refreshing…" : "Refresh"}
             </button>
             <button type="button" onClick={() => setShowFilters((s) => !s)} aria-expanded={showFilters} aria-controls="feed-filters-narrow"
-              className={cx(buttonClass("secondary", "sm"), "min-[1200px]:hidden")}>
+              className={cx(buttonClass("secondary", "sm"), "min-[1440px]:hidden")}>
               <Icon name="filter" size={15} />
               Filters{activeCount > 0 ? ` (${activeCount})` : ""}
             </button>
@@ -416,10 +416,10 @@ function FeedPage() {
           </div>
         )}
 
-        {showFilters && <div id="feed-filters-narrow" className="min-[1200px]:hidden">{filtersPanel}</div>}
+        {showFilters && <div id="feed-filters-narrow" className="min-[1440px]:hidden">{filtersPanel}</div>}
 
-        <div className="grid gap-4 items-start grid-cols-1 min-[1000px]:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)] min-[1200px]:grid-cols-[230px_minmax(0,1fr)_minmax(0,1.2fr)]">
-          <div className="hidden min-[1200px]:block">{filtersPanel}</div>
+        <div className="grid gap-4 items-start grid-cols-1 min-[1000px]:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)] min-[1440px]:grid-cols-[230px_minmax(0,1fr)_minmax(0,1.2fr)]">
+          <div className="hidden min-[1440px]:block">{filtersPanel}</div>
 
           <section aria-label="Roles" className="min-w-0 flex flex-col gap-2">
             {error && <Callout title="The feed didn't load" action={

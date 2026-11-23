@@ -10,7 +10,7 @@ import {
 import { useResource } from "@/lib/store";
 import { daysSince, greeting, longAgo, pct, shortAgo } from "@/lib/format";
 import { firstName } from "@/lib/persona";
-import { REPLIED, SENT, statusMeta, stageOf } from "@/lib/status";
+import { FOLLOW_UP_DAYS, followUpDue, REPLIED, SENT, statusMeta, stageOf } from "@/lib/status";
 import { sponsorshipBadges } from "@/lib/sponsorship";
 import { levelLabel } from "@/lib/format";
 import { jobHref, rememberFeed } from "@/lib/jobs";
@@ -20,7 +20,6 @@ import AssessmentsCard from "@/components/home/AssessmentsCard";
 interface JobsPage { jobs: Job[]; sponsorship?: string }
 
 const WEEK = 7 * 86400000;
-const FOLLOW_UP_DAYS = 7;
 
 /** Counts per week for the last `n` weeks, oldest first, bucketed by `dateOf`. */
 function weekly<T>(items: T[], dateOf: (t: T) => string | null | undefined, n = 10): number[] {
@@ -108,9 +107,10 @@ export default function DashboardPage() {
       { key: "Offer", count: list.filter((a) => a.status === "Offer").length },
     ];
     const closed = list.filter((a) => a.status === "Rejected" || a.status === "Discarded").length;
-    // Applied a week or more ago and still Applied: nothing has come back, so a follow-up is due.
+    // Same rule as the Applications page: one to two weeks in Applied with no reply. Older ones have
+    // gone quiet and aren't a to-do for this week.
     const followUps = list
-      .filter((a) => a.status === "Applied" && (daysSince(a.date_applied) ?? 0) >= FOLLOW_UP_DAYS)
+      .filter(followUpDue)
       .map((a) => ({ app: a, due: new Date(new Date(a.date_applied!).getTime() + FOLLOW_UP_DAYS * 86400000) }))
       .sort((x, y) => x.due.getTime() - y.due.getTime());
     return {
@@ -235,33 +235,47 @@ export default function DashboardPage() {
             <div className="flex justify-between items-center gap-3">
               <div className="flex flex-col gap-[3px]">
                 <SectionTitle id="pipe">Application pipeline</SectionTitle>
-                <span className="text-[13px] text-ink-3">{stats.active} active · {stats.closed} closed</span>
+                {apps.loading ? <Skeleton className="h-4 w-32 rounded-[5px]" /> :
+                  <span className="text-[13px] text-ink-3">{stats.active} active · {stats.closed} closed</span>}
               </div>
               <TextLink href="/applications">Open board</TextLink>
             </div>
-            <div className="flex h-3 rounded-full overflow-hidden gap-[3px] bg-track" role="img"
-              aria-label={`Pipeline: ${stats.stages.map((s) => `${s.count} ${statusMeta(s.key).label.toLowerCase()}`).join(", ")}`}>
-              {stats.active > 0 && stats.stages.map((s) => (
-                <span key={s.key} className={cx("h-full", statusMeta(s.key).dot)} style={{ flex: s.count || 0.4 }} />
-              ))}
-            </div>
-            <div className="grid gap-[10px]" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(min(90px, 100%), 1fr))" }}>
-              {stats.stages.map((s) => (
-                <div key={s.key} className="flex flex-col gap-[6px] p-3 rounded-inner bg-subtle border border-track">
-                  <span className="flex items-center gap-[7px] text-[12.5px] text-ink-2">
-                    <span className={cx("w-2 h-2 rounded-[3px] shrink-0", statusMeta(s.key).dot)} />
-                    {statusMeta(s.key).label}
-                  </span>
-                  <span className="font-mono text-[22px] font-medium">{s.count}</span>
+            {apps.loading ? (
+              // Placeholders, not a pipeline of zeros, until the applications arrive.
+              <div className="flex flex-col gap-[18px]">
+                <Skeleton className="h-3 rounded-full" />
+                <div className="grid gap-[10px] grid-cols-2 sm:grid-cols-3">
+                  {Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-[74px] rounded-inner" />)}
                 </div>
-              ))}
-            </div>
-            <p className="m-0 text-[13px] text-ink-2">
-              {stats.sent
-                ? `${stats.replied} of ${stats.sent} sent applications got a reply.`
-                : "Nothing sent yet. Applications you submit show up here."}
-              {stats.followUps.length > 0 && ` ${stats.followUps.length} follow-up${stats.followUps.length === 1 ? " is" : "s are"} due.`}
-            </p>
+              </div>
+            ) : (
+              <>
+                <div className="flex h-3 rounded-full overflow-hidden gap-[3px] bg-track" role="img"
+                  aria-label={`Pipeline: ${stats.stages.map((s) => `${s.count} ${statusMeta(s.key).label.toLowerCase()}`).join(", ")}`}>
+                  {stats.active > 0 && stats.stages.map((s) => (
+                    <span key={s.key} className={cx("h-full", statusMeta(s.key).dot)} style={{ flex: s.count || 0.4 }} />
+                  ))}
+                </div>
+                {/* Six stages as 2×3 / 3×2, so no stage is left alone on a row and labels stay on one line. */}
+                <div className="grid gap-[10px] grid-cols-2 sm:grid-cols-3">
+                  {stats.stages.map((s) => (
+                    <div key={s.key} className="flex flex-col gap-[6px] p-3 rounded-inner bg-subtle border border-track">
+                      <span className="flex items-center gap-[7px] text-[12.5px] text-ink-2 whitespace-nowrap">
+                        <span className={cx("w-2 h-2 rounded-[3px] shrink-0", statusMeta(s.key).dot)} />
+                        {statusMeta(s.key).label}
+                      </span>
+                      <span className="font-mono text-[22px] font-medium">{s.count}</span>
+                    </div>
+                  ))}
+                </div>
+                <p className="m-0 text-[13px] text-ink-2">
+                  {stats.sent
+                    ? `${stats.replied} of ${stats.sent} sent applications got a reply.`
+                    : "Nothing sent yet. Applications you submit show up here."}
+                  {stats.followUps.length > 0 && ` ${stats.followUps.length} follow-up${stats.followUps.length === 1 ? " is" : "s are"} due.`}
+                </p>
+              </>
+            )}
           </section>
 
           <section aria-labelledby="risk" className="flex-[1_1_300px] min-w-0 bg-surface border border-border rounded-card p-5 flex flex-col gap-4">

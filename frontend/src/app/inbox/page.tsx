@@ -174,13 +174,27 @@ function OlderMail({ state }: { state: Backfill | null | undefined }) {
         </div>
       ) : (
         <div className="flex flex-wrap items-center gap-3">
-          <button type="button" onClick={() => act(() => startBackfill(period))} disabled={!count?.to_read}
-            className={buttonClass("primary", "sm")}>
-            {count ? `Read ${count.to_read} emails` : "Read emails"}
-          </button>
-          <span className="text-[12.5px] text-ink-3">
-            {counting ? "Counting…" : count ? `${count.total} job emails in this period; ${count.total - count.to_read} already read. Each one is sent to the model, as your new mail is.` : ""}
-          </span>
+          {count && !counting && count.to_read === 0 ? (
+            // Nothing left to read: say so, instead of a greyed-out "Read 0 emails" button.
+            <span className="flex items-center gap-2 text-[13px] text-ink-2">
+              <span aria-hidden="true" className="w-[18px] h-[18px] rounded-full bg-teal-chip text-teal-deep flex items-center justify-center shrink-0">
+                <Icon name="check" size={11} strokeWidth={2.6} />
+              </span>
+              {count.total
+                ? `All ${count.total} job emails in this period are read.`
+                : "No job emails in this period."}
+            </span>
+          ) : (
+            <>
+              <button type="button" onClick={() => act(() => startBackfill(period))} disabled={!count?.to_read}
+                className={buttonClass("primary", "sm")}>
+                {count ? `Read ${count.to_read} ${count.to_read === 1 ? "email" : "emails"}` : "Read emails"}
+              </button>
+              <span className="text-[12.5px] text-ink-3">
+                {counting ? "Counting…" : count ? `${count.total} job emails in this period; ${count.total - count.to_read} already read. Each one is sent to the model, as your new mail is.` : ""}
+              </span>
+            </>
+          )}
         </div>
       )}
       {state && !running && !state.error && state.finished_at && (
@@ -411,7 +425,7 @@ function Inbox() {
 
   return (
     <>
-      <TopBar crumbs={[{ label: "Inbox" }]}>
+      <TopBar crumbs={[{ label: "Workspace" }, { label: "Inbox" }]}>
         {live && (
           <button type="button" onClick={sync} disabled={syncing || starting} className={buttonClass("secondary", "top")}>
             {syncing || starting ? <Spinner /> : <Icon name="refresh" size={15} />}
