@@ -874,7 +874,10 @@ async def careers_plan_generate(current_user: Annotated[auth.User, Depends(auth.
         if not result.get("plan"):
             yield _sse_json("error", {"message": "The plan came back empty. Try again."})
             return
-        saved = await asyncio.to_thread(tracker.save_career_plan, current_user.id, target, result["plan"])
+        yield _sse_json("status", {"message": "Looking up events and resources…"})
+        from . import career_search
+        plan = await career_search.enrich(result["plan"], persona, demand)
+        saved = await asyncio.to_thread(tracker.save_career_plan, current_user.id, target, plan)
         yield _sse_json("plan", saved)
         yield _sse_json("done", {"message": "Plan ready"})
 

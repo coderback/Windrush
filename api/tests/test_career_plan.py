@@ -3,7 +3,7 @@ be the user's own, ad counts looked up), the newest plan is the user's, and its 
 only."""
 import json
 
-from app import career_plan, main, tracker
+from app import career_plan, career_search, main, tracker
 
 PERSONA = {"preferences": {"target_titles": ["ML Engineer"]},
            "projects": [{"name": "Cambium: graph ML core", "technologies": ["PyTorch"]}]}
@@ -57,7 +57,11 @@ def test_the_prompt_names_the_users_projects_and_targets():
 def _generate(client, monkeypatch, raw):
     async def tool(name, tool_input):
         return {"plan": career_plan.validate(raw, tool_input["persona"], tool_input["market"])}
+
+    async def no_search(plan, persona, demand, **kwargs):
+        return plan
     monkeypatch.setattr(main, "execute_tool", tool)
+    monkeypatch.setattr(career_search, "enrich", no_search)
     events = [json.loads(line[6:]) for line in client.post("/careers/plan").text.splitlines() if line.startswith("data: ")]
     return {e["type"]: e for e in events}
 

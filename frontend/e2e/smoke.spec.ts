@@ -981,6 +981,36 @@ test("a saved plan is shown on arrival", async ({ page }) => {
   await expect(page.getByText("1 of 5 done", { exact: false })).toBeVisible();
 });
 
+test("a plan's looked-up resources link to their page, and its venues come with where they were found", async ({ page }) => {
+  await signIn(page);
+  const track = { ...PLAN.plan.tracks[0], resources: [
+    { name: "Kubernetes Up & Running", url: "https://www.oreilly.com/library/view/kubernetes-up-and/9781098110192/",
+      title: "Kubernetes: Up and Running, 3rd Edition", checked: true },
+    { name: "A Missing Book", url: "", checked: false },
+  ] };
+  await mockApi(page, {
+    ...SHELL,
+    "GET /api/careers/exposure": { roles: [], evidence: null },
+    "GET /api/careers/market": NO_MARKET,
+    "GET /api/careers/plan": { ...PLAN, plan: { ...PLAN.plan, tracks: [track], venues_searched: true, venues: [
+      { id: "v1", name: "PyData London", url: "https://www.meetup.com/pydata-london-meetup/", kind: "meetup",
+        when: "9 December 2026", why: "Monthly ML talks." },
+      { id: "v2", name: "ML hackathons in London", url: "https://www.hackathonradar.com/discover/london/ai/2026",
+        kind: "listing", when: "", why: "Hackathons to enter." },
+    ] } },
+  });
+  await page.goto("/careers");
+
+  await expect(page.getByRole("link", { name: "Kubernetes Up & Running" })).toHaveAttribute("href", /oreilly\.com/);
+  await expect(page.getByText("A Missing Book (not checked", { exact: false })).toBeVisible();
+  const venues = page.getByRole("region", { name: "Where to show up" });
+  await expect(venues.getByRole("link", { name: "PyData London" })).toHaveAttribute("href", "https://www.meetup.com/pydata-london-meetup/");
+  await expect(venues.getByText("9 December 2026")).toBeVisible();
+  await expect(venues.getByText("Listing", { exact: true })).toBeVisible();
+  await expect(page.getByText("0 of 7 done", { exact: false })).toBeVisible();
+  await expect(venues.getByRole("checkbox", { name: "Went to or joined PyData London" })).toBeVisible();
+});
+
 test("a job page never shows the old placeholder score", async ({ page }) => {
   await signIn(page);
   // Saved in this browser before scores named their occupation
