@@ -9,6 +9,7 @@ import SponsorshipPanel, { useSponsorship, VERDICT_TONE, viewVerdict } from "@/c
 import DocEditor, { CVDoc, LetterDoc, letterToText } from "@/components/DocEditor";
 import ReviewLayout, { AgentNotes, type LogLine } from "@/components/ReviewLayout";
 import JobDescription from "@/components/JobDescription";
+import ReportReading from "@/components/ReportReading";
 import DocChecks from "@/components/DocChecks";
 import FormQuestions from "@/components/FormQuestions";
 import Icon from "@/components/ui/Icon";
@@ -143,6 +144,8 @@ export default function JobDetailPage() {
   useEffect(() => {
     if (job && apps.data && trackedApplication(job)) setSaved(true);
   }, [job, apps.data]);
+
+  const [reporting, setReporting] = useState(false);
 
   const runAnalysis = useCallback(async () => {
     if (!job) return;
@@ -456,6 +459,11 @@ export default function JobDetailPage() {
             <Skeleton className="h-4 w-3/4 rounded-[6px]" />
           </span>
         </div>
+      ) : analysis?.no_text ? (
+        <div className="flex flex-col gap-2">
+          <h2 id="fit" className="m-0 text-[15px] font-semibold">Fit not scored</h2>
+          <p className="m-0 text-[13px] leading-[1.5] text-ink-2">Windrush couldn&apos;t read this ad&apos;s text, so there&apos;s nothing to compare with your persona.</p>
+        </div>
       ) : analysis?.fit_score != null ? (
         <>
           <div className="flex gap-[14px] items-center">
@@ -530,6 +538,11 @@ export default function JobDetailPage() {
               </div>
             ) : analysisError && !analysis ? (
               <Callout title="The analysis didn't finish">{analysisError}</Callout>
+            ) : analysis?.no_text ? (
+              <Callout tone="info" title="Windrush couldn't read this ad">
+                The page didn&apos;t give Windrush the ad&apos;s text, so it can&apos;t judge your fit. Open the posting to read it,
+                and use Report a bad reading above so pages like this get read properly.
+              </Callout>
             ) : (
               <p className="m-0 text-[14px] leading-[1.6] text-ink-2 max-w-[64ch]">
                 {analysis?.reasoning || "The analysis compares this role with your persona: the skills you already have, the gaps, and whether the level suits you."}
@@ -731,8 +744,14 @@ export default function JobDetailPage() {
             <button type="button" onClick={discard} disabled={discarding} className={buttonClass("quiet", "top", "px-3 font-normal")}>
               {discarding ? <Spinner /> : null}Discard
             </button>
+            {!reporting && (
+              <button type="button" onClick={() => setReporting(true)} className={buttonClass("quiet", "top", "px-3 font-normal")}>
+                <Icon name="alert" size={14} />Report a bad reading
+              </button>
+            )}
           </div>
           {actionError && <div className="basis-full"><Callout>{actionError}</Callout></div>}
+          {reporting && <ReportReading job={job} onClose={() => setReporting(false)} />}
           <div className="basis-full grid gap-[10px]" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(min(170px, 100%), 1fr))" }}>
             <FactTile large tint="mint" label="Salary" value={salary ?? "Not listed"} note={salary ? "per year" : "the ad doesn't say"} />
             <FactTile large tint="sky" label="Setting" value={setting ?? "Not stated"} note={job.location || undefined} />

@@ -228,6 +228,9 @@ async def fetch_full_description(url: str, max_chars: int = 8000) -> str:
         jd = _extract_jsonld_jobposting(raw_html)
         if len(jd) >= 200:
             return jd[:max_chars].strip()
+        embedded = (await embedded_job(url, raw_html)).get("description") or ""
+        if len(embedded) >= 200:
+            return embedded[:max_chars].strip()
     except Exception as exc:
         logger.debug("JSON-LD description fetch failed for %s: %s", url[:80], exc)
 
@@ -365,6 +368,101 @@ async def _greenhouse_company(url: str) -> str:
         return ""
 
 
+# ── Careers pages that load the job from an application system ──────────────────────────────────────────────
+
+# An employer's own careers page can be an empty frame the job is loaded into from Greenhouse or Ashby. The system's
+# job id rides in the link (gh_jid; ashby_jid or id) and the page usually names the board.
+_GH_EMBED = re.compile(r"greenhouse\.io/embed/job_(?:board|app)(?:/js)?\?(?:[^\"'\s<>]*?&(?:amp;)?)?for=([A-Za-z0-9_-]+)", re.I)
+_ASHBY_BOARD = re.compile(r"(?:jobs\.ashbyhq\.com|api\.ashbyhq\.com/posting-api/job-board)/([A-Za-z0-9_.-]+)", re.I)
+_UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.I)
+_BOARD_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{1,59}")
+
+
+def _site_stem(url: str) -> str:
+    """The name in an address: www.quantcast.com and careers.mako.co.uk give quantcast and mako."""
+    labels = [p for p in _site(url)[0].split(".") if p]
+    if len(labels) >= 3 and len(labels[-1]) == 2 and labels[-2] in ("co", "com", "org", "ac", "gov", "net"):
+        labels = labels[:-1]
+    return labels[-2] if len(labels) >= 2 else ""
+
+
+def _boards(found: list[str], stem: str) -> list[str]:
+    """The boards to try, the page's own first, then the address's name: at most three, each a plain name."""
+    return [b for b in dict.fromkeys(x.lower() for x in [*found, stem] if x) if _BOARD_NAME.fullmatch(b)][:3]
+
+
+async def embedded_job(url: str, raw_html: str = "") -> dict:
+    """
+    The job behind an employer's careers page that loads it from Greenhouse or Ashby (mako.com/…?gh_jid=…,
+    quantcast.com/careers-list?id=…), read from that system: {title, company, location, description, job_id}.
+    {} when the link carries no such id, it's on an application system's own site (read the usual way), or no
+    board has the job. Only the systems' own fixed hosts are called.
+    """
+    from urllib.parse import parse_qs, urlparse
+    host, _ = _site(url)
+    if not host or any(_on_ats(host, ats) for ats in _ATS_HOSTS):
+        return {}
+    query = parse_qs(urlparse(url).query)
+    gh_id = next((v for v in query.get("gh_jid", []) if re.fullmatch(r"\d{4,15}", v)), "")
+    ashby_id = next((v for k in ("ashby_jid", "id") for v in query.get(k, []) if _UUID.fullmatch(v)), "")
+    if not (gh_id or ashby_id):
+        return {}
+    stem = _site_stem(url)
+    site_name = _meta_content(raw_html, "og:site_name") if raw_html else ""
+    site_name = "" if _ATS_NAME.fullmatch(site_name) or len(site_name) > 60 else site_name
+    try:
+        async with http_client.async_client(follow_redirects=True, timeout=12.0) as client:
+            for board in (_boards(_GH_EMBED.findall(raw_html), stem) if gh_id else []):
+                resp = await client.get(f"https://boards-api.greenhouse.io/v1/boards/{board}/jobs/{gh_id}")
+                if resp.status_code != 200:
+                    continue
+                data = resp.json()
+                named = await client.get(f"https://boards-api.greenhouse.io/v1/boards/{board}")
+                company = str(named.json().get("name") or "").strip() if named.status_code == 200 else ""
+                return {"title": str(data.get("title") or "").strip(), "company": company or site_name or board.title(),
+                        "location": str((data.get("location") or {}).get("name") or "").strip(),
+                        "description": _html_to_text(data.get("content") or "")[:_DESC_MAX].strip(),
+                        "job_id": f"gh-{gh_id}"}
+            for board in (_boards(_ASHBY_BOARD.findall(raw_html), stem) if ashby_id else []):
+                resp = await client.get(f"https://api.ashbyhq.com/posting-api/job-board/{board}")
+                if resp.status_code != 200:
+                    continue
+                found = next((j for j in resp.json().get("jobs") or [] if str(j.get("id")) == ashby_id), None)
+                if not found:
+                    continue
+                text = found.get("descriptionPlain") or _html_to_text(found.get("descriptionHtml") or "")
+                return {"title": str(found.get("title") or "").strip(), "company": site_name or board.title(),
+                        "location": str(found.get("location") or "").strip(),
+                        "description": text[:_DESC_MAX].strip(), "job_id": f"ashby-{ashby_id}"}
+    except Exception as exc:
+        logger.debug("Embedded job read failed for %s: %s", url[:80], exc)
+    return {}
+
+
+# A careers site's page titles, never a job's: "Careers List", "Job Listing | Mako", "Quantcast Careers".
+_PAGE_TITLE = re.compile(
+    r"(?:(?:our|all|current|open|latest|search|browse|view|find)\s+)?"
+    r"(?:careers?|jobs?|job\s+(?:listings?|board|search|details?|descriptions?|openings?|postings?|applications?|"
+    r"opportunit(?:y|ies)|vacanc(?:y|ies))|openings|positions|roles|vacanc(?:y|ies)|opportunit(?:y|ies)|"
+    r"join\s+(?:us|our\s+team)|work\s+(?:with|for)\s+us|apply(?:\s+now)?|home)"
+    r"(?:\s+(?:list|listings?|page|portal|search|centre|center|site|home|opportunities))?", re.I)
+
+
+def _is_page_title(title: str, *names: str) -> bool:
+    """Whether a title is the careers page's own rather than a job's, once the employer's or site's name is set
+    aside: 'Job Listing | Mako' and 'Careers at Mako' are; 'Graduate Software Engineer | Mako' isn't."""
+    words = re.findall(r"[A-Za-z0-9+#]+", title or "")
+    drop = {w.lower() for name in names for w in re.findall(r"[A-Za-z0-9]+", name or "") if len(w) >= 3}
+    kept = [w for w in words if w.lower() not in drop and w.lower() not in ("at", "with", "the")]
+    return not kept or bool(_PAGE_TITLE.fullmatch(" ".join(kept)))
+
+
+def _job_title_from(text: str) -> str:
+    """Greenhouse's 'Job Application for Software Engineer at Catapult' says the job is 'Software Engineer'."""
+    m = re.fullmatch(r"(?is)\s*job application for\s+(.+?)(?:\s+at\s+[^|]+)?\s*", text or "")
+    return m.group(1).strip() if m else (text or "").strip()
+
+
 async def scrape_job_from_url(url: str) -> dict:
     """
     Scrape an arbitrary job-posting URL into a full Job dict ready for analysis.
@@ -401,18 +499,30 @@ async def scrape_job_from_url(url: str) -> dict:
     company = _jsonld_org_name(posting)
     location = _jsonld_location(posting)
     salary_min, salary_max = _jsonld_salary(posting)
+    # A careers page that loads the job from Greenhouse or Ashby: read the job from there, not the empty frame.
+    embedded = await embedded_job(url, raw_html) if not (title and description) else {}
+    if embedded.get("title"):
+        title, company = embedded["title"], embedded["company"] or company
+        location = embedded["location"] or location
+        description = embedded["description"] or description
 
     # Description fallback: JSON-LD object may carry it even when the ATS/standalone
     # fetcher returned "" (e.g. it was < 200 chars there).
     if not description and posting.get("description"):
         description = _html_to_text(posting["description"])[:_DESC_MAX].strip()
 
-    # OpenGraph / HTML fallbacks for missing metadata.
+    # OpenGraph / HTML fallbacks for missing metadata, skipping the careers page's own title ("Careers List").
+    names = (company, _site_stem(url), _meta_content(raw_html, "og:site_name"))
+    if title and _is_page_title(title, *names):
+        title = ""
     if not title:
-        title = _meta_content(raw_html, "og:title") or _first_tag_text(raw_html, "h1")
-        if not title:
-            page_title = _first_tag_text(raw_html, "title")
-            title = re.split(r"\s+[|\-–—]\s+", page_title)[0].strip() if page_title else ""
+        og_title = _job_title_from(_meta_content(raw_html, "og:title").split(" | ")[0])
+        page_title = _job_title_from(_first_tag_text(raw_html, "title"))
+        for candidate in (og_title, _first_tag_text(raw_html, "h1"),
+                          re.split(r"\s+[|\-–—]\s+", page_title)[0] if page_title else ""):
+            if candidate.strip() and not _is_page_title(candidate, *names):
+                title = candidate.strip()
+                break
     # Lever's page title is "Bloom & Wild Group - Junior Engineer", where the link only says "bloomon".
     if not company and _on_ats(_site(url)[0], "lever.co"):
         named, dash, role = title.partition(" - ")
@@ -444,6 +554,7 @@ async def scrape_job_from_url(url: str) -> dict:
         "salary_min": salary_min,
         "salary_max": salary_max,
         "source": "user-url",
+        "ats_job_id": embedded.get("job_id", ""),   # the application system's id, to find the feed's own copy
     }
     job.update(exposure_fields(job["title"]))
     return job

@@ -955,6 +955,18 @@ def _rank_semantically(jobs: list[dict], persona_vector: list[float]) -> None:
         jobs[i]["semantic_score"] = round(float(s), 3)
 
 
+def find_by_job_id(job_id: str) -> dict | None:
+    """The stored job with this source id ('gh-8921970002', 'ashby-<uuid>'), the newest if several, or None."""
+    if not job_id:
+        return None
+    if not _DB_PATH:
+        init_db()
+    con = sqlite3.connect(_DB_PATH)
+    row = con.execute("SELECT id FROM jobs WHERE job_id = ? ORDER BY updated_at DESC LIMIT 1", (job_id,)).fetchone()
+    con.close()
+    return get_job(row[0]) if row else None
+
+
 def get_job(job_db_id: str) -> dict | None:
     """Return the stored job row (without its embedding) by primary key, or None."""
     if not _DB_PATH:

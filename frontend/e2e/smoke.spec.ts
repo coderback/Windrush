@@ -212,6 +212,33 @@ test("a project switched off for CVs and cover letters is saved that way", async
   api.expectAllMocked();
 });
 
+test("a job whose ad can't be read isn't scored, and the reading can be reported", async ({ page }) => {
+  await signIn(page);
+  const job = { id: "77", title: "Careers List", company: "Quantcast", location: "", level: "", source: "user-url",
+                url: "https://www.quantcast.com/careers-list?id=1", description: "" };
+  await page.addInitScript((j) => sessionStorage.setItem("job_77", JSON.stringify(j)), job);
+  let reported: { job: { title: string; url: string }; note: string } | null = null;
+  const api = await mockApi(page, {
+    ...SHELL,
+    "GET /api/jobs/77/sponsorship": { sponsorship: "not_stated", evidence: "", clearance: "", licensed_sponsor: false, sponsor_name: "", mark: "" },
+    "POST /api/jobs/analyze": { sse: [{ type: "no_text", message: "Windrush couldn't read this ad's text, so it can't judge the fit." },
+                                      { type: "done" }] },
+    "POST /api/jobs/report": (request) => {
+      reported = request.postDataJSON();
+      return { id: 1 };
+    },
+  });
+  await page.goto("/jobs/77");
+  await expect(page.getByText("Windrush couldn't read this ad", { exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Fit not scored" })).toBeVisible();
+  await page.getByRole("button", { name: "Report a bad reading" }).click();
+  await page.getByLabel("What did Windrush get wrong? (optional)").fill("It's a Machine Learning Engineer job");
+  await page.getByRole("button", { name: "Send report" }).click();
+  await expect(page.getByText("Reported, with what Windrush read for this job.")).toBeVisible();
+  expect(reported).toMatchObject({ job: { title: "Careers List", url: job.url }, note: "It's a Machine Learning Engineer job" });
+  api.expectAllMocked();
+});
+
 test("changing a status in the application panel saves it, and Esc closes the panel", async ({ page }) => {
   await signIn(page);
   const patches: unknown[] = [];

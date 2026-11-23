@@ -57,7 +57,12 @@ export async function analyzeJob(job: Job): Promise<Analysis> {
       result.matched_skills = (top.matched_skills as string[] | undefined) ?? [];
       result.reasoning = top.reasoning as string | undefined;
     }
+    if (ev.type === "no_text") {
+      result.no_text = true;
+      result.reasoning = typeof ev.message === "string" ? ev.message : "Windrush couldn't read this ad's text.";
+    }
   });
+  if (result.no_text) return result;
   if (result.fit_score == null && !result.matched_skills) throw new Error("The analysis came back empty. Try again.");
   return result;
 }
