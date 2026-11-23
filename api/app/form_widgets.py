@@ -24,7 +24,9 @@ TEXT, SELECT, COMBOBOX, CHECKBOX, RADIO, EDITABLE, FILE, OTHER = (
 # a label not wrapping one of its own controls, or anything with "label" in its class) in the nearest box around it
 # that holds none of another question's controls. Lever puts the question in <div class="application-label"> and
 # a <label> around each option, so every checkbox otherwise reads as its option ("English (ENG)", "Yes") and a text
-# box as its input name ("cards[…][field0]"). `own` is the field's controls (a checkbox or radio group's members).
+# box as its input name ("cards[…][field0]"). `own` is the field's controls (a checkbox or radio group's members);
+# a label naming one of them (Greenhouse's <label for="d1">Mathematics</label> beside its box) is an option, not the
+# heading.
 # Lever's "✱" required marker comes back as "*", which callers already strip.
 QUESTION_HEAD_JS = r"""
   const headFor = (el, own) => {
@@ -35,7 +37,8 @@ QUESTION_HEAD_JS = r"""
     for (let up = 0; box && up < 8; up++, box = box.parentElement) {
       if ([...box.querySelectorAll(ctl)].some(c => !owned.has(c))) return '';
       for (const head of box.querySelectorAll('legend, label, [class*=label], [class*=Label]')) {
-        if ([...owned].some(c => head.contains(c))) continue;
+        // An option's own label is no heading, whether it wraps its box (Lever) or names it with for= (Greenhouse).
+        if ([...owned].some(c => head.contains(c) || (head.control && head.control === c))) continue;
         const t = words(head).replace(/✱/g, '*');
         if (t.replace(/\*/g, '').trim()) return t;
       }
