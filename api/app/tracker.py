@@ -950,6 +950,19 @@ def _gmail_tables(con: sqlite3.Connection) -> None:
     )""")
     con.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_email_events_msg ON email_events(user_id, gmail_id)")
     # Jobs the user says Windrush read badly, with what it read then (see add_job_report)
+    con.execute("""CREATE TABLE IF NOT EXISTS career_plans (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id     TEXT NOT NULL,
+        target      TEXT NOT NULL DEFAULT '',
+        plan        TEXT NOT NULL,
+        created_at  TEXT NOT NULL
+    )""")
+    con.execute("""CREATE TABLE IF NOT EXISTS career_plan_progress (
+        plan_id     INTEGER NOT NULL,
+        item_id     TEXT NOT NULL,
+        done_at     TEXT NOT NULL,
+        PRIMARY KEY (plan_id, item_id)
+    )""")
     con.execute("""CREATE TABLE IF NOT EXISTS job_reports (
         id           INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id      TEXT NOT NULL,
@@ -1103,6 +1116,63 @@ def job_reports(user_id: str) -> list[dict]:
                        "FROM job_reports WHERE user_id=? ORDER BY id DESC", (user_id,)).fetchall()
     con.close()
     return [dict(r) for r in rows]
+
+
+def save_career_plan(user_id: str, target: str, plan: dict) -> dict:
+    """Keep a newly generated plan; the newest is the user's plan (older ones stay, with their progress)."""
+    con = _gmail_con()
+    with con:
+        cur = con.execute("INSERT INTO career_plans (user_id, target, plan, created_at) VALUES (?,?,?,?)",
+                          (user_id, str(target or "")[:300], json.dumps(plan), _now()))
+    con.close()
+    return latest_career_plan(user_id) or {"id": cur.lastrowid}
+
+
+def latest_career_plan(user_id: str) -> dict | None:
+    """The user's newest plan with the ids of the items they've ticked off: {id, target, created_at, plan, done}."""
+    con = _gmail_con()
+    row = con.execute("SELECT id, target, plan, created_at FROM career_plans WHERE user_id=? ORDER BY id DESC LIMIT 1",
+                      (user_id,)).fetchone()
+    if not row:
+        con.close()
+        return None
+    done = [r[0] for r in con.execute("SELECT item_id FROM career_plan_progress WHERE plan_id=? ORDER BY done_at",
+                                      (row[0],))]
+    con.close()
+    return {"id": row[0], "target": row[1], "plan": json.loads(row[2]), "created_at": row[3], "done": done}
+
+
+def update_career_plan(user_id: str, plan_id: int, plan: dict) -> bool:
+    """Replace the content of one of the user's plans (e.g. once its events and resources are looked up)."""
+    con = _gmail_con()
+    with con:
+        cur = con.execute("UPDATE career_plans SET plan=? WHERE id=? AND user_id=?", (json.dumps(plan), plan_id, user_id))
+    con.close()
+    return cur.rowcount == 1
+
+
+def mark_plan_item(user_id: str, plan_id: int, item_id: str, done: bool, valid_ids: set[str] | None = None) -> bool:
+    """Tick an item of the user's plan off (or back on). False if the plan isn't theirs or has no such item."""
+    con = _gmail_con()
+    row = con.execute("SELECT plan FROM career_plans WHERE id=? AND user_id=?", (plan_id, user_id)).fetchone()
+    if not row or (valid_ids is not None and item_id not in valid_ids):
+        con.close()
+        return False
+    with con:
+        if done:
+            con.execute("INSERT OR IGNORE INTO career_plan_progress (plan_id, item_id, done_at) VALUES (?,?,?)",
+                        (plan_id, item_id, _now()))
+        else:
+            con.execute("DELETE FROM career_plan_progress WHERE plan_id=? AND item_id=?", (plan_id, item_id))
+    con.close()
+    return True
+
+
+def career_plan(user_id: str, plan_id: int) -> dict | None:
+    con = _gmail_con()
+    row = con.execute("SELECT plan FROM career_plans WHERE id=? AND user_id=?", (plan_id, user_id)).fetchone()
+    con.close()
+    return json.loads(row[0]) if row else None
 
 
 def assessment_marks(user_id: str) -> dict[str, dict]:

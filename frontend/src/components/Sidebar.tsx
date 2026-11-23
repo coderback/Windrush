@@ -128,7 +128,7 @@ export default function Sidebar() {
     { href: "/inbox", label: "Inbox", icon: "mail", badge: emailsWaiting, badgeTone: "amber" },
   ];
   const grow: NavItem[] = [
-    { href: "/careers", label: "AI exposure & roadmap", icon: "trend" },
+    { href: "/careers", label: "Career plan & AI exposure", icon: "trend" },
     { href: "/profile", label: "Persona", icon: "user", badge: suggested },
   ];
   const isActive = (i: NavItem) => pathname === i.href || pathname.startsWith(i.href + "/");

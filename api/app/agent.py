@@ -14,9 +14,7 @@ from openai import AsyncOpenAI, BadRequestError
 from . import azure_config, doc_check, doc_render
 from .company_names import normalise_company_name as _normalise_company_name
 from . import http_client
-from . import market
 from . import tracker
-from .risk_scorer import target_evidence
 from .browser_agent import apply_with_browser
 
 logger = logging.getLogger("windrush.agent")
@@ -101,13 +99,6 @@ def _chat_params(**params) -> dict:
     # requires); without it gpt-6-luna returned unparseable JSON for ~1 in 8 roadmaps.
     out["response_format"] = {"type": "json_object"}
     return out
-
-
-def _evidence_prompt(evidence: dict) -> str:
-    tasks = lambda key: "; ".join(t["task"] for t in evidence[key])
-    return (f"Usage evidence for {evidence['occupation']} (Anthropic Economic Index, chat conversations, {evidence['month']}):\n"
-            f"Handed to AI most: {tasks('most_handed_to_ai')}\n"
-            f"Handed to AI least: {tasks('least_handed_to_ai')}\n")
 
 
 async def _llm(system: str, user: str, max_tokens: int = 2048) -> str:
@@ -1353,91 +1344,10 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
             "research": company_research,
         }
 
-    elif name == "generate_skill_roadmap":
-        persona = tool_input.get("persona", {})
-        # Without an explicit target, plan for the roles the user is aiming at, not their last employer's industry.
-        target_titles = (persona.get("preferences") or {}).get("target_titles") or []
-        target_job_title = tool_input.get("target_job_title") or ", ".join(target_titles)
-        evidence = target_evidence([tool_input["target_job_title"]] if tool_input.get("target_job_title") else target_titles)
-        all_skills_str = ", ".join(s for group in persona.get("skills", []) for s in group.get("skills", []))
-
-        core = persona.get("core_info", {})
-        name_str = f"{core.get('first_name', '')} {core.get('last_name', '')}".strip() or "the candidate"
-        summary = persona.get("summary", "")
-        exp_list = persona.get("history", [])
-        exp_str = "".join(
-            f"\n- {e.get('title','')} at {e.get('employer','')}"
-            + (f" ({', '.join(e.get('tech_stack') or [])})" if e.get("tech_stack") else "")
-            for e in exp_list[:6]
-        )
-        projects_str = "".join(
-            f"\n- {(p.get('name') or '').split(':')[0].strip()}: {', '.join(p.get('technologies') or [])}"
-            for p in persona.get("projects") or [] if p.get("name")
-        )
-
-        edu_list = persona.get("education", [])
-        edu_str = "; ".join(
-            f"{e.get('degree','')} at {e.get('institution','')}" for e in edu_list[:2]
-        )
-
-        job_titles = list(set(e.get("title", "") for e in exp_list if e.get("title")))
-        market_m = tool_input.get("market") or {}
-        market_str = market.prompt_block(market_m)
-
-        text = await _llm(
-            system=(
-                "You are a career coach specialising in AI-resilient career development. "
-                "Given a candidate's background, generate a personalised skill development roadmap. "
-                "Return ONLY valid JSON with no markdown fences. "
-                "JSON key 'items', an array of exactly 6 objects each with: "
-                "skill (string — the skill to develop), "
-                "reason (string — one sentence explaining WHY this skill matters for their target role), "
-                "action (string — a concrete task: name a specific course, project, certification or open-source contribution), "
-                "timeline (one of: '1 month','2 months','3 months','6 months'), "
-                "resource (string — specific course name or platform). "
-                "STRICT RULES: "
-                "1. Plan for the TARGET role when one is given: every recommendation must make the candidate more competitive for that role across the employers who hire for it. Past employers' industries are background only — a short internship or placement does not define the candidate's industry. "
-                "2. Build ON their existing technical strengths — deepen and extend, do not replace them. "
-                "3. If usage evidence is given, favour work people hand to AI least over work they hand to it most, and "
-                "apply their strengths above the level of the tasks handed over most (novel research, production systems, "
-                "domain-specific expertise, technical leadership). The evidence is one month of chat use and generic task "
-                "descriptions, so treat it as a hint: never quote its figures or call a skill safe or at risk. "
-                "4. Do NOT recommend generic soft skills (leadership, communication, PM) unless the candidate is "
-                "already working in a non-technical or hybrid role. "
-                "5. Do NOT recommend skills the candidate already lists or shows in their projects or jobs. "
-                "6. Keep resources real and specific. "
-                "7. When counts of what employers ask for are given, they are the strongest evidence: favour skills "
-                "many ads ask for that the profile does NOT show yet, and say in the reason how many ads ask for it "
-                "(use the given numbers exactly, never invent one). A skill the profile already shows is not a gap. "
-                "8. Each 'skill' is a short name; when it is one of the counted skills, use that exact name."
-            ),
-            user=(
-                f"Candidate: {name_str}\n"
-                f"Background: {summary}\n"
-                f"Education: {edu_str}\n"
-                f"Experience: {exp_str}\n"
-                f"Current job titles: {', '.join(job_titles)}\n"
-                f"Target role: {target_job_title or 'not specified'}\n\n"
-                f"Skills they already list: {all_skills_str}\n"
-                + (f"Projects and the technologies they used: {projects_str}\n" if projects_str else "")
-                + (f"\n{market_str}" if market_str else "")
-                + (_evidence_prompt(evidence) if evidence else "")
-                + "\nGenerate 6 skill development recommendations that deepen this candidate's technical profile and make them more competitive for their target role."
-            ),
-            max_tokens=2048,
-        )
-        text = text.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
-        try:
-            data = json.loads(text or "{}")
-        except json.JSONDecodeError:
-            data = {}
-        items = [i for i in data.get("items", []) if isinstance(i, dict) and i.get("skill")]
-        # The market figures shown with an item are looked up here, never taken from the model's text.
-        counted = {s["key"]: s for s in market_m.get("skills") or []}
-        for item in items:
-            s = counted.get(market.skill_key(str(item["skill"])))
-            item["market"] = ({"ads": s["ads"], "of": market_m.get("ads", 0), "shown": s["shown"]} if s else None)
-        return {"status": "generated", "items": items}
+    elif name == "generate_career_plan":
+        from . import career_plan
+        plan = await career_plan.generate(tool_input.get("persona", {}), tool_input.get("market") or {})
+        return {"status": "generated" if plan else "empty", "plan": plan}
 
     elif name == "generate_tailored_cv":
         job = tool_input.get("job", {})
