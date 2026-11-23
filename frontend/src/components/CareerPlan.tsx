@@ -1,5 +1,6 @@
 "use client";
 
+import Icon from "@/components/ui/Icon";
 import { Chip, cx } from "@/components/ui/kit";
 import type { PlanResource, PlanTrack, PlanVenue, SavedPlan } from "@/lib/types";
 
@@ -137,8 +138,16 @@ export default function CareerPlan({ saved, onToggle }: { saved: SavedPlan; onTo
           <h3 id="plan-where" className="m-0 text-[15px] font-semibold">Where you stand</h3>
           {p.diagnosis && <p className="m-0 text-[13.5px] leading-[1.55] text-ink-2 max-w-[80ch] text-pretty">{p.diagnosis}</p>}
           {p.strengths.length > 0 && (
-            <ul className="list-none m-0 p-0 flex flex-wrap gap-[6px]" aria-label="Strengths">
-              {p.strengths.map((s) => <li key={s}><Chip tone="positive">{s}</Chip></li>)}
+            // Strengths are sentences, not tags: a list that wraps, not no-wrap chips that run off the page.
+            <ul className="list-none m-0 p-0 flex flex-col gap-2 max-w-[80ch]" aria-label="Strengths">
+              {p.strengths.map((s) => (
+                <li key={s} className="flex items-start gap-[10px] text-[13px] leading-[1.5] text-ink-2">
+                  <span aria-hidden="true" className="mt-[2px] w-[18px] h-[18px] rounded-full bg-teal-chip text-teal-deep flex items-center justify-center shrink-0">
+                    <Icon name="check" size={11} strokeWidth={2.6} />
+                  </span>
+                  <span className="min-w-0">{s}</span>
+                </li>
+              ))}
             </ul>
           )}
         </section>

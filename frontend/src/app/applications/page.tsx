@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ApplicationFlow from "@/components/ApplicationFlow";
 import Icon from "@/components/ui/Icon";
 import TopBar, { Page } from "@/components/ui/TopBar";
@@ -14,7 +14,9 @@ import { useResource } from "@/lib/store";
 import { setStatus } from "@/lib/actions";
 import { daysSince, longAgo, shortDate } from "@/lib/format";
 import { applicationLink } from "@/lib/jobs";
-import { CLOSED, CLOSED_STAGES, OPEN_STAGES, STATUS_CHOICES, stageOf, statusMeta } from "@/lib/status";
+import {
+  appliedDays, CLOSED, CLOSED_STAGES, followUpDue, goneQuiet, OPEN_STAGES, QUIET_DAYS, STATUS_CHOICES, stageOf, statusMeta,
+} from "@/lib/status";
 import type { Application } from "@/lib/types";
 import AdPicker from "@/components/AdPicker";
 
@@ -28,17 +30,10 @@ const RANGES: { key: Range; label: string; days: number }[] = [
 ];
 const SOURCE: Record<string, string> = { autopilot: "by autopilot", email: "from an email" };
 
-const FOLLOW_UP_DAYS = 7;
-const QUIET_DAYS = 14;
-
-const appliedDays = (a: Application) => (a.status === "Applied" ? daysSince(a.date_applied) : null);
-
 const QUICK: { key: Quick; label: string; dot: string; test: (a: Application) => boolean }[] = [
   { key: "review", label: "Needs review", dot: "bg-amber", test: (a) => a.status === "Pending Review" },
-  { key: "follow", label: "Follow-up due", dot: "bg-blue",
-    test: (a) => { const d = appliedDays(a); return d != null && d >= FOLLOW_UP_DAYS && d < QUIET_DAYS; } },
-  { key: "quiet", label: `No reply in ${QUIET_DAYS}+ days`, dot: "bg-stone",
-    test: (a) => { const d = appliedDays(a); return d != null && d >= QUIET_DAYS; } },
+  { key: "follow", label: "Follow-up due", dot: "bg-blue", test: followUpDue },
+  { key: "quiet", label: `No reply in ${QUIET_DAYS}+ days`, dot: "bg-stone", test: goneQuiet },
 ];
 
 const LEVEL: Record<string, string> = { strong: "Strong", ok: "Reasonable", reach: "Stretch" };
@@ -175,6 +170,19 @@ export default function ApplicationsPage() {
 
   const link = open ? applicationLink(open) : null;
 
+  // Whether board columns are hidden past the right edge.
+  const boardRef = useRef<HTMLDivElement>(null);
+  const [boardMore, setBoardMore] = useState(false);
+  const checkBoardEdge = useCallback(() => {
+    const el = boardRef.current;
+    setBoardMore(!!el && el.scrollLeft + el.clientWidth < el.scrollWidth - 4);
+  }, []);
+  useEffect(() => {
+    checkBoardEdge();
+    window.addEventListener("resize", checkBoardEdge);
+    return () => window.removeEventListener("resize", checkBoardEdge);
+  }, [checkBoardEdge, view, showClosed, apps.loading]);
+
   return (
     <>
       <TopBar crumbs={[{ label: "Workspace" }, { label: "Applications" }]}>
@@ -186,9 +194,11 @@ export default function ApplicationsPage() {
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div className="flex flex-col gap-[6px]">
             <h1 className="m-0 text-[26px] font-semibold tracking-[-0.025em]">Applications</h1>
-            <p className="m-0 text-[14px] text-ink-2">
-              {activeCount} active, {closedCount} closed{older > 0 ? `, ${older} older not shown` : ""}.{view === "board" && all.length > 0 ? " Drag a card to change its status." : ""}
-            </p>
+            {apps.loading ? <Skeleton className="h-5 w-64 rounded-[6px]" /> : (
+              <p className="m-0 text-[14px] text-ink-2">
+                {activeCount} active, {closedCount} closed{older > 0 ? `, ${older} older not shown` : ""}.{view === "board" && all.length > 0 ? " Drag a card to change its status." : ""}
+              </p>
+            )}
           </div>
           <div className="flex flex-wrap gap-2 items-center">
             <Segmented label="View" value={view} onChange={setView}
@@ -204,7 +214,7 @@ export default function ApplicationsPage() {
                 </span>
                 <button type="button" aria-pressed={showClosed} onClick={() => setShowClosed((s) => !s)}
                   className={cx(buttonClass("secondary", "sm", "h-9 font-normal"), showClosed && "bg-muted font-semibold")}>
-                  {showClosed ? "Hide closed" : `Show closed (${closedCount})`}
+                  {showClosed ? "Hide closed" : apps.loading ? "Show closed" : `Show closed (${closedCount})`}
                 </button>
               </>
             )}
@@ -221,8 +231,9 @@ export default function ApplicationsPage() {
                 className={cx("flex items-center gap-2 h-[34px] pl-3 pr-[6px] rounded-full text-[13px] border",
                   on ? "border-ink bg-ink text-on-ink font-semibold" : "border-border bg-surface text-ink font-medium hover:border-border-strong")}>
                 <span aria-hidden="true" className={cx("w-[7px] h-[7px] rounded-full", q.dot)} />{q.label}
+                {/* No count until the applications load: a "0" there reads as "nothing needs you". */}
                 <span className={cx("min-w-[22px] h-[22px] px-[6px] rounded-full flex items-center justify-center font-mono text-[11.5px] font-semibold",
-                  on ? "bg-white/20 text-on-ink" : "bg-muted text-ink")}>{n}</span>
+                  on ? "bg-white/20 text-on-ink" : "bg-muted text-ink")}>{apps.loading ? "–" : n}</span>
               </button>
             );
           })}
@@ -243,7 +254,11 @@ export default function ApplicationsPage() {
         ) : view === "flow" ? (
           <ApplicationFlow apps={everything} />
         ) : view === "board" ? (
-          <div className="relative overflow-x-auto pb-[6px] -mx-1 px-1">
+          <div ref={boardRef} onScroll={checkBoardEdge}
+            className="relative overflow-x-auto pb-[6px] -mx-1 px-1"
+            // Fade the right edge while columns are off screen, so it's clear the board scrolls sideways.
+            style={boardMore ? { maskImage: "linear-gradient(to right, #000 calc(100% - 48px), transparent)",
+              WebkitMaskImage: "linear-gradient(to right, #000 calc(100% - 48px), transparent)" } : undefined}>
             <div className="grid gap-[10px] items-start"
               style={{ gridTemplateColumns: `repeat(${columns.length}, minmax(176px, 1fr))`, minWidth: columns.length * 186 }}>
               {columns.map((col) => {

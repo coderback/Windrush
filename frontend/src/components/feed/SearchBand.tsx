@@ -16,7 +16,7 @@ export function salaryLabel([lo, hi]: [number, number]): string {
 }
 
 export const EXPERIENCE_OPTIONS = [
-  { value: "", label: "Any experience" },
+  { value: "", label: "Any" },  // the segment label already says "Experience asked"; "Any experience" truncated
   { value: "0", label: "No experience required" },
   { value: "1", label: "Up to 1 year" },
   { value: "2", label: "Up to 2 years" },
