@@ -730,9 +730,37 @@ async def job_from_url(
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Could not fetch that listing: {exc}")
 
-    job["level"] = seniority.infer_level(job.get("title", ""), job.get("description", ""))
+    # The same job already in the feed (a careers page showing a Greenhouse or Ashby job): its own copy, fully read.
+    stored = jobs_db.find_by_job_id(job.get("ats_job_id") or "")
+    if stored:
+        return {"job": stored}
+    level = seniority.infer_level(job.get("title", ""), job.get("description", ""))
+    # With no ad text, only the title's own rank says anything: "mid" would be a guess.
+    job["level"] = level if job.get("description") or level != "mid" else ""
     job["tags"] = jobs_db._extract_tags(job)
     return {"job": job}
+
+
+_MIN_AD_TEXT = 200   # characters of ad text below which a job isn't scored (a title and a line say too little)
+
+
+@app.post("/jobs/report")
+async def report_job_reading(
+    body: dict,
+    current_user: Annotated[auth.User, Depends(auth.get_current_user)],
+):
+    """Log a job Windrush read badly (wrong title, no ad text, a made-up level…) with the user's note, to fix later."""
+    job = body.get("job") if isinstance(body.get("job"), dict) else {}
+    if not (job.get("url") or job.get("title")):
+        raise HTTPException(status_code=400, detail="Say which job this is about.")
+    note = str(body.get("note") or "").strip()[:1000]
+    return {"id": tracker.add_job_report(current_user.id, job, note)}
+
+
+@app.get("/jobs/reports")
+async def job_reading_reports(current_user: Annotated[auth.User, Depends(auth.get_current_user)]):
+    """The badly read jobs this user has reported, newest first."""
+    return {"reports": tracker.job_reports(current_user.id)}
 
 
 @app.post("/jobs/analyze")
@@ -746,6 +774,11 @@ async def analyze_job(
 
     async def gen():
         yield _sse_json("start", {"message": "Analysing job…"})
+        # No ad text to compare: a score would only be the model guessing from the title.
+        if len((job.get("description") or "").strip()) < _MIN_AD_TEXT:
+            yield _sse_json("no_text", {"message": "Windrush couldn't read this ad's text, so it can't judge the fit."})
+            yield _sse_json("done", {"message": "Analysis complete"})
+            return
 
         # Score job fit
         fit_result = await execute_tool("score_job_fit", {"jobs": [job], "persona": persona})

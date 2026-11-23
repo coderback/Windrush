@@ -115,6 +115,8 @@ export interface CareerExposure {
 }
 
 export interface Analysis {
+  /** The ad's text couldn't be read, so the job wasn't scored; reasoning says so. */
+  no_text?: boolean;
   fit_score?: number;
   level_match?: string;
   skill_gaps?: string[];

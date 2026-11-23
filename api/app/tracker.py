@@ -949,6 +949,20 @@ def _gmail_tables(con: sqlite3.Connection) -> None:
         PRIMARY KEY (user_id, key)
     )""")
     con.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_email_events_msg ON email_events(user_id, gmail_id)")
+    # Jobs the user says Windrush read badly, with what it read then (see add_job_report)
+    con.execute("""CREATE TABLE IF NOT EXISTS job_reports (
+        id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id      TEXT NOT NULL,
+        job_key      TEXT NOT NULL DEFAULT '',
+        url          TEXT NOT NULL DEFAULT '',
+        title        TEXT NOT NULL DEFAULT '',
+        company      TEXT NOT NULL DEFAULT '',
+        level        TEXT NOT NULL DEFAULT '',
+        source       TEXT NOT NULL DEFAULT '',
+        text_chars   INTEGER NOT NULL DEFAULT 0,
+        note         TEXT NOT NULL DEFAULT '',
+        created_at   TEXT NOT NULL
+    )""")
 
 
 # What an email says happened. 'other' is about an application but changes nothing (we're reviewing it…).
@@ -1063,6 +1077,30 @@ def assessment_events(user_id: str) -> list[dict]:
                        "WHERE e.user_id=? AND e.decision NOT IN ('ignored', 'dismissed', 'undone') "
                        "AND (e.kind IN ('assessment', 'rejected', 'interview', 'offer') OR e.assessment != '') "
                        "ORDER BY e.received_at", (user_id,)).fetchall()
+    con.close()
+    return [dict(r) for r in rows]
+
+
+def add_job_report(user_id: str, job: dict, note: str) -> int:
+    """Log a badly read job as Windrush read it (title, employer, level, how much ad text) with the user's note."""
+    text = lambda v: str(v or "").strip()[:500]  # noqa: E731
+    con = _gmail_con()
+    with con:
+        cur = con.execute(
+            "INSERT INTO job_reports (user_id, job_key, url, title, company, level, source, text_chars, note, created_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?)",
+            (user_id, text(job.get("id") or job.get("job_id")), text(job.get("url")), text(job.get("title")),
+             text(job.get("company")), text(job.get("level")), text(job.get("source")),
+             len(str(job.get("description") or "").strip()), str(note or "").strip()[:1000], _now()))
+    con.close()
+    return cur.lastrowid
+
+
+def job_reports(user_id: str) -> list[dict]:
+    con = _gmail_con()
+    con.row_factory = sqlite3.Row
+    rows = con.execute("SELECT id, job_key, url, title, company, level, source, text_chars, note, created_at "
+                       "FROM job_reports WHERE user_id=? ORDER BY id DESC", (user_id,)).fetchall()
     con.close()
     return [dict(r) for r in rows]
 
