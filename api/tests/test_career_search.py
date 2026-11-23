@@ -48,9 +48,38 @@ def _search(asked):
     ("The Missing Book", "Missing persons", False),
     ("Kubernetes Up & Running", "Kubernetes documentation", False),
     ("fast.ai", "Practical Deep Learning for Coders - fast.ai", True),
+    ("Python documentation: The Python Profilers", "profiling — Python profilers — Python 3.15.2 documentation", True),
+    ("Python documentation: The Python Profilers", "Profiling in Python: How to Find Performance Bottlenecks", False),
+    ("Go documentation: Diagnostics", "Diagnostics - The Go Programming Language", True),
+    ("Go documentation: Diagnostics", "Diagnostics - Rust compiler development guide", False),
 ])
 def test_a_resource_matches_only_a_title_carrying_its_name(name, title, ok):
     assert career_search.matches_resource(name, title) is ok
+
+
+def test_the_source_can_be_in_the_results_link():
+    assert career_search.matches_resource("GitHub Docs: About pull requests", "About pull requests",
+                                          "https://docs.github.com/en/pull-requests/about-pull-requests")
+    assert not career_search.matches_resource("GitHub Docs: About pull requests", "About pull requests",
+                                              "https://example.com/about-pull-requests")
+
+
+def test_the_first_two_roles_get_their_own_searches():
+    queries = career_search.venue_queries(PERSONA, _plan(), {"roles": ["Software Engineer", "ML Engineer", "AI Engineer"]}, TODAY)
+    assert queries == ["Software Engineer hackathon London 2026 2027", "Software Engineer meetup London",
+                       "ML Engineer hackathon London 2026 2027", "ML Engineer meetup London",
+                       "Software Engineer conference London 2026 2027", "ML Engineer competition 2026 2027",
+                       "Kubernetes community London"]
+
+
+def test_an_empty_page_is_asked_for_again_once():
+    calls = []
+
+    async def flaky(query, max_results=8):
+        calls.append(query)
+        return [] if len(calls) == 1 else [{"title": "x", "url": "https://x.example"}]
+    assert asyncio.run(career_search._gentle(flaky, pause_s=0)("q")) == [{"title": "x", "url": "https://x.example"}]
+    assert calls == ["q", "q"]
 
 
 def test_resources_are_checked_and_venues_kept_only_as_the_results_they_point_at():
@@ -104,7 +133,54 @@ def test_the_place_is_a_city_before_a_country():
     assert career_search._place({"preferences": {}}) == ""
 
 
+class _Brave:
+    """Stands in for http_client.async_client: answers the Brave API with `body` and records what was asked."""
+    asked: list = []
+
+    def __init__(self, body=None, status=200):
+        self.body, self.status = body, status
+
+    def __call__(self, **kwargs):
+        return self
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *a):
+        return None
+
+    async def get(self, url, params=None, headers=None):
+        import httpx
+        _Brave.asked.append((url, params, headers))
+        return httpx.Response(self.status, json=self.body, request=httpx.Request("GET", url))
+
+
+def test_brave_results_are_read_and_ddg_is_the_fallback(monkeypatch):
+    monkeypatch.setenv("BRAVE_SEARCH_API_KEY", "test-brave-key")
+    monkeypatch.setattr(career_search, "_BRAVE_GAP_S", 0)
+    monkeypatch.setattr(career_search.http_client, "async_client", _Brave({"web": {"results": [
+        {"title": "<strong>PyData</strong> London", "url": "https://pydata.org/london", "description": "Talks <b>monthly</b>."},
+        {"title": "no link"}]}}))
+    assert asyncio.run(career_search.web_search("pydata london")) == [
+        {"title": "PyData London", "url": "https://pydata.org/london", "snippet": "Talks monthly."}]
+    assert _Brave.asked[-1][1]["q"] == "pydata london" and _Brave.asked[-1][2]["X-Subscription-Token"] == "test-brave-key"
+
+    from app import agent
+    ddg = []
+
+    async def fake_ddg(query, max_results=15):
+        ddg.append(query)
+        return [{"title": "x", "url": "https://x.example", "snippet": ""}]
+    monkeypatch.setattr(agent, "_ddg_search", fake_ddg)
+    monkeypatch.setattr(career_search.http_client, "async_client", _Brave(status=429))
+    assert asyncio.run(career_search.web_search("q"))[0]["url"] == "https://x.example" and ddg == ["q"]
+    monkeypatch.delenv("BRAVE_SEARCH_API_KEY")
+    asyncio.run(career_search.web_search("q2"))
+    assert ddg == ["q", "q2"]
+
+
 def test_the_plan_endpoint_saves_the_looked_up_plan(client, user, monkeypatch):
+    monkeypatch.delenv("BRAVE_SEARCH_API_KEY", raising=False)
     tracker.update_user_persona(user, PERSONA)
 
     async def tool(name, tool_input):
