@@ -1030,6 +1030,71 @@ test("a job page never shows the old placeholder score", async ({ page }) => {
   api.expectAllMocked();
 });
 
+test("coming back from a job's posting asks whether you applied, and yes tracks it with the ad and its fit", async ({ page }) => {
+  await signIn(page);
+  const job = { ...JOBS[0], description: "Python services." };
+  await page.addInitScript((j) => sessionStorage.setItem("job_1", JSON.stringify(j)), job);
+  await page.context().route("https://jobs.example.com/**", (route) => route.fulfill({ body: "<html>posting</html>" }));
+  const posts: unknown[] = [];
+  let opened = 0;
+  const api = await mockApi(page, {
+    ...SHELL,
+    "GET /api/jobs/1/sponsorship": { sponsorship: "offered", evidence: "", clearance: "", licensed_sponsor: false, sponsor_name: "", mark: "" },
+    "POST /api/jobs/analyze": { sse: [{ type: "job_fit", ranked_jobs: [{ fit_score: 84, level_match: "strong",
+      matched_skills: ["Python"], skill_gaps: ["Go"], reasoning: "Strong backend overlap." }] }] },
+    "POST /api/jobs/1/opened": () => { opened += 1; return { ok: true }; },
+    "POST /api/jobs/applied": (request) => { posts.push(request.postDataJSON()); return { id: "a9", status: "Applied" }; },
+  });
+  await page.goto("/jobs/1");
+  await expect(page.getByText("Strong backend overlap.")).toBeVisible();
+
+  const [posting] = await Promise.all([page.waitForEvent("popup"), page.getByRole("link", { name: /View posting/ }).click()]);
+  await posting.close();
+  await expect.poll(() => opened).toBe(1);
+  await page.bringToFront();
+  await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+  await page.getByRole("button", { name: "Yes, I applied" }).click();
+
+  await expect.poll(() => posts.length).toBe(1);
+  expect(posts[0]).toMatchObject({ job: { id: "1", title: "Graduate Software Engineer", company: "Acme Robotics" },
+                                   fit: { fit_score: 84, level_match: "strong", skill_gaps: ["Go"] } });
+  await expect(page.getByRole("button", { name: "Applied", exact: true })).toBeDisabled();
+  await expect(page.getByText("Did you apply on Acme Robotics's site?")).toHaveCount(0);
+  api.expectAllMocked();
+});
+
+test("an application tracked from email can be linked to the ad it was made through", async ({ page }) => {
+  await signIn(page);
+  let linked = false;
+  const fromEmail = () => app("e1", "Applied", linked
+    ? { job_id: "wd-1", job_url: "https://jobs.example.com/wd-1", ad_link: "you" }
+    : { job_id: "email:abc", job_url: "", ad_link: null });
+  const picks: unknown[] = [];
+  const api = await mockApi(page, {
+    ...SHELL,
+    "GET /api/applications": () => [fromEmail()],
+    "GET /api/applications/e1/ads": { linked: "", ads: [
+      { id: "j1", title: "Graduate Software Engineer, London", location: "London", url: "https://jobs.example.com/wd-1",
+        created_at: "2026-10-02T00:00:00Z", opened: "2026-10-03T00:00:00Z", text_chars: 4000 },
+      { id: "j2", title: "Graduate Software Engineer, Leeds", location: "Leeds", url: "https://jobs.example.com/wd-2",
+        created_at: "2026-10-01T00:00:00Z", opened: "", text_chars: 3000 },
+    ] },
+    "POST /api/applications/e1/ad": (request) => { picks.push(request.postDataJSON()); linked = true; return { ok: true }; },
+  });
+  await page.goto("/applications");
+  await page.getByRole("button", { name: /Role e1 at Company e1/ }).click();
+  const panel = page.getByRole("dialog", { name: "Application details" });
+  const ads = panel.getByRole("list", { name: "Ads from Company e1" });
+  await expect(ads.getByRole("listitem")).toHaveCount(2);
+  await expect(ads.getByText("you opened it", { exact: false })).toHaveCount(1);
+
+  await panel.getByRole("button", { name: "This one: Graduate Software Engineer, London" }).click();
+  await expect.poll(() => picks).toEqual([{ job_id: "j1" }]);
+  await expect(panel.getByRole("heading", { name: "Which ad was this?" })).toHaveCount(0);
+  await expect(panel.getByRole("link", { name: /View the original posting/ })).toBeVisible();
+  api.expectAllMocked();
+});
+
 test("Home lists assessments by deadline, and marking one done can be undone", async ({ page }) => {
   await signIn(page);
   const open = [

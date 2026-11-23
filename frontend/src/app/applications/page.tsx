@@ -16,6 +16,7 @@ import { daysSince, longAgo, shortDate } from "@/lib/format";
 import { applicationLink } from "@/lib/jobs";
 import { CLOSED, CLOSED_STAGES, OPEN_STAGES, STATUS_CHOICES, stageOf, statusMeta } from "@/lib/status";
 import type { Application } from "@/lib/types";
+import AdPicker from "@/components/AdPicker";
 
 type View = "board" | "table" | "flow";
 type Quick = "review" | "follow" | "quiet";
@@ -397,6 +398,7 @@ export default function ApplicationsPage() {
                 </span>
               </div>
             )}
+            <AdPicker key={open.id} app={open} />
             {open.job_url && (
               <a href={open.job_url} target="_blank" rel="noopener noreferrer"
                 className="flex items-center gap-[10px] px-3 py-[10px] border border-border rounded-[10px] text-ink text-[13px] hover:bg-subtle">
