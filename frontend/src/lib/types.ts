@@ -55,7 +55,12 @@ export interface Application {
   /** The questions the agent met on the application form, with each answer and where it came from. */
   questions?: FormAnswer[];
   created_at: string;
+  /** How an application made outside Windrush got its feed ad: "matched" by Windrush, "you" picked or marked it. */
+  ad_link?: string | null;
 }
+
+/** A feed ad an application may have been made through (GET /applications/{id}/ads). */
+export interface CandidateAd { id: string; title: string; location: string; url: string; created_at: string; opened: string; text_chars: number }
 
 /* ── Application questions (mirrors api/app/answers.py) ─────────────── */
 

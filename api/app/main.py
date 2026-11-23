@@ -33,6 +33,7 @@ from . import seniority
 from . import sponsor_register
 from . import job_attributes
 from . import job_skills
+from . import ad_match
 from . import market
 from .models import Persona
 from pydantic import BaseModel
@@ -73,6 +74,7 @@ async def lifespan(app: FastAPI):
     background = [asyncio.create_task(sponsor_register.keep_fresh()),
                   asyncio.create_task(job_attributes.keep_extracting()),
                   asyncio.create_task(job_skills.keep_reading()),
+                  asyncio.create_task(ad_match.keep_linking()),
                   asyncio.create_task(discovery.keep_collecting()),
                   asyncio.create_task(autopilot.keep_running()),
                   asyncio.create_task(gmail.keep_syncing())]
@@ -503,6 +505,74 @@ async def save_job(
     if app_id:
         return {"id": app_id, "status": "Saved"}
     return {"status": "duplicate", "message": "This job is already in your tracker."}
+
+
+# ── Applications made outside Windrush (see ad_match.py) ──────────────────────
+
+@app.post("/jobs/{job_db_id}/opened")
+async def job_posting_opened(job_db_id: str, current_user: Annotated[auth.User, Depends(auth.get_current_user)]):
+    """The user opened this feed job's posting: an application tracked from email later is matched to it first."""
+    if await asyncio.to_thread(jobs_db.get_job, job_db_id) is None:
+        raise HTTPException(status_code=404, detail="No such job")
+    await asyncio.to_thread(tracker.record_job_open, current_user.id, job_db_id)
+    return {"ok": True}
+
+
+_NOT_YET_SENT = {"Saved", "Pending Review", "Evaluated"}
+
+
+@app.post("/jobs/applied")
+async def job_applied_elsewhere(body: dict, current_user: Annotated[auth.User, Depends(auth.get_current_user)]):
+    """The user applied for this job on the employer's site: track it as Applied with the ad attached (or move the
+    tracked one to Applied), with the fit check the page already ran, if it did."""
+    job = body.get("job") if isinstance(body.get("job"), dict) else {}
+    if not (job.get("title") and job.get("company")):
+        raise HTTPException(status_code=400, detail="The job's title and employer are needed")
+    uid = current_user.id
+    app_id = await asyncio.to_thread(tracker.add_application, uid, job, {}, "", {}, "", "Applied", source="you")
+    if not app_id:
+        app_id = await asyncio.to_thread(tracker.find_application_id, uid, job["company"], job["title"])
+        row = app_id and await asyncio.to_thread(tracker.application_row, uid, app_id)
+        if not row:
+            raise HTTPException(status_code=409, detail="Couldn't track this application")
+        if row["status"] in _NOT_YET_SENT:
+            await asyncio.to_thread(tracker.update_status, app_id, "Applied", None, user_id=uid)
+    await asyncio.to_thread(tracker.link_application, uid, app_id, job, "you")
+    fit = body.get("fit") if isinstance(body.get("fit"), dict) else None
+    if fit and isinstance(fit.get("fit_score"), (int, float)):
+        await asyncio.to_thread(tracker.set_fit, app_id, {"fit_score": fit["fit_score"],
+                                                          "level_match": fit.get("level_match"),
+                                                          "skill_gaps": fit.get("skill_gaps") or []})
+    row = await asyncio.to_thread(tracker.application_row, uid, app_id)
+    return {"id": app_id, "status": row["status"] if row else "Applied"}
+
+
+@app.get("/applications/{app_id}/ads")
+async def application_ads(app_id: str, current_user: Annotated[auth.User, Depends(auth.get_current_user)]):
+    """The feed ads at this application's employer it may have been made through, for the user to pick from."""
+    from . import ad_match
+    row = await asyncio.to_thread(tracker.application_row, current_user.id, app_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Application not found")
+    opened = await asyncio.to_thread(tracker.opened_jobs, current_user.id)
+    ads = await asyncio.to_thread(ad_match.candidates, row, opened, any_role=True)
+    return {"ads": [{k: a.get(k) for k in ("id", "title", "location", "url", "created_at", "opened", "text_chars")}
+                    for a in ads], "linked": row.get("ad_link") or ""}
+
+
+@app.post("/applications/{app_id}/ad")
+async def application_link_ad(app_id: str, body: dict, current_user: Annotated[auth.User, Depends(auth.get_current_user)]):
+    """Link the ad the user picked (one of /applications/{id}/ads) to this application; its fit check then runs."""
+    from . import ad_match
+    row = await asyncio.to_thread(tracker.application_row, current_user.id, app_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Application not found")
+    ads = await asyncio.to_thread(ad_match.candidates, row, None, any_role=True)
+    ad = next((a for a in ads if a["id"] == body.get("job_id")), None)
+    if ad is None:
+        raise HTTPException(status_code=400, detail="That ad isn't one this application could have been made through")
+    await asyncio.to_thread(tracker.link_application, current_user.id, app_id, ad, "you")
+    return {"ok": True, "job_id": ad["job_id"], "job_url": ad["url"]}
 
 
 # ── Onboarding ────────────────────────────────────────────────────────────────

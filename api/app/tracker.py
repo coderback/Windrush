@@ -182,6 +182,11 @@ def init_db(db_path: str = "") -> None:
             "ALTER TABLE applications ADD COLUMN questions TEXT",
             # The CV and cover letter a run wrote, so a live send uses the ones the practice run showed.
             "ALTER TABLE autopilot_runs ADD COLUMN documents TEXT",
+            # How an application tracked from email got its feed ad (see ad_match.py): "matched" by Windrush, "you"
+            # chose or marked it; when matching was tried; and when its fit check ran.
+            "ALTER TABLE applications ADD COLUMN ad_link TEXT",
+            "ALTER TABLE applications ADD COLUMN ad_checked TEXT",
+            "ALTER TABLE applications ADD COLUMN fit_checked TEXT",
         ]:
             try:
                 con.execute(stmt)
@@ -950,6 +955,12 @@ def _gmail_tables(con: sqlite3.Connection) -> None:
     )""")
     con.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_email_events_msg ON email_events(user_id, gmail_id)")
     # Jobs the user says Windrush read badly, with what it read then (see add_job_report)
+    con.execute("""CREATE TABLE IF NOT EXISTS job_opens (
+        user_id     TEXT NOT NULL,
+        job_key     TEXT NOT NULL,
+        opened_at   TEXT NOT NULL,
+        PRIMARY KEY (user_id, job_key)
+    )""")
     con.execute("""CREATE TABLE IF NOT EXISTS career_plans (
         id          INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id     TEXT NOT NULL,
@@ -1116,6 +1127,103 @@ def job_reports(user_id: str) -> list[dict]:
                        "FROM job_reports WHERE user_id=? ORDER BY id DESC", (user_id,)).fetchall()
     con.close()
     return [dict(r) for r in rows]
+
+
+# ── Applications and the feed's ads (see ad_match.py) ─────────────────────────
+
+def record_job_open(user_id: str, job_key: str) -> None:
+    """The user opened this feed job's posting (its "View posting" link): the ad they most likely applied to."""
+    con = _gmail_con()
+    with con:
+        con.execute("INSERT INTO job_opens (user_id, job_key, opened_at) VALUES (?,?,?) "
+                    "ON CONFLICT(user_id, job_key) DO UPDATE SET opened_at=excluded.opened_at",
+                    (user_id, str(job_key)[:200], _now()))
+    con.close()
+
+
+def opened_jobs(user_id: str) -> dict[str, str]:
+    """{feed job id: when the user last opened its posting}."""
+    con = _gmail_con()
+    rows = con.execute("SELECT job_key, opened_at FROM job_opens WHERE user_id=?", (user_id,)).fetchall()
+    con.close()
+    return dict(rows)
+
+
+def applications_to_match(limit: int = 200) -> list[dict]:
+    """Applications tracked from email with no feed ad yet that matching hasn't tried."""
+    con = sqlite3.connect(_DB_PATH)
+    con.row_factory = sqlite3.Row
+    rows = con.execute("SELECT id, user_id, job_title, company, date_applied, created_at FROM applications "
+                       "WHERE job_id LIKE 'email:%' AND coalesce(ad_link, '') = '' AND ad_checked IS NULL "
+                       "ORDER BY created_at DESC LIMIT ?", (limit,)).fetchall()
+    con.close()
+    return [dict(r) for r in rows]
+
+
+def mark_ad_checked(app_id: str) -> None:
+    con = sqlite3.connect(_DB_PATH)
+    with con:
+        con.execute("UPDATE applications SET ad_checked=? WHERE id=?", (_now(), app_id))
+    con.close()
+
+
+def application_row(user_id: str, app_id: str) -> dict | None:
+    """One of the user's applications with the columns ad matching needs."""
+    con = sqlite3.connect(_DB_PATH)
+    con.row_factory = sqlite3.Row
+    row = con.execute("SELECT id, user_id, job_id, job_title, company, location, job_url, status, date_applied, "
+                      "created_at, ad_link FROM applications WHERE id=? AND user_id=?", (app_id, user_id)).fetchone()
+    con.close()
+    return dict(row) if row else None
+
+
+def link_application(user_id: str, app_id: str, job: dict, how: str) -> bool:
+    """Attach a feed ad to one of the user's applications (its id, link and place), so it's treated as one made
+    through Windrush: the fit check runs again. A placeholder title ("Role not stated") takes the ad's."""
+    con = sqlite3.connect(_DB_PATH)
+    try:
+        with con:
+            cur = con.execute(
+                "UPDATE applications SET job_id=?, job_url=?, location=CASE WHEN coalesce(location,'')='' THEN ? "
+                "ELSE location END, ad_link=?, ad_checked=?, fit_checked=NULL WHERE id=? AND user_id=?",
+                (str(job.get("job_id") or job.get("id") or ""), job.get("url") or "", job.get("location") or "",
+                 how, _now(), app_id, user_id))
+            if cur.rowcount != 1:
+                return False
+        try:
+            with con:
+                con.execute("UPDATE applications SET job_title=? WHERE id=? AND job_title=?",
+                            (job.get("title") or "", app_id, "Role not stated"))
+        except sqlite3.IntegrityError:
+            pass    # the user already tracks that title at this company
+        return True
+    finally:
+        con.close()
+
+
+def applications_to_fit_check(limit: int = 4) -> list[dict]:
+    """Applications with a feed ad whose fit check hasn't run."""
+    con = sqlite3.connect(_DB_PATH)
+    con.row_factory = sqlite3.Row
+    rows = con.execute("SELECT id, user_id, job_id, job_title, company, job_url FROM applications "
+                       "WHERE ad_link IN ('you', 'matched') AND fit_checked IS NULL ORDER BY created_at DESC LIMIT ?",
+                       (limit,)).fetchall()
+    con.close()
+    return [dict(r) for r in rows]
+
+
+def set_fit(app_id: str, fit: dict | None) -> None:
+    """Store a fit check's score, level match and gaps; None records that it couldn't run (no ad text, or a failed
+    call), so it isn't tried again until the ad is changed."""
+    con = sqlite3.connect(_DB_PATH)
+    with con:
+        if fit is None:
+            con.execute("UPDATE applications SET fit_checked=? WHERE id=?", (f"failed {_now()}", app_id))
+        else:
+            con.execute("UPDATE applications SET fit_score=?, level_match=?, skill_gaps=?, fit_checked=? WHERE id=?",
+                        (fit.get("fit_score"), fit.get("level_match") or "ok", json.dumps(fit.get("skill_gaps") or []),
+                         _now(), app_id))
+    con.close()
 
 
 def save_career_plan(user_id: str, target: str, plan: dict) -> dict:

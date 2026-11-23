@@ -1,5 +1,5 @@
 import { load, mutate, peek, requestJson } from "./store";
-import type { Application, Job } from "./types";
+import type { Analysis, Application, Job } from "./types";
 
 const APPS = "/api/applications";
 
@@ -17,6 +17,28 @@ export async function saveJob(job: Job): Promise<string | null> {
   });
   const apps = await load<Application[]>(APPS, { force: true }).catch(() => peek<Application[]>(APPS));
   return res.id ?? findTracked(apps, job)?.id ?? null;
+}
+
+/** "I applied" on the employer's site: track this job as Applied with its ad and the page's fit check attached. */
+export async function markApplied(job: Job, fit?: Analysis | null): Promise<{ id: string; status: string }> {
+  const res = await requestJson<{ id: string; status: string }>("/api/jobs/applied", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      job,
+      fit: fit && typeof fit.fit_score === "number"
+        ? { fit_score: fit.fit_score, level_match: fit.level_match, skill_gaps: fit.skill_gaps ?? [] } : null,
+    }),
+  });
+  await load<Application[]>(APPS, { force: true }).catch(() => undefined);
+  return res;
+}
+
+/** Note that the user opened this feed job's posting, so an emailed confirmation is matched to it first. */
+export async function notePostingOpened(jobId: string) {
+  try {
+    await requestJson(`/api/jobs/${encodeURIComponent(jobId)}/opened`, { method: "POST" });
+  } catch {}
 }
 
 export async function setStatus(appId: string, status: string, notes?: string) {

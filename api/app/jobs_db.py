@@ -1190,6 +1190,23 @@ def ads_waiting_for_skills() -> int:
     return row[0] if row else 0
 
 
+def ads_at_company(company: str) -> list[dict]:
+    """Every ad stored for this employer (expired ones too), newest first: what an application there may have been
+    made through."""
+    if not _DB_PATH:
+        init_db()
+    key = _normalize_company(company or "")
+    if not key:
+        return []
+    con = sqlite3.connect(_DB_PATH)
+    con.row_factory = sqlite3.Row
+    rows = con.execute("SELECT id, job_id, title, company, location, url, level, created_at, "
+                       "length(coalesce(description, '')) AS text_chars FROM jobs WHERE normalized_company = ? "
+                       "ORDER BY created_at DESC", (key,)).fetchall()
+    con.close()
+    return [dict(r) for r in rows]
+
+
 def title_matcher(title: str):
     """A test for job titles that are the same role as `title`: each of its words (or a known synonym, e.g. ML for
     machine learning) appears in the job title."""

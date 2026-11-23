@@ -22,7 +22,7 @@ import {
 import { degreeLabel, documentFileName, experienceLabel, jobSalary, levelLabel, longAgo, workSetting } from "@/lib/format";
 import { cacheFit, cachedFit, feedNeighbours, jobHref, recallJob } from "@/lib/jobs";
 import { analyzeJob, postStream, readStream } from "@/lib/sse";
-import { discardJob, saveJob, trackedApplication } from "@/lib/actions";
+import { discardJob, markApplied, notePostingOpened, saveJob, trackedApplication } from "@/lib/actions";
 import { load, useResource } from "@/lib/store";
 import { fitVerdict, jobExposure, noScoreReason, riskLevel, RISK } from "@/lib/status";
 import { sponsorshipVerdict } from "@/lib/sponsorship";
@@ -146,6 +146,44 @@ export default function JobDetailPage() {
   }, [job, apps.data]);
 
   const [reporting, setReporting] = useState(false);
+
+  // Applied on the employer's site: "I applied", and the question when the user comes back from the posting.
+  const SENT = ["Applied", "Responded", "Interview", "Offer", "Rejected"];
+  const [markedApplied, setMarkedApplied] = useState(false);
+  const [markingApplied, setMarkingApplied] = useState(false);
+  const [openedPosting, setOpenedPosting] = useState(false);
+  const [askApplied, setAskApplied] = useState(false);
+  const tracked = job && apps.data ? trackedApplication(job) : undefined;
+  const applied = markedApplied || (!!tracked && SENT.includes(tracked.status));
+
+  useEffect(() => {
+    if (!openedPosting || applied) return;
+    const back = () => { if (document.visibilityState === "visible") setAskApplied(true); };
+    document.addEventListener("visibilitychange", back);
+    window.addEventListener("focus", back);
+    return () => { document.removeEventListener("visibilitychange", back); window.removeEventListener("focus", back); };
+  }, [openedPosting, applied]);
+
+  const openPosting = () => {
+    if (job?.id) notePostingOpened(job.id);
+    setOpenedPosting(true);
+  };
+
+  const iApplied = async () => {
+    if (!job || applied) return;
+    setMarkingApplied(true);
+    setActionError(null);
+    try {
+      await markApplied(job, analysis);
+      setMarkedApplied(true);
+      setSaved(true);
+      setAskApplied(false);
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : "Couldn't track this application.");
+    } finally {
+      setMarkingApplied(false);
+    }
+  };
 
   const runAnalysis = useCallback(async () => {
     if (!job) return;
@@ -732,10 +770,15 @@ export default function JobDetailPage() {
           </div>
           <div className="flex flex-wrap gap-2">
             {job.url && (
-              <a href={job.url} target="_blank" rel="noopener noreferrer" className={buttonClass("secondary", "top")}>
+              <a href={job.url} target="_blank" rel="noopener noreferrer" onClick={openPosting} className={buttonClass("secondary", "top")}>
                 View posting<Icon name="external" size={14} strokeWidth={2} /><span className="sr-only"> (opens in a new tab)</span>
               </a>
             )}
+            <button type="button" onClick={iApplied} disabled={markingApplied || applied} aria-pressed={applied}
+              className={buttonClass("secondary", "top", applied ? "disabled:opacity-100 text-teal-deep" : undefined)}>
+              {markingApplied ? <Spinner /> : applied ? <Icon name="check" size={14} strokeWidth={2.4} /> : null}
+              {applied ? "Applied" : "I applied"}
+            </button>
             <button type="button" onClick={save} disabled={saving || saved} aria-pressed={saved}
               className={buttonClass("secondary", "top", saved ? "disabled:opacity-100 text-teal-deep" : undefined)}>
               {saving ? <Spinner /> : saved ? <Icon name="check" size={14} strokeWidth={2.4} /> : <Icon name="bookmark" size={14} />}
@@ -751,6 +794,22 @@ export default function JobDetailPage() {
             )}
           </div>
           {actionError && <div className="basis-full"><Callout>{actionError}</Callout></div>}
+          {askApplied && !applied && (
+            <div className="basis-full">
+              <Callout tone="info" title={`Did you apply on ${job.company}'s site?`}
+                action={
+                  <span className="flex flex-wrap gap-2">
+                    <button type="button" onClick={iApplied} disabled={markingApplied} className={buttonClass("primary", "sm")}>
+                      {markingApplied ? <Spinner /> : null}Yes, I applied
+                    </button>
+                    <button type="button" onClick={() => { setAskApplied(false); setOpenedPosting(false); }}
+                      className={buttonClass("quiet", "sm")}>Not yet</button>
+                  </span>
+                }>
+                Windrush will track it with this ad attached, so its fit, gaps and emails are kept together.
+              </Callout>
+            </div>
+          )}
           {reporting && <ReportReading job={job} onClose={() => setReporting(false)} />}
           <div className="basis-full grid gap-[10px]" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(min(170px, 100%), 1fr))" }}>
             <FactTile large tint="mint" label="Salary" value={salary ?? "Not listed"} note={salary ? "per year" : "the ad doesn't say"} />
