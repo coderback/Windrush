@@ -157,6 +157,8 @@ export interface Project {
   summary: string;
   is_ongoing: boolean;
   not_in_opening?: boolean;
+  /** Turned off: left out of CVs and cover letters (still in the profile, still used for job fit and form answers). */
+  not_in_documents?: boolean;
 }
 
 export interface Certification {
@@ -197,6 +199,8 @@ export interface CoreInfo {
   twitter: string;
   portfolio: string;
   website: string;
+  /** ORCID iD, e.g. "0009-0009-7786-8549"; shown on CVs as an "ORCID" link. */
+  orcid?: string;
   /** The visa in the user's own words: what it is, when it ends, what it allows, sponsorship needed later. */
   visa_status: string;
   visa_type: string;

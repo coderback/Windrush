@@ -261,6 +261,21 @@ def check_facts(doc_type: str, doc: dict, persona: dict, job: dict, extra_source
     return findings
 
 
+def check_off_projects(doc_type: str, doc: dict, names: list[str]) -> list[dict]:
+    """A document that still names a project the candidate turned off for CVs and letters (by its short name)."""
+    fields = _letter_fields(doc) if doc_type == "cover_letter" else _cv_fields(doc)
+    if doc_type != "cover_letter":
+        fields += [(f"projects.{i}.name", "Projects", p.get("name") or "") for i, p in enumerate(doc.get("projects") or [])]
+    out = []
+    for name in names:
+        pattern = re.compile(rf"(?<![A-Za-z0-9]){re.escape(name)}(?![A-Za-z0-9])", re.I)
+        for field, label, text in fields:
+            if pattern.search(text or ""):
+                out.append({"kind": "project_off", "field": field, "label": label, "value": name,
+                            "message": f"it names {name}, a project the candidate keeps off CVs and cover letters"})
+    return out
+
+
 def check_style(doc_type: str, doc: dict) -> list[dict]:
     fields = _letter_fields(doc) if doc_type == "cover_letter" else _cv_fields(doc)
     out = []

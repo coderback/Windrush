@@ -53,6 +53,7 @@ def persona_to_markdown(persona: dict) -> str:
         ("LinkedIn", core.get("linkedin", "")),
         ("GitHub", core.get("github", "")),
         ("Portfolio", core.get("portfolio", "") or core.get("website", "")),
+        ("ORCID iD", core.get("orcid", "")),
         ("Visa", core.get("visa_type", "")),
         ("Visa expires", core.get("visa_expiry", "")),
         ("Visa details", core.get("visa_status", "")),

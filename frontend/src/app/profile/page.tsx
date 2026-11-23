@@ -359,6 +359,7 @@ export default function ProfilePage() {
               <TextField label="Portfolio" type="url" value={c.portfolio} onChange={(v) => set("core_info", "portfolio", v)} />
               <TextField label="Website" type="url" value={c.website} onChange={(v) => set("core_info", "website", v)} />
               <TextField label="X (Twitter)" value={c.twitter} onChange={(v) => set("core_info", "twitter", v)} />
+              <TextField label="ORCID iD" value={c.orcid ?? ""} placeholder="0000-0000-0000-0000" onChange={(v) => set("core_info", "orcid", v)} />
             </div>
           </SectionCard>
         );
@@ -455,8 +456,17 @@ export default function ProfilePage() {
         return (
           <SectionCard title="Projects" action={<AddButton onClick={() => projects.add({ ...EMPTY_PROJECT })}>Add project</AddButton>}>
             {projects.list.length === 0 && <p className="m-0 text-[13.5px] text-ink-2">No projects yet. Side projects and coursework count.</p>}
-            {projects.list.map((p, i) => (
-              <EntryCard key={i} title={p.name} subtitle={p.technologies.join(", ")} meta={p.is_ongoing ? "Ongoing" : undefined}
+            {projects.list.map((p, i) => {
+              const onDocuments = (
+                <label className="flex items-center gap-2 text-[13.5px]">
+                  <input type="checkbox" checked={!p.not_in_documents} onChange={(e) => projects.edit(i, { not_in_documents: !e.target.checked })}
+                    aria-label={`Use ${p.name || "this project"} on CVs and cover letters`}
+                    className="w-4 h-4" style={{ accentColor: "var(--teal)" }} />Use on CVs and cover letters
+                </label>
+              );
+              return (
+              <EntryCard key={i} title={p.name} subtitle={p.technologies.join(", ")}
+                meta={p.not_in_documents ? "Not on CVs or letters" : p.is_ongoing ? "Ongoing" : undefined}
                 editing={projects.isEditing(i)} onEdit={() => projects.toggle(i)} onRemove={() => projects.remove(i)}
                 form={
                   <div className="flex flex-col gap-[14px]">
@@ -472,15 +482,20 @@ export default function ProfilePage() {
                       <input type="checkbox" checked={p.is_ongoing} onChange={(e) => projects.edit(i, { is_ongoing: e.target.checked })}
                         className="w-4 h-4" style={{ accentColor: "var(--teal)" }} />Still working on it
                     </label>
-                    <label className="flex items-center gap-2 text-[13.5px]">
-                      <input type="checkbox" checked={!!p.not_in_opening} onChange={(e) => projects.edit(i, { not_in_opening: e.target.checked })}
-                        className="w-4 h-4" style={{ accentColor: "var(--teal)" }} />Don&apos;t open cover letters with this project
-                    </label>
+                    {onDocuments}
+                    {!p.not_in_documents && (
+                      <label className="flex items-center gap-2 text-[13.5px]">
+                        <input type="checkbox" checked={!!p.not_in_opening} onChange={(e) => projects.edit(i, { not_in_opening: e.target.checked })}
+                          className="w-4 h-4" style={{ accentColor: "var(--teal)" }} />Don&apos;t open cover letters with this project
+                      </label>
+                    )}
                   </div>
                 }>
-                {(p.summary || p.problem_solved) && <p className="m-0 text-[13.5px] leading-[1.5] text-ink-2">{p.summary || p.problem_solved}</p>}
+                {(p.summary || p.problem_solved) && <p className={cx("m-0 text-[13.5px] leading-[1.5]", p.not_in_documents ? "text-ink-3" : "text-ink-2")}>{p.summary || p.problem_solved}</p>}
+                {onDocuments}
               </EntryCard>
-            ))}
+              );
+            })}
           </SectionCard>
         );
       case "certs":

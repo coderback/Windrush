@@ -138,6 +138,7 @@ _CORE_TEXT_FACTS = (
     ("twitter", "Twitter / X profile", False),
     ("portfolio", "Portfolio URL", False),
     ("website", "Personal website URL", False),
+    ("orcid", "ORCID iD (researcher identifier)", False),
     ("visa_status", "Visa details / immigration status in full: the visa, when it ends, what it allows and any "
                     "sponsorship needed later (their own words)", False),
     ("visa_type", "Visa type (the visa's name only)", False),

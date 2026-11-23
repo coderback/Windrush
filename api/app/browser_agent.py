@@ -520,6 +520,7 @@ def _build_task(job_url: str, persona: dict, cover_letter: str,
     if core.get("github"): profile_lines.append(f"GitHub: {core['github']}")
     if core.get("twitter"): profile_lines.append(f"Twitter/X: {core['twitter']}")
     if core.get("portfolio"): profile_lines.append(f"Portfolio/Website: {core['portfolio']}")
+    if core.get("orcid"): profile_lines.append(f"ORCID iD: {core['orcid']}")
     # Visas, nationality, clearance and every other screening fact go through answer_questions, so each
     # answer on the form is recorded with where it came from.
 

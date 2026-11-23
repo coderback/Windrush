@@ -152,6 +152,15 @@ def _abs_url(url: str) -> str:
     return "https://" + u.lstrip("/")
 
 
+_ORCID = re.compile(r"(?:https?://)?(?:www\.)?(?:orcid\.org/)?(\d{4}-\d{4}-\d{4}-\d{3}[\dX])/?", re.I)
+
+
+def _orcid_url(value: str) -> str:
+    """An ORCID iD, bare or as an orcid.org link, as its https://orcid.org/ address; "" for anything else."""
+    m = _ORCID.fullmatch((value or "").strip())
+    return f"https://orcid.org/{m.group(1).upper()}" if m else ""
+
+
 def _contact_items(contact: dict) -> list[dict]:
     """
     Header contact entries as {text, href?} objects, in the order of the candidate's CV design:
@@ -174,6 +183,9 @@ def _contact_items(contact: dict) -> list[dict]:
         url = _abs_url(contact.get(key, ""))
         if url:
             items.append({"text": label, "href": url})
+    orcid = _orcid_url(contact.get("orcid", ""))
+    if orcid:
+        items.append({"text": "ORCID", "href": orcid})
     return items
 
 

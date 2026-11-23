@@ -302,6 +302,7 @@ def _persona_to_cvdoc(persona: dict) -> dict:
         # core_info has both a 'website' and a 'portfolio' field; either may hold the
         # candidate's personal site, so fall back to portfolio when website is unset.
         "website": core.get("website", "") or core.get("portfolio", ""),
+        "orcid": core.get("orcid", ""),
     }
     skills = [
         {"category": c.get("category", "Skills"), "items": c.get("skills", [])}
@@ -449,6 +450,40 @@ def _project_short_name(name: str) -> str:
     return re.split(r"[:·]", name or "")[0].strip()
 
 
+def documents_persona(persona: dict) -> dict:
+    """The persona CVs and cover letters are written from: projects the candidate turned off for documents
+    (Project.not_in_documents) left out. They stay in the profile, and still count for job fit and form answers."""
+    projects = persona.get("projects") or []
+    kept = [p for p in projects if not (isinstance(p, dict) and p.get("not_in_documents"))]
+    return persona if len(kept) == len(projects) else {**persona, "projects": kept}
+
+
+def off_project_names(persona: dict) -> list[str]:
+    """Short names of the projects turned off for documents that a CV or letter mustn't name, leaving out a name that
+    is also an employer's: a founder's company stays nameable through the role ('RootLayer' and 'Rootlayer Ltd')."""
+    employers = [re.sub(r"[^a-z0-9]", "", (r.get("employer") or "").lower()) for r in persona.get("history") or []]
+    names = []
+    for p in persona.get("projects") or []:
+        short = _project_short_name(p.get("name", "")) if isinstance(p, dict) and p.get("not_in_documents") else ""
+        key = re.sub(r"[^a-z0-9]", "", short.lower())
+        if len(key) >= 3 and not any(e and (key in e or e in key) for e in employers):
+            names.append(short)
+    return names
+
+
+def _project_keys(name: str) -> set[str]:
+    """A project's full and short names, letters and digits only: 'Windrush: Career Advisor' -> windrushcareeradvisor,
+    windrush."""
+    return {k for k in (re.sub(r"[^a-z0-9]", "", s.lower()) for s in (name or "", _project_short_name(name))) if len(k) >= 3}
+
+
+def _drop_off_projects(cv_projects: list, persona: dict) -> list:
+    """The CV's projects without any the candidate turned off for documents, matched by full or short name."""
+    off = {k for p in persona.get("projects") or [] if isinstance(p, dict) and p.get("not_in_documents")
+           for k in _project_keys(p.get("name", ""))}
+    return [p for p in cv_projects or [] if not (_project_keys(p.get("name", "")) & off)]
+
+
 def opening_names_barred_project(letter: dict, persona: dict) -> list[str]:
     """Projects the candidate keeps out of a letter's opening (Project.not_in_opening) that its first paragraph names."""
     first = next(iter(letter.get("paragraphs") or []), "")
@@ -456,10 +491,13 @@ def opening_names_barred_project(letter: dict, persona: dict) -> list[str]:
     return [n for n in names if n and re.search(rf"\b{re.escape(n)}\b", first, re.I)]
 
 
-def _letter_findings(letter: dict, persona: dict, job: dict, research: str, hook: str) -> list[dict]:
-    """What the letter's one targeted revision has to fix: unbacked claims, machine-sounding words, a barred opening."""
+def _letter_findings(letter: dict, persona: dict, job: dict, research: str, hook: str,
+                     off_names: list[str] = ()) -> list[dict]:
+    """What the letter's one targeted revision has to fix: unbacked claims, machine-sounding words, a barred opening,
+    a project the candidate turned off for documents."""
     return (doc_check.check_facts("cover_letter", letter, persona, job, research)
             + doc_check.check_style("cover_letter", letter)
+            + doc_check.check_off_projects("cover_letter", letter, list(off_names))
             + [{"kind": "opening", "field": "paragraphs.0", "label": "First paragraph", "value": name,
                 "message": f"it names {name}, which the candidate keeps out of the opening"
                            + (f": open on {_project_short_name(hook)} instead" if hook else "")}
@@ -1132,7 +1170,8 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
 
     elif name == "generate_cover_letter":
         job = tool_input.get("job", {})
-        persona = tool_input.get("persona", {})
+        off_names = off_project_names(tool_input.get("persona", {}))
+        persona = documents_persona(tool_input.get("persona", {}))
         tone = tool_input.get("tone", "professional")
         archetype = _detect_archetype(job.get("title", ""), job.get("description", ""))
         
@@ -1274,14 +1313,14 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
         # machine-sounding words: one targeted revision, kept only if it clears them.
         revision = "fallback"
         if data:
-            findings = _letter_findings(letter, persona, job, company_research, hook_project)
+            findings = _letter_findings(letter, persona, job, company_research, hook_project, off_names)
             revision = "clean"
             if findings:
                 revised = await _revise_letter_text(letter, findings, persona, job)
                 if revised is None:
                     revision = f"{len(findings)} found, bad reply"
                 else:
-                    after = _letter_findings(revised, persona, job, company_research, hook_project)
+                    after = _letter_findings(revised, persona, job, company_research, hook_project, off_names)
                     kept = _better(findings, after)
                     revision = f"{len(findings)}->{len(after)} {'kept' if kept else 'rejected'}"
                     if kept:
@@ -1381,7 +1420,8 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
 
     elif name == "generate_tailored_cv":
         job = tool_input.get("job", {})
-        persona = tool_input.get("persona", {})
+        off_names = off_project_names(tool_input.get("persona", {}))
+        persona = documents_persona(tool_input.get("persona", {}))
         template_id = tool_input.get("template_id", "classic")
 
         base_cv = _persona_to_cvdoc(persona)
@@ -1490,6 +1530,9 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
             cv["skills"] = chosen or base_cv["skills"]
         if cv.get("projects") and base_cv.get("projects"):
             cv["projects"] = _restore_project_depth(cv["projects"], base_cv["projects"])
+        # A project turned off for documents never stays in the projects section, whatever the model wrote.
+        if cv.get("projects"):
+            cv["projects"] = _drop_off_projects(cv["projects"], tool_input.get("persona", {}))
         if cv.get("experience") and base_cv.get("experience"):
             cv["experience"] = _restore_role_dates(cv["experience"], base_cv["experience"])
         if not cv.get("name"):
@@ -1510,14 +1553,16 @@ async def execute_tool(name: str, tool_input: dict) -> dict:
         # Check the text against the candidate's data; one targeted revision when it flags something.
         revision = "fallback"
         if not used_fallback:
-            findings = doc_check.check_facts("cv", cv, persona, job) + doc_check.check_style("cv", cv)
+            findings = (doc_check.check_facts("cv", cv, persona, job) + doc_check.check_style("cv", cv)
+                        + doc_check.check_off_projects("cv", cv, off_names))
             revision = "clean"
             if findings:
                 revised = await _revise_cv_text(cv, findings, llm_cv, job)
                 if revised is None:
                     revision = f"{len(findings)} found, bad reply"
                 else:
-                    after = doc_check.check_facts("cv", revised, persona, job) + doc_check.check_style("cv", revised)
+                    after = (doc_check.check_facts("cv", revised, persona, job) + doc_check.check_style("cv", revised)
+                             + doc_check.check_off_projects("cv", revised, off_names))
                     kept = _better(findings, after)
                     revision = f"{len(findings)}->{len(after)} {'kept' if kept else 'rejected'}"
                     if kept:

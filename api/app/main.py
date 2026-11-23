@@ -192,7 +192,7 @@ async def export_persona(
     """Download the user's persona twin as JSON, Markdown, or a formatted CV PDF."""
     from fastapi.responses import JSONResponse, Response
     from .persona_export import persona_to_markdown
-    from .agent import _persona_to_cvdoc
+    from .agent import _persona_to_cvdoc, documents_persona
 
     persona = tracker.get_user_persona(current_user.id)
 
@@ -210,7 +210,7 @@ async def export_persona(
         )
 
     # format == "pdf" — render the persona through the existing CV pipeline.
-    cvdoc = _persona_to_cvdoc(persona)
+    cvdoc = _persona_to_cvdoc(documents_persona(persona))
     try:
         doc_id = await doc_render.render_pdf("cv", cvdoc, "classic")
     except Exception as exc:

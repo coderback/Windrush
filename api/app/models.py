@@ -45,6 +45,8 @@ class Project(BaseModel):
     summary: str = ""
     is_ongoing: bool = False
     not_in_opening: bool = False   # never the project a cover letter opens on (it can still be evidence)
+    # Turned off: left out of CVs and cover letters. It stays in the profile and still counts for job fit and form answers.
+    not_in_documents: bool = False
 
 class BehavioralStory(BaseModel):
     title: str
@@ -98,6 +100,7 @@ class CoreInfo(BaseModel):
     twitter: str = ""
     portfolio: str = ""
     website: str = ""
+    orcid: str = ""   # ORCID iD, e.g. "0009-0009-7786-8549" (a full orcid.org link is fine too)
     # The visa in the candidate's own words: what it is, when it ends, what it allows, any sponsorship
     # needed later. Answers "visa details" / "immigration status" questions in full.
     visa_status: str = ""
