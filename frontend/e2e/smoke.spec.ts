@@ -188,6 +188,30 @@ test("target titles and locations typed with commas are saved as lists", async (
   api.expectAllMocked();
 });
 
+test("a project switched off for CVs and cover letters is saved that way", async ({ page }) => {
+  await signIn(page);
+  const project = { name: "Windrush", url: "", problem_solved: "Reads job ads", technologies: ["FastAPI"], outcomes: "",
+                    summary: "", is_ongoing: false };
+  let saved: typeof PERSONA | null = null;
+  const api = await mockApi(page, {
+    ...SHELL,
+    "GET /api/persona": { ...PERSONA, projects: [project] },
+    "PUT /api/persona": (request) => {
+      saved = request.postDataJSON();
+      return { status: "ok" };
+    },
+  });
+  await page.goto("/profile#projects");
+  const use = page.getByRole("checkbox", { name: "Use Windrush on CVs and cover letters" });
+  await expect(use).toBeChecked();
+  await use.uncheck();
+  await expect.poll(() => (saved?.projects[0] as { not_in_documents?: boolean } | undefined)?.not_in_documents).toBe(true);
+  await expect(page.getByText("Not on CVs or letters")).toBeVisible();
+  await use.check();
+  await expect.poll(() => (saved?.projects[0] as { not_in_documents?: boolean } | undefined)?.not_in_documents).toBe(false);
+  api.expectAllMocked();
+});
+
 test("changing a status in the application panel saves it, and Esc closes the panel", async ({ page }) => {
   await signIn(page);
   const patches: unknown[] = [];

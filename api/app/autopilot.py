@@ -305,10 +305,19 @@ def _pdf(doc_id: str) -> str:
     return path if path and os.path.exists(path) else ""
 
 
-def _earlier_documents(user_id: str, job: dict) -> dict | None:
-    """The CV and cover letter the last run for this job wrote, when both PDFs are still there."""
+def _earlier_documents(user_id: str, job: dict, persona: dict) -> dict | None:
+    """The CV and cover letter the last run for this job wrote, when both PDFs are still there and neither names a
+    project the candidate has since turned off for documents."""
     docs = tracker.autopilot_documents(user_id, str(job.get("id", "")))
-    return docs if docs and _pdf(docs["cv_doc_id"]) and _pdf(docs["letter_doc_id"]) else None
+    if not (docs and _pdf(docs["cv_doc_id"]) and _pdf(docs["letter_doc_id"])):
+        return None
+    names = agent.off_project_names(persona)
+    if (doc_check.check_off_projects("cv", docs.get("cv") or {}, names)
+            or doc_check.check_off_projects("cover_letter", docs.get("letter") or {}, names)
+            or agent._drop_off_projects((docs.get("cv") or {}).get("projects"), persona)
+            != ((docs.get("cv") or {}).get("projects") or [])):
+        return None
+    return docs
 
 
 async def _write_documents(state: _Run, job: dict, persona: dict) -> dict:
@@ -375,7 +384,7 @@ async def _apply(state: _Run, user_id: str, job: dict, verdict: dict, cfg: dict,
     # A live send uses the CV and cover letter the last run for this job wrote (the practice run the user looked
     # at), so what goes out is what they saw. Read before start_autopilot_run replaces that run; practice always
     # writes them afresh.
-    earlier = _earlier_documents(user_id, job) if live else None
+    earlier = _earlier_documents(user_id, job, persona) if live else None
     run_id = tracker.start_autopilot_run(user_id, job, practice=not live, fit_score=verdict.get("fit_score"))
     if earlier:
         _keep_documents(run_id, user_id, earlier)   # at once, so a retry after a failure still has them
