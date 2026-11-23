@@ -799,9 +799,14 @@ async def job_from_url(
         raise HTTPException(status_code=400, detail="Please paste a valid http(s) link.")
     try:
         job = await scrape_job_from_url(url)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:
+        # The site refused or the page couldn't be read (Workday often answers 429): the feed's own copy of this link,
+        # if it has one, is the same job, already read.
+        stored = await asyncio.to_thread(jobs_db.find_by_url, url)
+        if stored:
+            return {"job": stored}
+        if isinstance(exc, ValueError):
+            raise HTTPException(status_code=400, detail=str(exc))
         raise HTTPException(status_code=502, detail=f"Could not fetch that listing: {exc}")
 
     # The same job already in the feed (a careers page showing a Greenhouse or Ashby job): its own copy, fully read.

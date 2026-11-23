@@ -174,6 +174,27 @@ def test_i_applied_moves_a_saved_job_on_and_leaves_a_later_stage_alone(client, u
     assert client.post("/jobs/applied", json={"job": job}).json()["status"] == "Interview"
 
 
+def test_a_pasted_link_the_site_refuses_opens_the_feeds_copy(client, monkeypatch):
+    from app import job_searcher
+    stored = "https://bpinternational.wd3.myworkdayjobs.com/bpCareers/job/United-Kingdom---London/Software-Engineer_RQ117581-2"
+    jobs_db.add_jobs([make_job("wd-bp", title="Software Engineer", company="bp", url=stored, description=AD)])
+
+    async def refused(url):
+        raise ValueError("Couldn't read that listing")
+    monkeypatch.setattr(job_searcher, "scrape_job_from_url", refused)
+    pasted = stored.replace("myworkdayjobs.com/", "myworkdayjobs.com/en-US/") + "/?source=LinkedIn"
+    job = client.post("/jobs/from-url", json={"url": pasted}).json()["job"]
+    assert (job["title"], job["company"], job["job_id"]) == ("Software Engineer", "bp", "wd-bp")
+    other = client.post("/jobs/from-url", json={"url": "https://bpinternational.wd3.myworkdayjobs.com/bpCareers/job/X/Other_RQ1"})
+    assert other.status_code == 400 and "Couldn't read" in other.json()["detail"]
+
+
+def test_link_keys_ignore_scheme_locale_query_and_trailing_slash():
+    a = jobs_db._link_key("https://www.kla.wd1.myworkdayjobs.com/en-US/Search/job/AI-ML_2641701-1/?x=1#top")
+    assert a == jobs_db._link_key("http://kla.wd1.myworkdayjobs.com/Search/job/AI-ML_2641701-1")
+    assert a != jobs_db._link_key("https://kla.wd1.myworkdayjobs.com/Search/job/AI-ML_2641702-1")
+
+
 def test_opening_a_posting_is_recorded_for_real_jobs_only(client, user):
     ad = _ad(1, "Software Engineer")
     assert client.post(f"/jobs/{ad['id']}/opened").json() == {"ok": True}

@@ -1190,6 +1190,31 @@ def ads_waiting_for_skills() -> int:
     return row[0] if row else 0
 
 
+def _link_key(url: str) -> str:
+    """A job link compared without its scheme, query, fragment, trailing slash or Workday-style locale segment:
+    "https://x.wd3.myworkdayjobs.com/en-US/Site/job/A_R1?src=li" -> "x.wd3.myworkdayjobs.com/site/job/a_r1"."""
+    from urllib.parse import urlparse
+    parsed = urlparse((url or "").strip())
+    path = re.sub(r"^/[a-z]{2}-[a-z]{2}(?=/)", "", parsed.path.lower()).rstrip("/")
+    return f"{(parsed.hostname or '').lower().removeprefix('www.')}{path}"
+
+
+def find_by_url(url: str) -> dict | None:
+    """The stored job whose link is this one (see _link_key), the newest if several, or None."""
+    key = _link_key(url)
+    last = key.rsplit("/", 1)[-1]
+    if not _DB_PATH:
+        init_db()
+    if "/" not in key or len(last) < 3:
+        return None
+    con = sqlite3.connect(_DB_PATH)
+    rows = con.execute("SELECT id, url FROM jobs WHERE lower(url) LIKE ? ORDER BY updated_at DESC",
+                       (f"%{last}%",)).fetchall()
+    con.close()
+    hit = next((row_id for row_id, stored in rows if _link_key(stored) == key), None)
+    return get_job(hit) if hit else None
+
+
 def ads_at_company(company: str) -> list[dict]:
     """Every ad stored for this employer (expired ones too), newest first: what an application there may have been
     made through."""
