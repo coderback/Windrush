@@ -1120,11 +1120,8 @@ _MAX_SKILL_TRIES = 3
 SKILLS_MIN_AD_CHARS = 600
 
 
-def jobs_needing_skills(limit: int, version: int, locations: list[str] | None = None) -> list[dict]:
-    """Newest ads with enough text that the current skill reader hasn't read, skipping ones it has given up on.
-    `locations` narrows them to what some feed shows, as for jobs_needing_attributes."""
-    if not _DB_PATH:
-        init_db()
+def _skills_queue(version: int, locations: list[str] | None) -> tuple[str, list]:
+    """The WHERE clause and its parameters for ads the skill reader still has to read (see jobs_needing_skills)."""
     where = ("coalesce(skills_version, 0) < ? AND coalesce(skills_tries, 0) < ? "
              "AND length(coalesce(description, '')) >= ?")
     params: list = [version, _MAX_SKILL_TRIES, SKILLS_MIN_AD_CHARS]
@@ -1133,6 +1130,15 @@ def jobs_needing_skills(limit: int, version: int, locations: list[str] | None = 
         if loc_sql:
             where += f" AND {loc_sql}"
             params += loc_params
+    return where, params
+
+
+def jobs_needing_skills(limit: int, version: int, locations: list[str] | None = None) -> list[dict]:
+    """Newest ads with enough text that the current skill reader hasn't read, skipping ones it has given up on.
+    `locations` narrows them to what some feed shows, as for jobs_needing_attributes."""
+    if not _DB_PATH:
+        init_db()
+    where, params = _skills_queue(version, locations)
     con = sqlite3.connect(_DB_PATH)
     con.row_factory = sqlite3.Row
     rows = con.execute(
@@ -1177,15 +1183,15 @@ def ads_with_skills(since: str = "") -> list[dict]:
     return out
 
 
-def ads_waiting_for_skills() -> int:
-    """How many ads with enough text the skill reader still has to read."""
+def ads_waiting_for_skills(locations: list[str] | None = None) -> int:
+    """How many ads the skill reader will still read: with enough text and, given `locations` (what the feeds show,
+    tracker.feed_locations), in those places, as the reader only reads ads there."""
     if not _DB_PATH:
         init_db()
-    con = sqlite3.connect(_DB_PATH)
     from .job_skills import SKILLS_VERSION
-    row = con.execute("SELECT count(*) FROM jobs WHERE coalesce(skills_version, 0) < ? AND coalesce(skills_tries, 0) < ? "
-                      "AND length(coalesce(description, '')) >= ?",
-                      (SKILLS_VERSION, _MAX_SKILL_TRIES, SKILLS_MIN_AD_CHARS)).fetchone()
+    where, params = _skills_queue(SKILLS_VERSION, locations)
+    con = sqlite3.connect(_DB_PATH)
+    row = con.execute(f"SELECT count(*) FROM jobs WHERE {where}", params).fetchone()
     con.close()
     return row[0] if row else 0
 
